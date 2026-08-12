@@ -1,0 +1,14 @@
+.git
+node_modules
+.next
+data
+.env*
+!.env.example
+.canvas-token
+.superpowers
+test-results
+playwright-report
+e2e
+docs
+*.md
+!README.md
