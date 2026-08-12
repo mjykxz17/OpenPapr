@@ -30,3 +30,27 @@ export async function runUserSync(deps: SyncDeps, userId: number): Promise<void>
 export function computeBackoffMs(consecutiveFailures: number, baseMs: number): number {
   return Math.min(baseMs * 2 ** consecutiveFailures, 3_600_000);
 }
+
+export class BackoffSkipError extends Error {}
+
+export function createGuard(baseMs: number, now: () => number = Date.now) {
+  const failures = new Map<string, number>();
+  const lastFailAt = new Map<string, number>();
+  return function guard(source: string, fn: (userId: number) => Promise<void>) {
+    return async (userId: number) => {
+      const key = `${source}:${userId}`;
+      const n = failures.get(key) ?? 0;
+      if (n > 0 && now() - (lastFailAt.get(key) ?? 0) < computeBackoffMs(n, baseMs)) {
+        throw new BackoffSkipError(`backing off ${source} after ${n} consecutive failure(s)`);
+      }
+      try {
+        await fn(userId);
+        failures.set(key, 0);
+      } catch (err) {
+        failures.set(key, n + 1);
+        lastFailAt.set(key, now());
+        throw err;
+      }
+    };
+  };
+}

@@ -14,7 +14,7 @@ import { linkMailToModule, normalizeMail } from "../connectors/graph/normalize";
 import { triageEmail } from "../enrich/rules";
 import { createScorer } from "../enrich/llm";
 import { createWeightageExtractor, type WeightageSourceText, type WeightageSourcePdf } from "../enrich/weightage";
-import { computeBackoffMs, runUserSync } from "./sync";
+import { createGuard, runUserSync } from "./sync";
 
 const env = loadEnv();
 const db = createDb(env.DATABASE_PATH);
@@ -86,27 +86,17 @@ async function enrich(userId: number): Promise<void> {
   }
 }
 
-const failures = new Map<string, number>();
+const guard = createGuard(env.POLL_INTERVAL_MS);
 async function loop(): Promise<void> {
   for (const user of db.select().from(users).all()) {
     await runUserSync({
       db, now: Date.now,
-      canvasSync: guarded("canvas", canvasSync),
-      mailSync: guarded("graph", mailSync),
-      enrich: guarded("enrich", enrich),
+      canvasSync: guard("canvas", canvasSync),
+      mailSync: guard("graph", mailSync),
+      enrich: guard("enrich", enrich),
     }, user.id);
   }
   setTimeout(loop, env.POLL_INTERVAL_MS);
-}
-function guarded(source: string, fn: (userId: number) => Promise<void>) {
-  return async (userId: number) => {
-    const key = `${source}:${userId}`;
-    const wait = computeBackoffMs(failures.get(key) ?? 0, env.POLL_INTERVAL_MS);
-    const last = failures.get(`${key}:at`) ?? 0;
-    if ((failures.get(key) ?? 0) > 0 && Date.now() - last < wait) return; // still backing off
-    try { await fn(userId); failures.set(key, 0); }
-    catch (err) { failures.set(key, (failures.get(key) ?? 0) + 1); failures.set(`${key}:at`, Date.now()); throw err; }
-  };
 }
 console.log("one-ring worker starting");
 void loop();
