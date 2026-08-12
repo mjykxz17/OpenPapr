@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# one-ring
 
-## Getting Started
+A Canvas + NUS Outlook dashboard: one place to see, per module, the module
+structure, assessment weightage, and newest announcements, plus a filtered
+view of important mail. Design and phasing are in
+[`docs/superpowers/specs/2026-08-12-canvas-outlook-dashboard-design.md`](docs/superpowers/specs/2026-08-12-canvas-outlook-dashboard-design.md).
 
-First, run the development server:
+Single-user today (built for Aiden), with `userId` threaded through every
+table and function so adding more people later is mechanical, not a rewrite.
+
+## Local dev
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env   # fill in SECRET_KEY, APP_PASSWORD at minimum
+npm install
+npm run dev             # web, http://localhost:3000
+npm run worker          # separate terminal: pollers + LLM enrichment
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`SECRET_KEY` is 64 hex chars (`openssl rand -hex 32`), used to encrypt stored
+Canvas/Microsoft tokens. `APP_PASSWORD` gates the whole app behind a single
+password (min 8 chars) — there is no per-user login yet.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Run the tests with `npm test` (Vitest) and `npx playwright test` (end-to-end,
+seeds a demo fixture and drives a real browser against it).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Connecting Canvas and Microsoft
 
-## Learn More
+Both connections write an encrypted token onto a `users` row and are one-time
+setup per person, not something done through the UI yet.
 
-To learn more about Next.js, take a look at the following resources:
+- **Canvas**: generate a personal access token at Canvas → Account → Settings
+  → New Access Token, then encrypt-and-store it against the user row (e.g. via
+  a short `npx tsx -e` script using `encrypt()` from `src/lib/crypto.ts` and
+  `createDb()` from `src/db/client.ts`).
+- **Microsoft**: run `npx tsx scripts/connect-microsoft.ts --user <id>`. It
+  prints a device code — open the URL it gives you in any browser, sign in,
+  and grant `Mail.Read` + `offline_access`. The refresh token is stored
+  encrypted; the worker refreshes it on every poll.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The worker only picks up a module or mailbox once the corresponding token is
+present, so it's safe to deploy before either is connected.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Deploying
 
-## Deploy on Vercel
+One container, two processes: **web** (`next start`, via the standalone
+server) serves pages and API routes; **worker** (`tsx src/worker/index.ts`)
+runs pollers and LLM enrichment in the background inside the same container.
+The web process is what Docker watches — if it dies, the container dies and
+Fly restarts it.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Deploy target is Fly.io, one always-on machine, SQLite on a persistent
+volume at `/data`. Run these from the repo root, in order:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+fly launch --no-deploy --copy-config
+fly volumes create one_ring_data --size 1 --region sin
+fly secrets set SECRET_KEY=$(openssl rand -hex 32) APP_PASSWORD=... ANTHROPIC_API_KEY=... MS_CLIENT_ID=...
+fly deploy
+```
+
+After the first deploy, `fly ssh console` in and:
+
+1. Insert the first `users` row and store its Canvas token (see "Connecting
+   Canvas and Microsoft" above).
+2. Run `npx tsx scripts/connect-microsoft.ts` — the device code it prints
+   works from any browser, not just the console.
+3. Confirm `/api/overview` returns data and the dashboard renders at
+   `https://one-ring-<suffix>.fly.dev`.
+
+## Where data lives
+
+Everything is one SQLite file, `DATABASE_PATH` (default `data/one-ring.db`
+locally, `/data/one-ring.db` in production), on the Fly volume `one_ring_data`
+mounted at `/data`. There is no external database. Back up by copying that
+one file.

@@ -1,0 +1,14 @@
+# fly.toml
+app = "one-ring"
+primary_region = "sin"
+[build]
+[env]
+  DATABASE_PATH = "/data/one-ring.db"
+[mounts]
+  source = "one_ring_data"
+  destination = "/data"
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false   # worker must keep polling
+  min_machines_running = 1
