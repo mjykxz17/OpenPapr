@@ -132,6 +132,40 @@ manually" rather than a fabricated table.
   components and known scores, per-component "what it's worth", and what-if
   sliders for unscored components.
 
+## UI design
+
+Decided in a visual mockup session (mockups preserved under
+`.superpowers/brainstorm/`, not committed).
+
+**Layout — hybrid, one-page-first.** A slim icon rail (Home, Modules, Mail,
+Planner) plus a one-page home. Home is a single scrolling column, max-width
+~760px, in order: header (date, week of term, per-source sync status with the
+staleness warning inline), what's-new strip, to-dos, important mail, module
+cards grid. Module detail, the full mail archive (including filtered), and
+the planner live on their own pages behind the rail.
+
+**Style — "quiet ink".** Near-white surface (`#fcfcfc`), hairline borders
+(`#ececee`), no shadows, no gradients, no emoji. One accent: muted teal
+(`#0f766e`). Red (`#dc2626`) is reserved for overdue and deadline-moved;
+amber (`#b45309`) is reserved for uncertainty and staleness (LLM-sourced
+weightage, unaccounted percentages, stale sync). Section labels are tiny
+uppercase letter-spaced text. Typeface: Geist or IBM Plex Sans (deliberately
+not default Inter), tabular numerals for weights and dates.
+
+**Component base.** shadcn/ui re-themed to the above (borders instead of
+shadows, accent swapped); Lucide icons, thin weight, sparingly.
+
+**Deliberate UI contracts with the data model:**
+
+- Every weightage number carries its source label (`canvas` / `syllabus*` /
+  `manual`); `syllabus*` opens the quoted evidence on click.
+- Weight that does not sum to 100% shows as an explicit "Unaccounted N% — add
+  manually" row, never silently normalized.
+- Every mail row shows its one-line triage reason in muted text.
+- The filtered-mail count is always visible with a reveal link.
+- Overdue items pin to the top in red; weight badges inform but never
+  reorder the deadline sort.
+
 ## Error handling
 
 - Pollers are independent; one source failing never blocks the other.
