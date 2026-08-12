@@ -1,0 +1,8 @@
+export interface CanvasCourse { id: number; name: string; course_code: string; syllabus_body?: string | null; term?: { name: string } | null; }
+export interface CanvasSubmission { workflow_state: string; score: number | null; }
+export interface CanvasAssignment { id: number; name: string; due_at: string | null; html_url: string; points_possible: number | null; submission?: CanvasSubmission; }
+export interface CanvasAssignmentGroup { id: number; name: string; group_weight: number | null; assignments?: CanvasAssignment[]; }
+export interface CanvasAnnouncement { id: number; title: string; message: string; html_url: string; posted_at: string | null; }
+export interface CanvasCalendarEvent { id: number; title: string; start_at: string | null; html_url: string; description: string | null; }
+export interface CanvasPage { url: string; title: string; }
+export interface CanvasFile { id: number; display_name: string; url: string; content_type: string; }
