@@ -47,11 +47,11 @@ important information in one place.
 A single Next.js (TypeScript) application in one container, deployed to a
 cheap always-on host (Fly.io or Railway). Two processes in the container:
 
-- **web** — Next.js server: UI pages and API routes. Reads the database only.
-  Never calls Canvas or Graph directly.
+- **web** — Next.js server: UI pages and API routes. Never calls Canvas or
+  Graph directly. Writes only user-state data (seen/dismissed flags, manual
+  component overrides, `last_seen_at`); never writes source data.
 - **worker** — background process: pollers and the LLM enricher. The only
-  writer to the database (other than user actions such as dismiss/override,
-  which go through API routes).
+  writer of source data (modules, items, non-manual components, sync_runs).
 
 Storage is SQLite on a persistent volume, accessed through Drizzle ORM.
 SQLite is sufficient for single-digit users; nothing in the design assumes
