@@ -13,7 +13,7 @@ export function SyncStatus({ syncStatus }: { syncStatus: Overview["syncStatus"] 
         <li key={s.source} className={s.stale ? "text-warn" : "text-ink-3"}>
           <span className="font-medium">{SOURCE_LABEL[s.source] ?? s.source}</span>{" "}
           {s.stale ? (
-            <span>
+            <span className="tabular-nums">
               ⚠ stale{s.lastOkAt ? ` — last synced ${new Date(s.lastOkAt).toLocaleString()}` : " — never synced"}
             </span>
           ) : (

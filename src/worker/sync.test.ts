@@ -90,6 +90,18 @@ describe("createGuard", () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
+  it("carries the last real error's message into the BackoffSkipError so downstream matching still works", async () => {
+    let clock = 0;
+    const guard = createGuard(300_000, () => clock);
+    const fn = vi.fn(async () => { throw new Error("Graph 401: invalid_grant"); });
+    const wrapped = guard("graph", fn);
+
+    await expect(wrapped(1)).rejects.toThrow("Graph 401: invalid_grant");
+
+    clock = 100_000; // still within the backoff window
+    await expect(wrapped(1)).rejects.toThrow(/401/);
+  });
+
   it("a skip does not increment the failure count or bump lastFailAt (skip is not a new failure)", async () => {
     let clock = 0;
     const guard = createGuard(300_000, () => clock);

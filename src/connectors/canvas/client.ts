@@ -41,7 +41,7 @@ export function createCanvasClient(baseUrl: string, token: string, fetchFn: type
     listAnnouncements: (courseId: number) =>
       getAllPages<CanvasAnnouncement>(`/courses/${courseId}/discussion_topics?only_announcements=true&per_page=50`),
     listCalendarEvents: (courseId: number) =>
-      getAllPages<CanvasCalendarEvent>(`/calendar_events?type=event&context_codes[]=course_${courseId}&per_page=100`),
+      getAllPages<CanvasCalendarEvent>(`/calendar_events?type=event&context_codes[]=course_${courseId}&per_page=100&all_events=true`),
     listPages: (courseId: number) => getAllPages<CanvasPage>(`/courses/${courseId}/pages?per_page=100`),
     getPageBody: async (courseId: number, slug: string) =>
       (await getOne<{ body: string | null }>(`/courses/${courseId}/pages/${encodeURIComponent(slug)}`)).body ?? "",

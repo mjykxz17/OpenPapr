@@ -59,6 +59,21 @@ describe("getOverview", () => {
     db.insert(syncRuns).values({ userId: 1, source: "graph", startedAt: 0, finishedAt: 1, ok: false, error: "Graph 401: invalid_grant" }).run();
     expect(getOverview(db, 1, 1000, 300_000).graphAuthBroken).toBe(true);
   });
+  it("keeps graphAuthBroken true when the latest graph run is a backing-off skip carrying the 401 text", () => {
+    const { db } = setup();
+    db.insert(syncRuns).values([
+      { userId: 1, source: "graph", startedAt: 0, finishedAt: 1, ok: false, error: "Graph 401: invalid_grant" },
+      {
+        userId: 1,
+        source: "graph",
+        startedAt: 2,
+        finishedAt: 3,
+        ok: false,
+        error: "backing off graph after 1 consecutive failure(s); last error: Error: Graph 401: invalid_grant",
+      },
+    ]).run();
+    expect(getOverview(db, 1, 1000, 300_000).graphAuthBroken).toBe(true);
+  });
   it("flags stale sources", () => {
     const { db } = setup();
     db.insert(syncRuns).values({ userId: 1, source: "graph", startedAt: 0, finishedAt: 0, ok: true }).run();
