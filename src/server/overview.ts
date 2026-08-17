@@ -56,12 +56,20 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
 
   const allItems = db.select().from(items).where(eq(items.userId, userId)).all();
 
-  const whatsNew = allItems
+  const allMods = db.select().from(modules).where(eq(modules.userId, userId)).all();
+  const inactiveModIds = new Set(allMods.filter((m) => !m.active).map((m) => m.id));
+  // Emails always show regardless of module link (fail-open); canvas-derived
+  // items from inactive (past-term) modules are hidden everywhere.
+  const scopedItems = allItems.filter(
+    (i) => i.type === "email" || i.moduleId === null || !inactiveModIds.has(i.moduleId),
+  );
+
+  const whatsNew = scopedItems
     .filter((i) => i.firstSeenAt > lastSeenAt)
     .sort(byNewestFirst)
     .slice(0, 20);
 
-  const todos = allItems
+  const todos = scopedItems
     .filter((i) => (i.type === "assignment" || i.type === "event") && !i.dismissed && !i.submitted)
     .sort(compareTodos(now));
 
@@ -72,7 +80,7 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
     .slice(0, 20);
   const filteredCount = mailItems.filter((i) => i.triage === "garbage").length;
 
-  const mods = db.select().from(modules).where(eq(modules.userId, userId)).all();
+  const mods = allMods.filter((m) => m.active);
   const modIds = mods.map((m) => m.id);
   const allComponents = modIds.length ? db.select().from(components).where(inArray(components.moduleId, modIds)).all() : [];
 

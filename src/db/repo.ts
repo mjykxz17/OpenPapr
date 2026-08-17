@@ -46,3 +46,24 @@ export function upsertMailItems(db: Db, userId: number, mails: MailItem[], now: 
       .onConflictDoNothing().run();
   }
 }
+
+const TERM_CODE_RE = /^\[(\d+)\]/;
+
+function parseTermCode(term: string | null): number | null {
+  const m = term?.match(TERM_CODE_RE);
+  return m ? Number(m[1]) : null;
+}
+
+// A module is active only when its term is the newest numeric term the user
+// has. Non-Academic shells and past terms deactivate; if no module carries a
+// numeric term at all, everything stays active (nothing to compare against).
+export function setModuleActivity(db: Db, userId: number): void {
+  const rows = db.select().from(modules).where(eq(modules.userId, userId)).all();
+  const codes = rows.map((r) => parseTermCode(r.term)).filter((c): c is number => c !== null);
+  if (codes.length === 0) return;
+  const current = Math.max(...codes);
+  for (const r of rows) {
+    const active = parseTermCode(r.term) === current;
+    if (r.active !== active) db.update(modules).set({ active }).where(eq(modules.id, r.id)).run();
+  }
+}

@@ -81,3 +81,20 @@ describe("getOverview", () => {
     expect(o.syncStatus.find((s) => s.source === "graph")!.stale).toBe(true);
   });
 });
+
+describe("active-term scoping", () => {
+  it("hides inactive modules' cards, todos, and what's-new items; mail unaffected", () => {
+    const { db, moduleId } = setup();
+    const old = db.insert(modules).values({ userId: 1, canvasCourseId: 8, code: "GES1035", name: "old", active: false }).returning().get();
+    db.insert(items).values([
+      { userId: 1, moduleId: old.id, source: "canvas", type: "assignment", sourceId: "a:old", title: "old essay", firstSeenAt: 500, dueAt: 9999 },
+      { userId: 1, moduleId, source: "canvas", type: "assignment", sourceId: "a:new", title: "new lab", firstSeenAt: 500, dueAt: 9999 },
+      { userId: 1, moduleId: null, source: "graph", type: "email", sourceId: "m:x", title: "mail", firstSeenAt: 500, triage: "important" },
+    ]).run();
+    const o = getOverview(db, 1, 1000, 300_000);
+    expect(o.modules.map((m) => m.code)).toEqual(["CS2103T"]);
+    expect(o.todos.map((t) => t.title)).toEqual(["new lab"]);
+    expect(o.whatsNew.map((i) => i.title).sort()).toEqual(["mail", "new lab"]);
+    expect(o.mail.important.map((m) => m.title)).toEqual(["mail"]);
+  });
+});

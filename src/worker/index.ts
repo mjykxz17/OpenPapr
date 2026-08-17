@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
-import { applyCanvasSync, upsertMailItems } from "../db/repo";
+import { applyCanvasSync, setModuleActivity, upsertMailItems } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient } from "../connectors/canvas/client";
@@ -76,6 +76,7 @@ async function canvasSync(userId: number): Promise<void> {
         .onConflictDoNothing().run();
     }
   }
+  setModuleActivity(db, userId);
 }
 
 async function mailSync(userId: number): Promise<void> {
