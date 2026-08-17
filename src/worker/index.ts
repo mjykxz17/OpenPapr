@@ -13,14 +13,29 @@ import { refreshAccessToken } from "../connectors/graph/auth";
 import { linkMailToModule, normalizeMail } from "../connectors/graph/normalize";
 import { triageEmail } from "../enrich/rules";
 import { createScorer } from "../enrich/llm";
+import { createCompatScorer, createCompatWeightageExtractor } from "./../enrich/openai-compat";
 import { createWeightageExtractor, type WeightageSourceText, type WeightageSourcePdf } from "../enrich/weightage";
 import { createGuard, runUserSync } from "./sync";
 
 const env = loadEnv();
 const db = createDb(env.DATABASE_PATH);
-const anthropic = env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }) : null;
-const scorer = anthropic ? createScorer(anthropic, env.ANTHROPIC_MODEL) : null;
-const extractor = anthropic ? createWeightageExtractor(anthropic, env.ANTHROPIC_MODEL) : null;
+
+// Provider selection: OpenAI-compatible endpoint (Agnes agrouter) wins when
+// configured; otherwise Anthropic; otherwise rules-only. The compat path has
+// no PDF document support, so PDF syllabus sources are only gathered on the
+// Anthropic path.
+const compatCfg = env.OPENAI_COMPAT_BASE_URL && env.OPENAI_COMPAT_API_KEY
+  ? { baseUrl: env.OPENAI_COMPAT_BASE_URL, apiKey: env.OPENAI_COMPAT_API_KEY, model: env.OPENAI_COMPAT_MODEL }
+  : null;
+const anthropic = !compatCfg && env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }) : null;
+const scorer = compatCfg ? createCompatScorer(compatCfg) : anthropic ? createScorer(anthropic, env.ANTHROPIC_MODEL) : null;
+const anthropicExtractor = anthropic ? createWeightageExtractor(anthropic, env.ANTHROPIC_MODEL) : null;
+const compatExtractor = compatCfg ? createCompatWeightageExtractor(compatCfg) : null;
+const extractor = compatCfg
+  ? (texts: WeightageSourceText[], _pdfs?: WeightageSourcePdf[]) => compatExtractor!(texts)
+  : anthropicExtractor;
+const supportsPdfSources = Boolean(anthropic);
+if (compatCfg) console.log(`llm provider: openai-compat ${compatCfg.model} @ ${compatCfg.baseUrl} (pdf sources disabled)`);
 
 const SYLLABUS_NAME_RE = /(syllabus|assessment|grading|outline)/i;
 
@@ -46,8 +61,9 @@ async function canvasSync(userId: number): Promise<void> {
     for (const p of (await canvas.listPages(course.id)).filter((p) => SYLLABUS_NAME_RE.test(p.title)).slice(0, 3))
       texts.push({ label: `Page: ${p.title}`, text: await canvas.getPageBody(course.id, p.url) });
     const pdfs: WeightageSourcePdf[] = [];
-    for (const f of (await canvas.listSyllabusFiles(course.id)).filter((f) => f.content_type === "application/pdf").slice(0, 2))
-      pdfs.push({ label: f.display_name, base64: Buffer.from(await canvas.downloadFile(f.url)).toString("base64") });
+    if (supportsPdfSources)
+      for (const f of (await canvas.listSyllabusFiles(course.id)).filter((f) => f.content_type === "application/pdf").slice(0, 2))
+        pdfs.push({ label: f.display_name, base64: Buffer.from(await canvas.downloadFile(f.url)).toString("base64") });
     const extracted = await extractor(texts, pdfs);
     if (extracted) for (const c of extracted) {
       db.insert(components).values({ moduleId, name: c.name, weightPct: c.weightPct, source: "llm_syllabus", evidence: c.evidence })

@@ -21,3 +21,14 @@ describe("loadEnv", () => {
     expect(loadEnv({ ...good, POLL_INTERVAL_MS: "60000" } as never).POLL_INTERVAL_MS).toBe(60000);
   });
 });
+
+describe("openai-compat provider vars", () => {
+  it("parses the compat vars and defaults the model", () => {
+    const env = loadEnv({ ...good, OPENAI_COMPAT_BASE_URL: "https://agrouter.example/v1", OPENAI_COMPAT_API_KEY: "sk-x" } as never);
+    expect(env.OPENAI_COMPAT_BASE_URL).toBe("https://agrouter.example/v1");
+    expect(env.OPENAI_COMPAT_MODEL).toBe("agnes-2.5-flash");
+  });
+  it("leaves compat vars undefined when unset", () => {
+    expect(loadEnv(good as never).OPENAI_COMPAT_BASE_URL).toBeUndefined();
+  });
+});

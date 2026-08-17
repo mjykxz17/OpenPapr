@@ -8,6 +8,9 @@ const EnvSchema = z.object({
   MS_CLIENT_ID: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default("claude-haiku-4-5"),
+  OPENAI_COMPAT_BASE_URL: z.string().url().optional(),
+  OPENAI_COMPAT_API_KEY: z.string().optional(),
+  OPENAI_COMPAT_MODEL: z.string().default("agnes-2.5-flash"),
   POLL_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
 });
 
