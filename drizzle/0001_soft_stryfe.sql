@@ -1,0 +1,1 @@
+ALTER TABLE `items` ADD `actions_extracted_at` integer;

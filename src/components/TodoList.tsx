@@ -24,7 +24,15 @@ export function TodoList({
                 {overdue && (
                   <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-danger">Overdue</span>
                 )}
-                <span className={`truncate text-sm ${overdue ? "text-danger" : "text-ink"}`}>{todo.title}</span>
+                <span
+                  className={`truncate text-sm ${overdue ? "text-danger" : "text-ink"}`}
+                  title={todo.type === "deadline" ? (todo.body ?? undefined) : undefined}
+                >
+                  {todo.title}
+                </span>
+                {todo.type === "deadline" && (
+                  <span className="shrink-0 text-xs text-ink-3">extracted</span>
+                )}
               </div>
               <div className="mt-0.5 text-xs tabular-nums text-ink-3">
                 {todo.dueAt !== null ? new Date(todo.dueAt).toLocaleString() : "No due date"}

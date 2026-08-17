@@ -34,7 +34,7 @@ export const items = sqliteTable("items", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull().references(() => users.id),
   moduleId: integer("module_id").references(() => modules.id),
-  type: text("type", { enum: ["announcement", "assignment", "email", "event", "deadline_change"] }).notNull(),
+  type: text("type", { enum: ["announcement", "assignment", "email", "event", "deadline_change", "deadline"] }).notNull(),
   source: text("source", { enum: ["canvas", "graph"] }).notNull(),
   sourceId: text("source_id").notNull(),
   title: text("title").notNull(),
@@ -49,6 +49,7 @@ export const items = sqliteTable("items", {
   triage: text("triage", { enum: ["important", "garbage", "ambiguous", "unscored"] }),
   importance: real("importance"),
   importanceReason: text("importance_reason"),
+  actionsExtractedAt: integer("actions_extracted_at"),   // deadline-extraction marker: null = not yet processed
 }, (t) => [uniqueIndex("items_user_source").on(t.userId, t.source, t.sourceId)]);
 
 export const syncRuns = sqliteTable("sync_runs", {

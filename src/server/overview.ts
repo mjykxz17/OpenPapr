@@ -70,7 +70,7 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
     .slice(0, 20);
 
   const todos = scopedItems
-    .filter((i) => (i.type === "assignment" || i.type === "event") && !i.dismissed && !i.submitted)
+    .filter((i) => (i.type === "assignment" || i.type === "event" || i.type === "deadline") && !i.dismissed && !i.submitted)
     .sort(compareTodos(now));
 
   const mailItems = allItems.filter((i) => i.type === "email");

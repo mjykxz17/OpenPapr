@@ -25,7 +25,7 @@ export function extractJson(text: string): unknown | null {
   }
 }
 
-async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system: string, user: string, maxTokens: number): Promise<unknown | null> {
+export async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system: string, user: string, maxTokens: number): Promise<unknown | null> {
   const res = await fetchFn(`${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },

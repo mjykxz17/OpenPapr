@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
-import { applyCanvasSync, setModuleActivity, upsertMailItems } from "../db/repo";
+import { applyCanvasSync, applyExtractedActions, setModuleActivity, upsertMailItems } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient } from "../connectors/canvas/client";
@@ -14,6 +14,7 @@ import { linkMailToModule, normalizeMail } from "../connectors/graph/normalize";
 import { triageEmail } from "../enrich/rules";
 import { createScorer } from "../enrich/llm";
 import { createCompatScorer, createCompatWeightageExtractor } from "./../enrich/openai-compat";
+import { createCompatActionExtractor } from "../enrich/actions";
 import { createWeightageExtractor, type WeightageSourceText, type WeightageSourcePdf } from "../enrich/weightage";
 import { createGuard, runUserSync } from "./sync";
 
@@ -35,6 +36,7 @@ const extractor = compatCfg
   ? (texts: WeightageSourceText[], _pdfs?: WeightageSourcePdf[]) => compatExtractor!(texts)
   : anthropicExtractor;
 const supportsPdfSources = Boolean(anthropic);
+const actionExtractor = compatCfg ? createCompatActionExtractor(compatCfg) : null; // Anthropic-path parity: future work
 if (compatCfg) console.log(`llm provider: openai-compat ${compatCfg.model} @ ${compatCfg.baseUrl} (pdf sources disabled)`);
 
 const SYLLABUS_NAME_RE = /(syllabus|assessment|grading|outline)/i;
@@ -106,6 +108,25 @@ async function enrich(userId: number): Promise<void> {
     const scored = await scorer({ sender: mail.sender, title: mail.title, body: mail.body });
     db.update(items).set({ triage: scored.triage, importance: scored.importance, importanceReason: scored.reason })
       .where(eq(items.id, mail.id)).run();
+  }
+
+  // Deadline extraction: announcements + important emails from ACTIVE modules
+  // (emails with no module link included), once per item, capped per cycle so
+  // a cold start can't burst the LLM budget. null result = retry next cycle.
+  if (!actionExtractor) return;
+  const activeIds = new Set(
+    db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all().map((m) => m.id));
+  const candidates = db.select().from(items).where(and(
+    eq(items.userId, userId), isNull(items.actionsExtractedAt),
+    inArray(items.type, ["announcement", "email"]),
+  )).all().filter((i) =>
+    i.type === "announcement" ? (i.moduleId !== null && activeIds.has(i.moduleId))
+      : i.triage === "important",
+  ).slice(0, 25);
+  for (const item of candidates) {
+    const actions = await actionExtractor({ title: item.title, body: item.body, postedAt: item.sourceCreatedAt ?? item.firstSeenAt });
+    if (actions === null) continue;
+    applyExtractedActions(db, userId, item.id, actions, Date.now());
   }
 }
 

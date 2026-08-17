@@ -67,3 +67,44 @@ export function setModuleActivity(db: Db, userId: number): void {
     if (r.active !== active) db.update(modules).set({ active }).where(eq(modules.id, r.id)).run();
   }
 }
+
+const ACTION_STOPWORDS = new Set(["the", "and", "for", "due", "this", "that", "week", "your", "with", "will", "from"]);
+
+function distinctiveTokens(title: string): Set<string> {
+  return new Set(title.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length >= 3 && !ACTION_STOPWORDS.has(t)));
+}
+
+export function isDuplicateOfExisting(action: { title: string; dueAt: number }, existing: { title: string; dueAt: number | null }[]): boolean {
+  const tokens = distinctiveTokens(action.title);
+  return existing.some((e) => {
+    if (e.dueAt === null || Math.abs(e.dueAt - action.dueAt) > 48 * 3_600_000) return false;
+    const theirs = distinctiveTokens(e.title);
+    return [...tokens].some((t) => theirs.has(t));
+  });
+}
+
+const slug = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+
+// Inserts extracted deadline items under a parent announcement/email and marks
+// the parent processed. Dedupe: an action restating an existing same-module
+// item (due within 48h, sharing a distinctive title word) is skipped.
+export function applyExtractedActions(
+  db: Db, userId: number, parentItemId: number,
+  actions: { title: string; dueAt: number; evidence: string }[], now: number,
+): void {
+  const parent = db.select().from(items).where(eq(items.id, parentItemId)).get();
+  if (!parent) return;
+  const existing = parent.moduleId === null ? [] :
+    db.select().from(items).where(and(eq(items.userId, userId), eq(items.moduleId, parent.moduleId))).all()
+      .filter((i) => i.type !== "deadline")
+      .map((i) => ({ title: i.title, dueAt: i.dueAt }));
+  for (const a of actions) {
+    if (isDuplicateOfExisting(a, existing)) continue;
+    db.insert(items).values({
+      userId, moduleId: parent.moduleId, source: parent.source, type: "deadline",
+      sourceId: `${parent.sourceId}:action:${slug(a.title)}`,
+      title: a.title, body: a.evidence, url: parent.url, dueAt: a.dueAt, firstSeenAt: now,
+    }).onConflictDoNothing().run();
+  }
+  db.update(items).set({ actionsExtractedAt: now }).where(eq(items.id, parentItemId)).run();
+}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDb } from "./client";
 import { items, components, users, modules } from "./schema";
-import { applyCanvasSync, setModuleActivity } from "./repo";
+import { applyCanvasSync, applyExtractedActions, setModuleActivity } from "./repo";
 import { eq } from "drizzle-orm";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 
@@ -75,5 +75,47 @@ describe("setModuleActivity", () => {
     db.insert(modules).values([mod(1, "A", "Non-Academic"), mod(2, "B", null)]).run();
     setModuleActivity(db, 1);
     expect(db.select().from(modules).all().every((m) => m.active)).toBe(true);
+  });
+});
+
+describe("applyExtractedActions", () => {
+  const seedParent = (db: ReturnType<typeof setup>) => {
+    const { moduleId } = applyCanvasSync(db, 1, base, 1);
+    return db.insert(items).values({
+      userId: 1, moduleId, source: "canvas", type: "announcement", sourceId: "announcement:9",
+      title: "Quiz details", body: "Quiz on Thursday", firstSeenAt: 1,
+    }).returning().get();
+  };
+  const action = { title: "In-person quiz", dueAt: 5_000_000, evidence: "Quiz on Thursday 6:30pm" };
+  it("inserts deadline items inheriting the parent's module and marks the parent processed", () => {
+    const db = setup();
+    const parent = seedParent(db);
+    applyExtractedActions(db, 1, parent.id, [action], 99);
+    const all = db.select().from(items).all();
+    const dl = all.find((i) => i.type === "deadline")!;
+    expect(dl.moduleId).toBe(parent.moduleId);
+    expect(dl.dueAt).toBe(5_000_000);
+    expect(dl.body).toBe("Quiz on Thursday 6:30pm");
+    expect(dl.sourceId.startsWith("announcement:9:action:")).toBe(true);
+    expect(all.find((i) => i.id === parent.id)!.actionsExtractedAt).toBe(99);
+  });
+  it("is idempotent on re-apply", () => {
+    const db = setup();
+    const parent = seedParent(db);
+    applyExtractedActions(db, 1, parent.id, [action], 99);
+    applyExtractedActions(db, 1, parent.id, [action], 100);
+    expect(db.select().from(items).all().filter((i) => i.type === "deadline")).toHaveLength(1);
+  });
+  it("skips actions duplicating an existing same-module item due within 48h", () => {
+    const db = setup();
+    const parent = seedParent(db);
+    // base sync already inserted assignment "tP v1.3" dueAt 1000 — add a quiz assignment near the action's time
+    db.insert(items).values({
+      userId: 1, moduleId: parent.moduleId, source: "canvas", type: "assignment",
+      sourceId: "assignment:77", title: "Quiz 4", dueAt: 5_000_000 + 3_600_000, firstSeenAt: 1,
+    }).run();
+    applyExtractedActions(db, 1, parent.id, [action], 99);
+    expect(db.select().from(items).all().filter((i) => i.type === "deadline")).toHaveLength(0);
+    expect(db.select().from(items).all().find((i) => i.id === parent.id)!.actionsExtractedAt).toBe(99);
   });
 });

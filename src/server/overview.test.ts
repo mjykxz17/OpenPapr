@@ -98,3 +98,14 @@ describe("active-term scoping", () => {
     expect(o.mail.important.map((m) => m.title)).toEqual(["mail"]);
   });
 });
+
+describe("extracted deadlines", () => {
+  it("appear in todos ordered with everything else", () => {
+    const { db, moduleId } = setup();
+    db.insert(items).values([
+      { userId: 1, moduleId, source: "canvas", type: "deadline", sourceId: "a:9:action:quiz", title: "In-person quiz", firstSeenAt: 1, dueAt: 2000 },
+      { userId: 1, moduleId, source: "canvas", type: "assignment", sourceId: "a:1", title: "later", firstSeenAt: 1, dueAt: 5000 },
+    ]).run();
+    expect(getOverview(db, 1, 1000, 300_000).todos.map((t) => t.title)).toEqual(["In-person quiz", "later"]);
+  });
+});
