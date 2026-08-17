@@ -56,14 +56,20 @@ async function canvasSync(userId: number): Promise<void> {
     if (!extractor) continue;
     const have = db.select().from(components).where(eq(components.moduleId, moduleId)).all();
     if (have.length > 0) continue;
+    // Pages/files are OPTIONAL weightage sources: courses can have the Pages or
+    // Files feature disabled (Canvas returns 404 "disabled for this course"),
+    // and that must not abort the sync of this or later courses.
+    const optional = async <T,>(p: Promise<T>, fallback: T): Promise<T> => {
+      try { return await p; } catch { return fallback; }
+    };
     const texts: WeightageSourceText[] = [];
     if (sync.module.syllabusBody) texts.push({ label: "Canvas syllabus page", text: sync.module.syllabusBody });
-    for (const p of (await canvas.listPages(course.id)).filter((p) => SYLLABUS_NAME_RE.test(p.title)).slice(0, 3))
-      texts.push({ label: `Page: ${p.title}`, text: await canvas.getPageBody(course.id, p.url) });
+    for (const p of (await optional(canvas.listPages(course.id), [])).filter((p) => SYLLABUS_NAME_RE.test(p.title)).slice(0, 3))
+      texts.push({ label: `Page: ${p.title}`, text: await optional(canvas.getPageBody(course.id, p.url), "") });
     const pdfs: WeightageSourcePdf[] = [];
     if (supportsPdfSources)
-      for (const f of (await canvas.listSyllabusFiles(course.id)).filter((f) => f.content_type === "application/pdf").slice(0, 2))
-        pdfs.push({ label: f.display_name, base64: Buffer.from(await canvas.downloadFile(f.url)).toString("base64") });
+      for (const f of (await optional(canvas.listSyllabusFiles(course.id), [])).filter((f) => f.content_type === "application/pdf").slice(0, 2))
+        pdfs.push({ label: f.display_name, base64: Buffer.from(await optional(canvas.downloadFile(f.url), new Uint8Array())).toString("base64") });
     const extracted = await extractor(texts, pdfs);
     if (extracted) for (const c of extracted) {
       db.insert(components).values({ moduleId, name: c.name, weightPct: c.weightPct, source: "llm_syllabus", evidence: c.evidence })
