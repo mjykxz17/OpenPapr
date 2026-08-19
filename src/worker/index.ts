@@ -15,6 +15,7 @@ import { triageEmail } from "../enrich/rules";
 import { createScorer } from "../enrich/llm";
 import { createCompatScorer, createCompatWeightageExtractor } from "./../enrich/openai-compat";
 import { createCompatActionExtractor } from "../enrich/actions";
+import { createCompatDeadlineClassifier } from "../enrich/classify";
 import { createWeightageExtractor, type WeightageSourceText, type WeightageSourcePdf } from "../enrich/weightage";
 import { createGuard, runUserSync } from "./sync";
 
@@ -37,6 +38,7 @@ const extractor = compatCfg
   : anthropicExtractor;
 const supportsPdfSources = Boolean(anthropic);
 const actionExtractor = compatCfg ? createCompatActionExtractor(compatCfg) : null; // Anthropic-path parity: future work
+const deadlineClassifier = compatCfg ? createCompatDeadlineClassifier(compatCfg) : null;
 if (compatCfg) console.log(`llm provider: openai-compat ${compatCfg.model} @ ${compatCfg.baseUrl} (pdf sources disabled)`);
 
 const SYLLABUS_NAME_RE = /(syllabus|assessment|grading|outline)/i;
@@ -128,6 +130,19 @@ async function enrich(userId: number): Promise<void> {
     if (actions === null) continue;
     applyExtractedActions(db, userId, item.id, actions, Date.now());
   }
+
+  // Classify unclassified deadlines in one batched call per cycle.
+  if (!deadlineClassifier) return;
+  const codeById = new Map(db.select().from(modules).where(eq(modules.userId, userId)).all().map((m) => [m.id, m.code]));
+  const unclassified = db.select().from(items).where(and(
+    eq(items.userId, userId), eq(items.type, "deadline"), isNull(items.category),
+  )).all().slice(0, 50);
+  if (unclassified.length === 0) return;
+  const result = await deadlineClassifier(unclassified.map((d) => ({
+    id: d.id, title: d.title, module: d.moduleId !== null ? codeById.get(d.moduleId) ?? null : null,
+  })));
+  if (result) for (const [id, category] of result)
+    db.update(items).set({ category }).where(eq(items.id, id)).run();
 }
 
 const guard = createGuard(env.POLL_INTERVAL_MS);

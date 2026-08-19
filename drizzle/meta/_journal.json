@@ -15,6 +15,13 @@
       "when": 1786973249799,
       "tag": "0001_soft_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787133018350,
+      "tag": "0002_friendly_gravity",
+      "breakpoints": true
     }
   ]
 }

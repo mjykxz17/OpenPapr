@@ -119,3 +119,19 @@ describe("applyExtractedActions", () => {
     expect(db.select().from(items).all().find((i) => i.id === parent.id)!.actionsExtractedAt).toBe(99);
   });
 });
+
+describe("applyExtractedActions cross-parent dedupe", () => {
+  it("skips an action already extracted from a different announcement", () => {
+    const db = setup();
+    const { moduleId } = applyCanvasSync(db, 1, base, 1);
+    const mk = (sourceId: string) => db.insert(items).values({
+      userId: 1, moduleId, source: "canvas", type: "announcement", sourceId, title: "t", body: "b", firstSeenAt: 1,
+    }).returning().get();
+    const p1 = mk("announcement:1");
+    const p2 = mk("announcement:2");
+    const action = { title: "Bring PC to class", dueAt: 9_000_000, evidence: "bring your PC" };
+    applyExtractedActions(db, 1, p1.id, [action], 50);
+    applyExtractedActions(db, 1, p2.id, [action], 60);
+    expect(db.select().from(items).all().filter((i) => i.type === "deadline")).toHaveLength(1);
+  });
+});

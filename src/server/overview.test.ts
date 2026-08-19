@@ -109,3 +109,44 @@ describe("extracted deadlines", () => {
     expect(getOverview(db, 1, 1000, 300_000).todos.map((t) => t.title)).toEqual(["In-person quiz", "later"]);
   });
 });
+
+describe("todo tidying", () => {
+  const HOUR = 3_600_000;
+  const ev = (moduleId: number, sourceId: string, title: string, dueAt: number) =>
+    ({ userId: 1, moduleId, source: "canvas" as const, type: "event" as const, sourceId, title, firstSeenAt: 1, dueAt });
+  it("collapses a recurring event series to its next occurrence with a count", () => {
+    const { db, moduleId } = setup();
+    const now = 100 * HOUR;
+    db.insert(items).values([
+      ev(moduleId, "e:1", "Security Practice", now - 50 * HOUR),
+      ev(moduleId, "e:2", "Security Practice", now + 50 * HOUR),
+      ev(moduleId, "e:3", "Security Practice", now + 200 * HOUR),
+      ev(moduleId, "e:4", "Security Practice", now + 400 * HOUR),
+    ]).run();
+    const todos = getOverview(db, 1, now, 300_000).todos;
+    expect(todos).toHaveLength(1);
+    expect(todos[0].dueAt).toBe(now + 50 * HOUR);
+    expect(todos[0].seriesCount).toBe(3);
+  });
+  it("hides past events and past routine deadlines after a 12h grace, keeps overdue submittables", () => {
+    const { db, moduleId } = setup();
+    const now = 100 * HOUR;
+    db.insert(items).values([
+      ev(moduleId, "e:1", "Old lab", now - 24 * HOUR),
+      { userId: 1, moduleId, source: "canvas", type: "deadline", sourceId: "d:1", title: "Attend old lab", firstSeenAt: 1, dueAt: now - 24 * HOUR, category: "routine" },
+      { userId: 1, moduleId, source: "canvas", type: "deadline", sourceId: "d:2", title: "Submit old report", firstSeenAt: 1, dueAt: now - 24 * HOUR, category: "deliverable" },
+      { userId: 1, moduleId, source: "canvas", type: "assignment", sourceId: "a:1", title: "Old assignment", firstSeenAt: 1, dueAt: now - 24 * HOUR },
+      ev(moduleId, "e:2", "Recent lab", now - 6 * HOUR),
+    ]).run();
+    const titles = getOverview(db, 1, now, 300_000).todos.map((t) => t.title).sort();
+    expect(titles).toEqual(["Old assignment", "Recent lab", "Submit old report"]);
+  });
+  it("treats unclassified deadlines as deliverable (kept when overdue)", () => {
+    const { db, moduleId } = setup();
+    const now = 100 * HOUR;
+    db.insert(items).values(
+      { userId: 1, moduleId, source: "canvas", type: "deadline", sourceId: "d:9", title: "Unclassified overdue", firstSeenAt: 1, dueAt: now - 24 * HOUR },
+    ).run();
+    expect(getOverview(db, 1, now, 300_000).todos.map((t) => t.title)).toEqual(["Unclassified overdue"]);
+  });
+});

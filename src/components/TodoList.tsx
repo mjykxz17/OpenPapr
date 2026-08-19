@@ -12,6 +12,25 @@ export function TodoList({
 }) {
   if (todos.length === 0) return <p className="text-sm text-ink-3">No to-dos.</p>;
 
+  const main = todos.filter((t) => t.category !== "routine");
+  const routine = todos.filter((t) => t.category === "routine");
+
+  return (
+    <>
+      {renderRows(main, modules, now)}
+      {routine.length > 0 && (
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs uppercase tracking-wide text-ink-3">
+            Routine ({routine.length})
+          </summary>
+          {renderRows(routine, modules, now)}
+        </details>
+      )}
+    </>
+  );
+}
+
+function renderRows(todos: Overview["todos"], modules: Overview["modules"], now: number) {
   return (
     <ul className="divide-y divide-line">
       {todos.map((todo) => {
@@ -32,6 +51,9 @@ export function TodoList({
                 </span>
                 {todo.type === "deadline" && (
                   <span className="shrink-0 text-xs text-ink-3">extracted</span>
+                )}
+                {todo.seriesCount !== undefined && todo.seriesCount > 1 && (
+                  <span className="shrink-0 text-xs tabular-nums text-ink-3">×{todo.seriesCount} sessions</span>
                 )}
               </div>
               <div className="mt-0.5 text-xs tabular-nums text-ink-3">

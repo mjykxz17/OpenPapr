@@ -3,12 +3,13 @@ import type { Db } from "../db/client";
 import { components, items, modules, syncRuns, users } from "../db/schema";
 
 export type ItemRow = typeof items.$inferSelect;
+export type TodoEntry = ItemRow & { seriesCount?: number };
 export type ComponentRow = typeof components.$inferSelect;
 
 export interface Overview {
   lastSeenAt: number;
   whatsNew: ItemRow[]; // firstSeenAt > lastSeenAt, newest first, cap 20
-  todos: ItemRow[]; // type in (assignment,event), !dismissed, !submitted; overdue (dueAt < now) first, then dueAt asc, nulls last
+  todos: TodoEntry[]; // assignment/event/deadline, !dismissed, !submitted; past events + past routine deadlines hidden after 12h grace; recurring event series collapsed to next occurrence; overdue first, then dueAt asc, nulls last
   mail: { important: ItemRow[]; filteredCount: number }; // important = triage in (important,ambiguous,unscored) & !dismissed, newest 20; filteredCount = garbage count
   modules: { id: number; code: string; name: string; components: ComponentRow[]; latestAnnouncements: ItemRow[]; unaccountedPct: number | null }[];
   syncStatus: { source: string; lastOkAt: number | null; stale: boolean }[]; // stale = now - lastOkAt > 3 * pollIntervalMs
@@ -69,9 +70,39 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
     .sort(byNewestFirst)
     .slice(0, 20);
 
-  const todos = scopedItems
-    .filter((i) => (i.type === "assignment" || i.type === "event" || i.type === "deadline") && !i.dismissed && !i.submitted)
-    .sort(compareTodos(now));
+  const GRACE_MS = 12 * 3_600_000;
+  const isPast = (i: ItemRow) => i.dueAt !== null && i.dueAt < now - GRACE_MS;
+  const todoCandidates = scopedItems.filter(
+    (i) => (i.type === "assignment" || i.type === "event" || i.type === "deadline") && !i.dismissed && !i.submitted,
+  ).filter((i) => {
+    // A lab that happened is not a to-do; a missed submittable still is.
+    if (i.type === "event") return !isPast(i);
+    if (i.type === "deadline" && i.category === "routine") return !isPast(i);
+    return true;
+  });
+
+  // Collapse recurring event series (same module + title, 3+ total occurrences
+  // among scoped items) into the next upcoming occurrence with a count.
+  const seriesKey = (i: ItemRow) => `${i.moduleId}::${i.title}`;
+  const seriesTotals = new Map<string, number>();
+  for (const i of scopedItems) if (i.type === "event") {
+    const k = seriesKey(i);
+    seriesTotals.set(k, (seriesTotals.get(k) ?? 0) + 1);
+  }
+  const seen = new Set<string>();
+  const todos: TodoEntry[] = [];
+  for (const i of [...todoCandidates].sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity))) {
+    if (i.type === "event" && (seriesTotals.get(seriesKey(i)) ?? 0) >= 3) {
+      const k = seriesKey(i);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const remaining = todoCandidates.filter((c) => c.type === "event" && seriesKey(c) === k).length;
+      todos.push({ ...i, seriesCount: remaining });
+      continue;
+    }
+    todos.push(i);
+  }
+  todos.sort(compareTodos(now));
 
   const mailItems = allItems.filter((i) => i.type === "email");
   const important = mailItems

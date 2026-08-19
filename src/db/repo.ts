@@ -96,7 +96,9 @@ export function applyExtractedActions(
   if (!parent) return;
   const existing = parent.moduleId === null ? [] :
     db.select().from(items).where(and(eq(items.userId, userId), eq(items.moduleId, parent.moduleId))).all()
-      .filter((i) => i.type !== "deadline")
+      // Exclude only this parent's own children so re-apply stays idempotent;
+      // deadlines extracted from OTHER announcements do participate in dedupe.
+      .filter((i) => !i.sourceId.startsWith(`${parent.sourceId}:action:`))
       .map((i) => ({ title: i.title, dueAt: i.dueAt }));
   for (const a of actions) {
     if (isDuplicateOfExisting(a, existing)) continue;

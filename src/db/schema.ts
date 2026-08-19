@@ -50,6 +50,7 @@ export const items = sqliteTable("items", {
   importance: real("importance"),
   importanceReason: text("importance_reason"),
   actionsExtractedAt: integer("actions_extracted_at"),   // deadline-extraction marker: null = not yet processed
+  category: text("category", { enum: ["deliverable", "routine"] }),  // deadline tier; null = unclassified, treated as deliverable
 }, (t) => [uniqueIndex("items_user_source").on(t.userId, t.source, t.sourceId)]);
 
 export const syncRuns = sqliteTable("sync_runs", {
