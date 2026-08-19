@@ -1,0 +1,1 @@
+ALTER TABLE `modules` ADD `weightage_checked_at` integer;

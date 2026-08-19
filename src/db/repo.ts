@@ -110,3 +110,14 @@ export function applyExtractedActions(
   }
   db.update(items).set({ actionsExtractedAt: now }).where(eq(items.id, parentItemId)).run();
 }
+
+const WEIGHTAGE_RETRY_MS = 7 * 24 * 3_600_000;
+
+// Weightage extraction is attempted only for component-less modules, at most
+// once a week — a syllabus with no stated breakdown must not cost an LLM call
+// every poll cycle.
+export function shouldAttemptWeightage(componentCount: number, checkedAt: number | null, now: number): boolean {
+  if (componentCount > 0) return false;
+  if (checkedAt === null) return true;
+  return now - checkedAt > WEIGHTAGE_RETRY_MS;
+}

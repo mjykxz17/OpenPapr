@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDb } from "./client";
 import { items, components, users, modules } from "./schema";
-import { applyCanvasSync, applyExtractedActions, setModuleActivity } from "./repo";
+import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage } from "./repo";
 import { eq } from "drizzle-orm";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 
@@ -133,5 +133,19 @@ describe("applyExtractedActions cross-parent dedupe", () => {
     applyExtractedActions(db, 1, p1.id, [action], 50);
     applyExtractedActions(db, 1, p2.id, [action], 60);
     expect(db.select().from(items).all().filter((i) => i.type === "deadline")).toHaveLength(1);
+  });
+});
+
+describe("shouldAttemptWeightage", () => {
+  const WEEK = 7 * 24 * 3_600_000;
+  it("attempts when no components and never checked", () => {
+    expect(shouldAttemptWeightage(0, null, 1000)).toBe(true);
+  });
+  it("skips when components exist", () => {
+    expect(shouldAttemptWeightage(3, null, 1000)).toBe(false);
+  });
+  it("skips within a week of the last attempt, retries after", () => {
+    expect(shouldAttemptWeightage(0, 1000, 1000 + WEEK - 1)).toBe(false);
+    expect(shouldAttemptWeightage(0, 1000, 1000 + WEEK + 1)).toBe(true);
   });
 });

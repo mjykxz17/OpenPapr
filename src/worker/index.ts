@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
-import { applyCanvasSync, applyExtractedActions, setModuleActivity, upsertMailItems } from "../db/repo";
+import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient } from "../connectors/canvas/client";
@@ -18,6 +18,7 @@ import { createCompatActionExtractor } from "../enrich/actions";
 import { createCompatDeadlineClassifier } from "../enrich/classify";
 import { createWeightageExtractor, type WeightageSourceText, type WeightageSourcePdf } from "../enrich/weightage";
 import { createGuard, runUserSync } from "./sync";
+import { extractPdfText } from "../lib/pdf-text";
 
 const env = loadEnv();
 const db = createDb(env.DATABASE_PATH);
@@ -56,10 +57,11 @@ async function canvasSync(userId: number): Promise<void> {
     const sync = normalizeCanvasCourse(course, groups, announcements, events);
     const { moduleId } = applyCanvasSync(db, userId, sync, Date.now());
 
-    // Weightage extraction: once per module, only when nothing (canvas/llm/manual) exists yet.
+    // Weightage extraction: component-less modules only, at most weekly.
     if (!extractor) continue;
+    const modRow = db.select().from(modules).where(eq(modules.id, moduleId)).get()!;
     const have = db.select().from(components).where(eq(components.moduleId, moduleId)).all();
-    if (have.length > 0) continue;
+    if (!shouldAttemptWeightage(have.length, modRow.weightageCheckedAt, Date.now())) continue;
     // Pages/files are OPTIONAL weightage sources: courses can have the Pages or
     // Files feature disabled (Canvas returns 404 "disabled for this course"),
     // and that must not abort the sync of this or later courses.
@@ -70,11 +72,28 @@ async function canvasSync(userId: number): Promise<void> {
     if (sync.module.syllabusBody) texts.push({ label: "Canvas syllabus page", text: sync.module.syllabusBody });
     for (const p of (await optional(canvas.listPages(course.id), [])).filter((p) => SYLLABUS_NAME_RE.test(p.title)).slice(0, 3))
       texts.push({ label: `Page: ${p.title}`, text: await optional(canvas.getPageBody(course.id, p.url), "") });
+    // Candidate PDFs: syllabus-named files, else week-0/admin-looking decks
+    // (profs often put the assessment breakdown in the prelim slides).
+    let candidateFiles = (await optional(canvas.listSyllabusFiles(course.id), [])).filter((f) => f.content_type === "application/pdf");
+    if (candidateFiles.length === 0) {
+      const DECK_RE = /(prelim|intro|week ?0|u0|admin|assess|outline|course.?info)/i;
+      candidateFiles = (await optional(canvas.listCourseFiles(course.id), []))
+        .filter((f) => f.content_type === "application/pdf" && DECK_RE.test(f.display_name));
+    }
+    candidateFiles = candidateFiles.slice(0, 2);
     const pdfs: WeightageSourcePdf[] = [];
-    if (supportsPdfSources)
-      for (const f of (await optional(canvas.listSyllabusFiles(course.id), [])).filter((f) => f.content_type === "application/pdf").slice(0, 2))
-        pdfs.push({ label: f.display_name, base64: Buffer.from(await optional(canvas.downloadFile(f.url), new Uint8Array())).toString("base64") });
+    for (const f of candidateFiles) {
+      const bytes = await optional(canvas.downloadFile(f.url), new Uint8Array());
+      if (bytes.length === 0) continue;
+      if (supportsPdfSources) {
+        pdfs.push({ label: f.display_name, base64: Buffer.from(bytes).toString("base64") });
+      } else {
+        const text = await extractPdfText(bytes);
+        if (text.trim()) texts.push({ label: `Slides: ${f.display_name}`, text });
+      }
+    }
     const extracted = await extractor(texts, pdfs);
+    db.update(modules).set({ weightageCheckedAt: Date.now() }).where(eq(modules.id, moduleId)).run();
     if (extracted) for (const c of extracted) {
       db.insert(components).values({ moduleId, name: c.name, weightPct: c.weightPct, source: "llm_syllabus", evidence: c.evidence })
         .onConflictDoNothing().run();

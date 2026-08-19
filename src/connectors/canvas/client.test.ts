@@ -30,3 +30,13 @@ describe("createCanvasClient", () => {
     await expect(client.listActiveCourses()).rejects.toThrow(/401/);
   });
 });
+
+describe("listCourseFiles", () => {
+  it("lists all course files with pagination params", async () => {
+    const fetchFn = vi.fn(async () => json([{ id: 9, display_name: "U0-prelim.pdf", url: "u", content_type: "application/pdf" }]));
+    const client = createCanvasClient("https://canvas.example", "tok", fetchFn as never);
+    const files = await client.listCourseFiles(7);
+    expect(files[0].display_name).toBe("U0-prelim.pdf");
+    expect((fetchFn.mock.calls[0] as unknown as [string])[0]).toContain("/courses/7/files?per_page=100&sort=created_at");
+  });
+});

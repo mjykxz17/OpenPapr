@@ -47,6 +47,8 @@ export function createCanvasClient(baseUrl: string, token: string, fetchFn: type
       (await getOne<{ body: string | null }>(`/courses/${courseId}/pages/${encodeURIComponent(slug)}`)).body ?? "",
     listSyllabusFiles: (courseId: number) =>
       getAllPages<CanvasFile>(`/courses/${courseId}/files?search_term=syllabus&per_page=50`),
+    listCourseFiles: (courseId: number) =>
+      getAllPages<CanvasFile>(`/courses/${courseId}/files?per_page=100&sort=created_at`),
     downloadFile: async (url: string) => {
       const res = await fetchFn(url, { headers });
       if (!res.ok) throw new Error(`Canvas file ${res.status}`);
