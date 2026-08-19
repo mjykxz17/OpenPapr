@@ -35,7 +35,7 @@ export default function Home() {
       {overview.whatsNew.length > 0 && <WhatsNew items={overview.whatsNew} />}
 
       <section className="mb-10">
-        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">To-dos</h2>
+        <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Reminders</h2>
         <TodoList todos={overview.todos} modules={overview.modules} now={now} />
       </section>
 

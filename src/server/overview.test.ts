@@ -150,3 +150,18 @@ describe("todo tidying", () => {
     expect(getOverview(db, 1, now, 300_000).todos.map((t) => t.title)).toEqual(["Unclassified overdue"]);
   });
 });
+
+describe("reminder aging", () => {
+  const HOUR = 3_600_000;
+  it("keeps an overdue deliverable for 72h then hides it; assignments never auto-hide", () => {
+    const { db, moduleId } = setup();
+    const now = 200 * HOUR;
+    db.insert(items).values([
+      { userId: 1, moduleId, source: "canvas", type: "deadline", sourceId: "d:1", title: "missed recently", firstSeenAt: 1, dueAt: now - 50 * HOUR, category: "deliverable" },
+      { userId: 1, moduleId, source: "canvas", type: "deadline", sourceId: "d:2", title: "missed long ago", firstSeenAt: 1, dueAt: now - 100 * HOUR, category: "deliverable" },
+      { userId: 1, moduleId, source: "canvas", type: "assignment", sourceId: "a:9", title: "ancient assignment", firstSeenAt: 1, dueAt: now - 500 * HOUR },
+    ]).run();
+    const titles = getOverview(db, 1, now, 300_000).todos.map((t) => t.title).sort();
+    expect(titles).toEqual(["ancient assignment", "missed recently"]);
+  });
+});

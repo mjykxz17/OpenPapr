@@ -71,13 +71,15 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
     .slice(0, 20);
 
   const GRACE_MS = 12 * 3_600_000;
-  const isPast = (i: ItemRow) => i.dueAt !== null && i.dueAt < now - GRACE_MS;
+  const DELIVERABLE_LINGER_MS = 72 * 3_600_000; // reminders are notifications: a miss shows for 3 days, then fades
+  const pastBy = (i: ItemRow, ms: number) => i.dueAt !== null && i.dueAt < now - ms;
   const todoCandidates = scopedItems.filter(
     (i) => (i.type === "assignment" || i.type === "event" || i.type === "deadline") && !i.dismissed && !i.submitted,
   ).filter((i) => {
-    // A lab that happened is not a to-do; a missed submittable still is.
-    if (i.type === "event") return !isPast(i);
-    if (i.type === "deadline" && i.category === "routine") return !isPast(i);
+    // A lab that happened is not a reminder; a missed submittable lingers 72h.
+    // Canvas assignments never auto-hide — they clear on submission.
+    if (i.type === "event") return !pastBy(i, GRACE_MS);
+    if (i.type === "deadline") return !pastBy(i, i.category === "routine" ? GRACE_MS : DELIVERABLE_LINGER_MS);
     return true;
   });
 

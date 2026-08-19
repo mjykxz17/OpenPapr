@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-export function DismissButton({ itemId }: { itemId: number }) {
+export function DismissButton({ itemId, compact = false }: { itemId: number; compact?: boolean }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
 
@@ -19,9 +19,12 @@ export function DismissButton({ itemId }: { itemId: number }) {
       type="button"
       onClick={onClick}
       disabled={pending}
-      className="shrink-0 border border-line px-2 py-1 text-xs text-ink-2 hover:text-accent disabled:opacity-50"
+      aria-label="Dismiss"
+      className={compact
+        ? "shrink-0 px-1 text-sm leading-none text-ink-3 opacity-0 transition-opacity hover:text-accent group-hover:opacity-100 disabled:opacity-50"
+        : "shrink-0 border border-line px-2 py-1 text-xs text-ink-2 hover:text-accent disabled:opacity-50"}
     >
-      {pending ? "…" : "Dismiss"}
+      {pending ? "…" : compact ? "×" : "Dismiss"}
     </button>
   );
 }
