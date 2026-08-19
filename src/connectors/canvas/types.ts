@@ -5,4 +5,6 @@ export interface CanvasAssignmentGroup { id: number; name: string; group_weight:
 export interface CanvasAnnouncement { id: number; title: string; message: string; html_url: string; posted_at: string | null; }
 export interface CanvasCalendarEvent { id: number; title: string; start_at: string | null; html_url: string; description: string | null; }
 export interface CanvasPage { url: string; title: string; }
-export interface CanvasFile { id: number; display_name: string; url: string; content_type: string; }
+// NB: the Canvas files API returns the MIME type under the HYPHENATED key
+// "content-type", not snake_case like every other field.
+export interface CanvasFile { id: number; display_name: string; url: string; "content-type"?: string; }

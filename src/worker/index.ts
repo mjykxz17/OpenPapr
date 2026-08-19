@@ -6,7 +6,7 @@ import { components, items, modules, users } from "../db/schema";
 import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
-import { createCanvasClient } from "../connectors/canvas/client";
+import { createCanvasClient, isPdfFile } from "../connectors/canvas/client";
 import { normalizeCanvasCourse } from "../connectors/canvas/normalize";
 import { fetchInboxDelta } from "../connectors/graph/client";
 import { refreshAccessToken } from "../connectors/graph/auth";
@@ -19,6 +19,7 @@ import { createCompatDeadlineClassifier } from "../enrich/classify";
 import { createWeightageExtractor, type WeightageSourceText, type WeightageSourcePdf } from "../enrich/weightage";
 import { createGuard, runUserSync } from "./sync";
 import { extractPdfText } from "../lib/pdf-text";
+import { focusAssessmentText } from "../lib/assessment-focus";
 
 const env = loadEnv();
 const db = createDb(env.DATABASE_PATH);
@@ -74,11 +75,11 @@ async function canvasSync(userId: number): Promise<void> {
       texts.push({ label: `Page: ${p.title}`, text: await optional(canvas.getPageBody(course.id, p.url), "") });
     // Candidate PDFs: syllabus-named files, else week-0/admin-looking decks
     // (profs often put the assessment breakdown in the prelim slides).
-    let candidateFiles = (await optional(canvas.listSyllabusFiles(course.id), [])).filter((f) => f.content_type === "application/pdf");
+    let candidateFiles = (await optional(canvas.listSyllabusFiles(course.id), [])).filter(isPdfFile);
     if (candidateFiles.length === 0) {
       const DECK_RE = /(prelim|intro|week ?0|u0|admin|assess|outline|course.?info)/i;
       candidateFiles = (await optional(canvas.listCourseFiles(course.id), []))
-        .filter((f) => f.content_type === "application/pdf" && DECK_RE.test(f.display_name));
+        .filter((f) => isPdfFile(f) && DECK_RE.test(f.display_name));
     }
     candidateFiles = candidateFiles.slice(0, 2);
     const pdfs: WeightageSourcePdf[] = [];
@@ -89,7 +90,7 @@ async function canvasSync(userId: number): Promise<void> {
         pdfs.push({ label: f.display_name, base64: Buffer.from(bytes).toString("base64") });
       } else {
         const text = await extractPdfText(bytes);
-        if (text.trim()) texts.push({ label: `Slides: ${f.display_name}`, text });
+        if (text.trim()) texts.push({ label: `Slides: ${f.display_name}`, text: focusAssessmentText(text) });
       }
     }
     const extracted = await extractor(texts, pdfs);

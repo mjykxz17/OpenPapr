@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createCanvasClient } from "./client";
+import { createCanvasClient, isPdfFile } from "./client";
 
 const json = (body: unknown, headers: Record<string, string> = {}) =>
   new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json", ...headers } });
@@ -33,10 +33,22 @@ describe("createCanvasClient", () => {
 
 describe("listCourseFiles", () => {
   it("lists all course files with pagination params", async () => {
-    const fetchFn = vi.fn(async () => json([{ id: 9, display_name: "U0-prelim.pdf", url: "u", content_type: "application/pdf" }]));
+    const fetchFn = vi.fn(async () => json([{ id: 9, display_name: "U0-prelim.pdf", url: "u", "content-type": "application/pdf" }]));
     const client = createCanvasClient("https://canvas.example", "tok", fetchFn as never);
     const files = await client.listCourseFiles(7);
     expect(files[0].display_name).toBe("U0-prelim.pdf");
     expect((fetchFn.mock.calls[0] as unknown as [string])[0]).toContain("/courses/7/files?per_page=100&sort=created_at");
+  });
+});
+
+describe("isPdfFile", () => {
+  it("matches on the hyphenated content-type key Canvas actually returns", () => {
+    expect(isPdfFile({ id: 1, display_name: "deck", url: "u", "content-type": "application/pdf" })).toBe(true);
+  });
+  it("falls back to the .pdf extension when content-type is absent", () => {
+    expect(isPdfFile({ id: 2, display_name: "U0-prelim.pdf", url: "u" })).toBe(true);
+  });
+  it("rejects non-PDFs", () => {
+    expect(isPdfFile({ id: 3, display_name: "course-page-hacking.jpg", url: "u" })).toBe(false);
   });
 });

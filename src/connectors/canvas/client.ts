@@ -12,6 +12,9 @@ function nextLink(header: string | null): string | null {
   return null;
 }
 
+export const isPdfFile = (f: CanvasFile): boolean =>
+  f["content-type"] === "application/pdf" || /\.pdf$/i.test(f.display_name);
+
 export function createCanvasClient(baseUrl: string, token: string, fetchFn: typeof fetch = fetch) {
   const headers = { Authorization: `Bearer ${token}` };
 

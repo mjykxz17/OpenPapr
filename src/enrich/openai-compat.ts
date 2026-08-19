@@ -61,7 +61,7 @@ export function createCompatScorer(cfg: CompatConfig, fetchFn: typeof fetch = fe
   };
 }
 
-const WEIGHTAGE_SYSTEM = `You extract assessment component weightage from university course materials. Report only weightings explicitly stated in the sources, quoting the exact sentence as evidence. If the sources do not state a complete weightage breakdown, set found=false and return no components — never guess or fill gaps. Reply with ONLY a JSON object, no prose, no code fences: {"found": boolean, "components": [{"name": string, "weight_pct": number, "evidence": "verbatim quote"}]}`;
+const WEIGHTAGE_SYSTEM = `You extract assessment component weightage from university course materials. Report only weightings explicitly stated in the sources, quoting the exact sentence as evidence. If the sources present more than one alternative breakdown (e.g. a current scheme and one marked preliminary, tentative, or to-be-discussed), extract ONLY the currently-operative scheme — one scheme, summing to roughly 100 — and ignore the alternatives entirely. If the sources do not state a complete weightage breakdown, set found=false and return no components — never guess or fill gaps. Reply with ONLY a JSON object, no prose, no code fences: {"found": boolean, "components": [{"name": string, "weight_pct": number, "evidence": "verbatim quote"}]}`;
 
 export function createCompatWeightageExtractor(cfg: CompatConfig, fetchFn: typeof fetch = fetch) {
   return async (texts: WeightageSourceText[]): Promise<ExtractedComponent[] | null> => {
