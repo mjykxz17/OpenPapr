@@ -3,7 +3,7 @@ import { MarkSeenButton } from "./MarkSeenButton";
 
 export function WhatsNew({ items }: { items: ItemRow[] }) {
   return (
-    <section className="mb-10 border border-[#d6e5e2] bg-[#f4f9f8] p-4">
+    <section className="border border-[#d6e5e2] bg-[#f4f9f8] p-4">
       <div className="mb-3 flex items-center justify-between gap-4">
         <h2 className="text-xs font-medium uppercase tracking-wide text-ink-3">New since your last visit</h2>
         <MarkSeenButton />

@@ -4,7 +4,7 @@ import { SOURCE_LABEL } from "@/lib/component-display";
 
 export function ModuleCard({ module: m }: { module: Overview["modules"][number] }) {
   return (
-    <div className="border border-line p-4">
+    <div className="border border-line p-3">
       <Link href={`/modules/${m.id}`} className="text-sm font-medium text-ink hover:text-accent">
         {m.code} <span className="font-normal text-ink-2">{m.name}</span>
       </Link>
