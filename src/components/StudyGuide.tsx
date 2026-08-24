@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, isValidElement, type ReactNode } from "react";
+import { useState, useEffect, useRef, isValidElement, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkUnwrapImages from "remark-unwrap-images";
@@ -106,13 +106,75 @@ function Body({ markdown, moduleId }: { markdown: string; moduleId: number }) {
   );
 }
 
+const posKey = (moduleId: number) => `sg-pos:${moduleId}`;
+
 export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId: number }) {
   const { preamble, chapters } = splitGuideIntoChapters(markdown);
   const [active, setActive] = useState(0);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
+  const pendingScroll = useRef<string | null>(null); // section to scroll to after a restored chapter renders
+  const restored = useRef(false);
 
   const subs = chapters.length ? extractSubheadings(chapters[active].markdown) : [];
   const spyKey = subs.map((s) => s.slug).join("|");
+
+  // Restore the last-read chapter + section for this module (once, on mount).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(posKey(moduleId));
+      if (raw) {
+        const { c, s } = JSON.parse(raw);
+        if (typeof c === "number" && c >= 0 && c < chapters.length) {
+          pendingScroll.current = typeof s === "string" ? s : null;
+          setActive(c);
+        }
+      }
+    } catch {}
+    restored.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moduleId]);
+
+  // Once the restored chapter is on the page, scroll to the saved section.
+  useEffect(() => {
+    const slug = pendingScroll.current;
+    if (!slug || !document.getElementById(slug)) return; // wrong chapter yet — wait
+    pendingScroll.current = null;
+    let cancelled = false;
+    const go = () => {
+      if (!cancelled) document.getElementById(slug)?.scrollIntoView();
+    };
+    const stop = () => {
+      cancelled = true;
+    };
+    go();
+    // Mermaid diagrams and lazy images above the target render after this and
+    // shift it down; corrective re-scrolls settle on the right spot — unless
+    // the reader has already started scrolling, in which case we back off.
+    const timers = [setTimeout(go, 300), setTimeout(go, 800)];
+    window.addEventListener("wheel", stop, { passive: true, once: true });
+    window.addEventListener("touchmove", stop, { passive: true, once: true });
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+      window.removeEventListener("wheel", stop);
+      window.removeEventListener("touchmove", stop);
+    };
+  }, [active]);
+
+  // Persist position as the reader moves (only after the initial restore).
+  useEffect(() => {
+    if (!restored.current) return;
+    try {
+      localStorage.setItem(posKey(moduleId), JSON.stringify({ c: active, s: activeSlug }));
+    } catch {}
+  }, [moduleId, active, activeSlug]);
+
+  // Switching chapters via a tab starts that chapter from the top.
+  function selectChapter(i: number) {
+    pendingScroll.current = null;
+    setActive(i);
+    document.getElementById("study")?.scrollIntoView();
+  }
 
   // Scroll-spy: the active section is the last heading scrolled above the
   // sticky bar. A plain scroll listener tracks this reliably even in the long
@@ -187,7 +249,7 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
               key={c.label}
               role="tab"
               aria-selected={i === active}
-              onClick={() => setActive(i)}
+              onClick={() => selectChapter(i)}
               className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-[13px] transition-colors ${
                 i === active ? "border-accent text-ink" : "border-transparent text-ink-3 hover:text-ink-2"
               }`}
