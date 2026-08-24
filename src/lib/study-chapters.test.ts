@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitGuideIntoChapters, chapterLabel } from "./study-chapters";
+import { splitGuideIntoChapters, chapterLabel, slugifyHeading, extractSubheadings } from "./study-chapters";
 
 const md = `# CS4239 Guide
 
@@ -49,5 +49,25 @@ describe("chapterLabel", () => {
   });
   it("leaves a plain heading intact", () => {
     expect(chapterLabel("## 6. Key terms glossary")).toBe("6. Key terms glossary");
+  });
+});
+
+
+describe("slugifyHeading", () => {
+  it("lowercases and hyphenates", () => {
+    expect(slugifyHeading("3.1 The Process Memory Layout")).toBe("3-1-the-process-memory-layout");
+  });
+});
+
+describe("extractSubheadings", () => {
+  const md = "## 3. C\n\n### 3.1 Compile pipeline\n\ntext\n\n```c\n// ### not a heading\n```\n\n### 3.2 Pointers\n\nmore";
+  it("lists ### headings with slugs, skipping code fences", () => {
+    expect(extractSubheadings(md)).toEqual([
+      { label: "3.1 Compile pipeline", slug: "3-1-compile-pipeline" },
+      { label: "3.2 Pointers", slug: "3-2-pointers" },
+    ]);
+  });
+  it("returns [] when there are no subheadings", () => {
+    expect(extractSubheadings("## 1. Intro\n\njust text")).toEqual([]);
   });
 });

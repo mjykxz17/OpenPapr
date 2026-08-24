@@ -31,3 +31,25 @@ export function chapterLabel(headingLine: string): string {
     .split(":")[0]
     .trim();
 }
+
+// Anchor id for a heading; must match the id the renderer stamps on the same
+// heading text so outline links resolve.
+export function slugifyHeading(text: string): string {
+  return text.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+export type Subheading = { label: string; slug: string };
+
+// The `### ` subsections of a chapter, for the outline sidebar. Headings inside
+// fenced code blocks are ignored.
+export function extractSubheadings(markdown: string): Subheading[] {
+  const out: Subheading[] = [];
+  let inFence = false;
+  for (const line of markdown.split("\n")) {
+    if (/^```/.test(line)) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    const m = /^### (?!#)(.+)$/.exec(line);
+    if (m) out.push({ label: m[1].trim(), slug: slugifyHeading(m[1].trim()) });
+  }
+  return out;
+}
