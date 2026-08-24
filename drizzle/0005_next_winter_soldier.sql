@@ -1,0 +1,1 @@
+ALTER TABLE `modules` ADD `position` integer;

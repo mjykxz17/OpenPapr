@@ -1,13 +1,9 @@
-import Link from "next/link";
 import { getDb } from "@/server/db";
 import { getOverview } from "@/server/overview";
 import { loadEnv } from "@/lib/env";
 import { AppShell } from "@/components/AppShell";
 import { SyncStatus } from "@/components/SyncStatus";
-import { WhatsNew } from "@/components/WhatsNew";
-import { TodoList } from "@/components/TodoList";
-import { MailList } from "@/components/MailList";
-import { ModuleCard } from "@/components/ModuleCard";
+import { ModuleGrid } from "@/components/ModuleGrid";
 
 export const dynamic = "force-dynamic";
 
@@ -32,39 +28,7 @@ export default function Home() {
         <SyncStatus syncStatus={overview.syncStatus} />
       </header>
 
-      <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(230px,1fr)_minmax(320px,1.5fr)_minmax(300px,1.3fr)] lg:gap-8">
-        <section>
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Reminders</h2>
-          <TodoList todos={overview.todos} modules={overview.modules} now={now} />
-        </section>
-
-        <div className="space-y-10">
-          {overview.whatsNew.length > 0 && <WhatsNew items={overview.whatsNew} />}
-
-          <section>
-            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Important mail</h2>
-            <MailList items={overview.mail.important} />
-            <p className="mt-2 text-xs text-ink-3">
-              <Link href="/mail?filtered=1" className="underline decoration-line hover:text-accent">
-                {overview.mail.filteredCount} filtered
-              </Link>
-            </p>
-          </section>
-        </div>
-
-        <section id="modules">
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Modules</h2>
-          {overview.modules.length === 0 ? (
-            <p className="text-sm text-ink-3">No modules yet.</p>
-          ) : (
-            <div className="grid grid-cols-1 gap-4">
-              {overview.modules.map((m) => (
-                <ModuleCard key={m.id} module={m} />
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
+      <ModuleGrid modules={overview.modules} />
     </AppShell>
   );
 }

@@ -122,6 +122,17 @@ export function shouldAttemptWeightage(componentCount: number, checkedAt: number
   return now - checkedAt > WEIGHTAGE_RETRY_MS;
 }
 
+// Persist the home-grid order: each id gets its index as `position`, but only
+// for modules the user owns — a foreign id in the list is ignored.
+export function setModuleOrder(db: Db, userId: number, orderedIds: number[]): void {
+  orderedIds.forEach((id, index) => {
+    db.update(modules)
+      .set({ position: index })
+      .where(and(eq(modules.id, id), eq(modules.userId, userId)))
+      .run();
+  });
+}
+
 // One study guide per module; re-import replaces in place.
 export function upsertStudyGuide(db: Db, moduleId: number, markdown: string, sourceNote: string | null, now: number): void {
   db.insert(studyGuides)

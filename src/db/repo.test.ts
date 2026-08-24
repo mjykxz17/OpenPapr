@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDb } from "./client";
 import { items, components, users, modules, studyGuides } from "./schema";
-import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, upsertStudyGuide, getStudyGuide, listStudyGuides } from "./repo";
+import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, upsertStudyGuide, getStudyGuide, listStudyGuides, setModuleOrder } from "./repo";
 import { eq } from "drizzle-orm";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 
@@ -182,5 +182,31 @@ describe("study guides", () => {
     const list = listStudyGuides(db, 1);
     expect(list.map((g) => g.code)).toEqual(["CS4238", "CS4239"]);
     expect(list[0]).toMatchObject({ moduleId: 2, code: "CS4238", name: "Computer Security", sourceNote: "3 decks" });
+  });
+});
+
+describe("setModuleOrder", () => {
+  const seed = () => {
+    const db = setup();
+    db.insert(users).values({ name: "b" }).run(); // user 2
+    db.insert(modules).values({ userId: 1, canvasCourseId: 10, code: "A", name: "A" }).run();
+    db.insert(modules).values({ userId: 1, canvasCourseId: 11, code: "B", name: "B" }).run();
+    db.insert(modules).values({ userId: 1, canvasCourseId: 12, code: "C", name: "C" }).run();
+    db.insert(modules).values({ userId: 2, canvasCourseId: 13, code: "X", name: "X" }).run(); // other user
+    return db;
+  };
+  it("assigns positions in the given order", () => {
+    const db = seed();
+    setModuleOrder(db, 1, [3, 1, 2]);
+    const pos = (id: number) => db.select().from(modules).where(eq(modules.id, id)).get()!.position;
+    expect(pos(3)).toBe(0);
+    expect(pos(1)).toBe(1);
+    expect(pos(2)).toBe(2);
+  });
+  it("does not touch modules owned by another user", () => {
+    const db = seed();
+    setModuleOrder(db, 1, [4, 1]); // id 4 belongs to user 2
+    expect(db.select().from(modules).where(eq(modules.id, 4)).get()!.position).toBeNull();
+    expect(db.select().from(modules).where(eq(modules.id, 1)).get()!.position).toBe(1);
   });
 });

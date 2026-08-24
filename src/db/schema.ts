@@ -19,6 +19,7 @@ export const modules = sqliteTable("modules", {
   active: integer("active", { mode: "boolean" }).notNull().default(true),
   syllabusBody: text("syllabus_body"),    // raw HTML from Canvas, weightage-extraction input
   weightageCheckedAt: integer("weightage_checked_at"),  // last extraction attempt; null = never tried
+  position: integer("position"),          // home-grid order; null = unplaced (sorts after placed, by id)
 }, (t) => [uniqueIndex("modules_user_course").on(t.userId, t.canvasCourseId)]);
 
 export const components = sqliteTable("components", {

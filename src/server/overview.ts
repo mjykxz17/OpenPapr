@@ -113,7 +113,11 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
     .slice(0, 20);
   const filteredCount = mailItems.filter((i) => i.triage === "garbage").length;
 
-  const mods = allMods.filter((m) => m.active);
+  // Home-grid order: placed modules first (by saved position), then any
+  // unplaced ones by id — so a newly-synced module lands at the end.
+  const mods = allMods
+    .filter((m) => m.active)
+    .sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity) || a.id - b.id);
   const modIds = mods.map((m) => m.id);
   const allComponents = modIds.length ? db.select().from(components).where(inArray(components.moduleId, modIds)).all() : [];
 
