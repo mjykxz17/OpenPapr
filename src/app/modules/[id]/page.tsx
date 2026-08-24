@@ -6,6 +6,7 @@ import { getStudyGuide } from "@/db/repo";
 import { AppShell } from "@/components/AppShell";
 import { ManualComponentForm } from "@/components/ManualComponentForm";
 import { StudyGuide } from "@/components/StudyGuide";
+import { htmlToText } from "@/lib/html-text";
 import { withShadowFlags, SOURCE_LABEL } from "@/lib/component-display";
 
 export const dynamic = "force-dynamic";
@@ -85,9 +86,11 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
       </section>
 
       {evidenceRows.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Evidence</h2>
-          <ul className="space-y-3">
+        <details className="mt-8">
+          <summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wide text-ink-3 hover:text-ink-2">
+            Evidence ({evidenceRows.length})
+          </summary>
+          <ul className="mt-3 space-y-3">
             {evidenceRows.map((c) => (
               <li key={c.id} className="border border-line p-3 text-sm">
                 <div className="mb-1 font-medium text-ink">{c.name}</div>
@@ -95,7 +98,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
               </li>
             ))}
           </ul>
-        </section>
+        </details>
       )}
 
       <section className="mt-8">
@@ -104,12 +107,23 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           <p className="text-sm text-ink-3">No announcements yet.</p>
         ) : (
           <ul className="divide-y divide-line">
-            {announcements.map((a) => (
-              <li key={a.id} className="py-3">
-                <div className="text-sm text-ink">{a.title}</div>
-                {a.body && <p className="mt-1 text-xs text-ink-3">{a.body}</p>}
-              </li>
-            ))}
+            {announcements.map((a) => {
+              const text = htmlToText(a.body);
+              const posted = a.sourceCreatedAt ?? a.firstSeenAt;
+              return (
+                <li key={a.id} className="py-3">
+                  <details className="group">
+                    <summary className="flex cursor-pointer select-none items-baseline justify-between gap-3">
+                      <span className="text-sm text-ink group-open:font-medium">{a.title}</span>
+                      <span className="shrink-0 text-xs tabular-nums text-ink-3">
+                        {new Date(posted).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                      </span>
+                    </summary>
+                    {text && <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-ink-2">{text}</p>}
+                  </details>
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
