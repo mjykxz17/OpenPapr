@@ -29,3 +29,16 @@ body {
   color: var(--ink);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
+
+/* Edit-mode "jiggle" for the draggable module tiles. Neighbours are slightly
+   desynced so it reads as organic rather than a single locked animation. */
+@keyframes tile-wobble {
+  0%, 100% { transform: rotate(-0.6deg); }
+  50% { transform: rotate(0.6deg); }
+}
+.tile-wobble { animation: tile-wobble 0.5s ease-in-out infinite; }
+.tile-wobble:nth-child(2n) { animation-delay: -0.13s; animation-duration: 0.56s; }
+.tile-wobble:nth-child(3n) { animation-delay: -0.27s; animation-duration: 0.47s; }
+@media (prefers-reduced-motion: reduce) {
+  .tile-wobble { animation: none; }
+}
