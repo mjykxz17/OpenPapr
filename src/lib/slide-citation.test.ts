@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSlideCitation, deckProxyUrl } from "./slide-citation";
+import { parseSlideCitation, deckProxyUrl, parseSlideImage, slideImageUrl } from "./slide-citation";
 
 describe("parseSlideCitation", () => {
   it("parses a slide: href into deck stem and page", () => {
@@ -21,5 +21,22 @@ describe("deckProxyUrl", () => {
   });
   it("url-encodes the deck name", () => {
     expect(deckProxyUrl(2, "C part1", 3)).toBe("/api/modules/2/deck?name=C%20part1#page=3");
+  });
+});
+
+
+describe("parseSlideImage", () => {
+  it("parses a slide-img: src into deck stem and page", () => {
+    expect(parseSlideImage("slide-img:U2-background#15")).toEqual({ deck: "U2-background", page: 15 });
+  });
+  it("returns null for other srcs", () => {
+    expect(parseSlideImage("https://x/y.png")).toBeNull();
+    expect(parseSlideImage("slide:U0-prelim#62")).toBeNull();
+  });
+});
+
+describe("slideImageUrl", () => {
+  it("builds the rendered-page image url", () => {
+    expect(slideImageUrl(2, "U2-background", 15)).toBe("/api/modules/2/slide?name=U2-background&page=15");
   });
 });

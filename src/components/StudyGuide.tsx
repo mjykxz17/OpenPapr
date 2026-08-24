@@ -5,7 +5,7 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import { splitGuideIntoChapters } from "@/lib/study-chapters";
-import { parseSlideCitation, deckProxyUrl } from "@/lib/slide-citation";
+import { parseSlideCitation, deckProxyUrl, parseSlideImage, slideImageUrl } from "@/lib/slide-citation";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
 
 // Quiet-ink element mapping. The guide markdown is self-authored and trusted;
@@ -44,6 +44,14 @@ function componentsFor(moduleId: number): Components {
         {children}
       </a>
     );
+  },
+  // react-markdown wraps a lone image in a <p>, so use inline-valid elements
+  // (a <span> wrapper, not <figure>) — a block element inside <p> is dropped.
+  img: ({ src, alt }) => {
+    const fig = typeof src === "string" ? parseSlideImage(src) : null;
+    const url = fig ? slideImageUrl(moduleId, fig.deck, fig.page) : typeof src === "string" ? src : "";
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={url} alt={alt ?? (fig ? `${fig.deck} slide ${fig.page}` : "")} loading="lazy" className="my-5 block w-full rounded border border-line" />;
   },
   code: ({ className, children }) => {
     if (className?.includes("language-mermaid")) return <MermaidDiagram chart={String(children).trim()} />;
