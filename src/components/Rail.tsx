@@ -29,9 +29,19 @@ function MailIcon() {
   );
 }
 
+function StudyIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+  );
+}
+
 const NAV = [
   { href: "/", label: "Home", Icon: HomeIcon },
   { href: "/#modules", label: "Modules", Icon: ModulesIcon },
+  { href: "/study", label: "Study guides", Icon: StudyIcon },
   { href: "/mail", label: "Mail", Icon: MailIcon },
 ] as const;
 

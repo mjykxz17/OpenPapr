@@ -2,8 +2,10 @@ import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { components, items, modules } from "@/db/schema";
+import { getStudyGuide } from "@/db/repo";
 import { AppShell } from "@/components/AppShell";
 import { ManualComponentForm } from "@/components/ManualComponentForm";
+import { StudyGuide } from "@/components/StudyGuide";
 import { withShadowFlags, SOURCE_LABEL } from "@/lib/component-display";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +38,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     .filter((i) => i.type === "announcement")
     .sort((a, b) => b.firstSeenAt - a.firstSeenAt);
   const evidenceRows = rows.filter((c) => c.source === "llm_syllabus" && c.evidence);
+  const guide = getStudyGuide(db, mod.id);
 
   return (
     <AppShell>
@@ -110,6 +113,19 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           </ul>
         )}
       </section>
+
+      {guide && (
+        <section id="study" className="mt-12 scroll-mt-6 border-t border-line pt-8">
+          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <h2 className="text-xs font-medium uppercase tracking-wide text-ink-3">Study guide</h2>
+            <span className="text-xs text-ink-3">
+              {guide.sourceNote ? `${guide.sourceNote} · ` : ""}
+              generated {new Date(guide.generatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+            </span>
+          </div>
+          <StudyGuide markdown={guide.markdown} />
+        </section>
+      )}
 
       <section className="mt-8">
         <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Add manual component</h2>

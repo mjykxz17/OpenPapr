@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDb } from "./client";
-import { items, components, users, modules } from "./schema";
-import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage } from "./repo";
+import { items, components, users, modules, studyGuides } from "./schema";
+import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, upsertStudyGuide, getStudyGuide, listStudyGuides } from "./repo";
 import { eq } from "drizzle-orm";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 
@@ -147,5 +147,40 @@ describe("shouldAttemptWeightage", () => {
   it("skips within a week of the last attempt, retries after", () => {
     expect(shouldAttemptWeightage(0, 1000, 1000 + WEEK - 1)).toBe(false);
     expect(shouldAttemptWeightage(0, 1000, 1000 + WEEK + 1)).toBe(true);
+  });
+});
+
+describe("study guides", () => {
+  const seed = () => {
+    const db = setup();
+    db.insert(modules).values({ userId: 1, canvasCourseId: 7, code: "CS4239", name: "Software Security" }).run();
+    db.insert(modules).values({ userId: 1, canvasCourseId: 8, code: "CS4238", name: "Computer Security" }).run();
+    return db;
+  };
+  it("upserts a guide and reads it back by module", () => {
+    const db = seed();
+    upsertStudyGuide(db, 1, "# Guide\ncontent", "8 decks", 1000);
+    const g = getStudyGuide(db, 1);
+    expect(g?.markdown).toBe("# Guide\ncontent");
+    expect(g?.sourceNote).toBe("8 decks");
+    expect(g?.generatedAt).toBe(1000);
+  });
+  it("replaces rather than duplicates on re-import", () => {
+    const db = seed();
+    upsertStudyGuide(db, 1, "old", null, 1000);
+    upsertStudyGuide(db, 1, "new", "note", 2000);
+    expect(getStudyGuide(db, 1)?.markdown).toBe("new");
+    expect(db.select().from(studyGuides).all()).toHaveLength(1);
+  });
+  it("returns undefined when a module has no guide", () => {
+    expect(getStudyGuide(seed(), 2)).toBeUndefined();
+  });
+  it("lists guides for a user with module code and name, newest first", () => {
+    const db = seed();
+    upsertStudyGuide(db, 1, "a", "8 decks", 1000);
+    upsertStudyGuide(db, 2, "b", "3 decks", 3000);
+    const list = listStudyGuides(db, 1);
+    expect(list.map((g) => g.code)).toEqual(["CS4238", "CS4239"]);
+    expect(list[0]).toMatchObject({ moduleId: 2, code: "CS4238", name: "Computer Security", sourceNote: "3 decks" });
   });
 });

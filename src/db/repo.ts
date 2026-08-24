@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "./client";
-import { components, items, modules } from "./schema";
+import { components, items, modules, studyGuides } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 import type { MailItem } from "../connectors/graph/normalize";
 
@@ -120,4 +120,38 @@ export function shouldAttemptWeightage(componentCount: number, checkedAt: number
   if (componentCount > 0) return false;
   if (checkedAt === null) return true;
   return now - checkedAt > WEIGHTAGE_RETRY_MS;
+}
+
+// One study guide per module; re-import replaces in place.
+export function upsertStudyGuide(db: Db, moduleId: number, markdown: string, sourceNote: string | null, now: number): void {
+  db.insert(studyGuides)
+    .values({ moduleId, markdown, sourceNote, generatedAt: now })
+    .onConflictDoUpdate({
+      target: studyGuides.moduleId,
+      set: { markdown, sourceNote, generatedAt: now },
+    })
+    .run();
+}
+
+export function getStudyGuide(db: Db, moduleId: number) {
+  return db.select().from(studyGuides).where(eq(studyGuides.moduleId, moduleId)).get();
+}
+
+export type StudyGuideSummary = { moduleId: number; code: string; name: string; sourceNote: string | null; generatedAt: number };
+
+// Index rows for the Study page: guides owned by this user, newest first.
+export function listStudyGuides(db: Db, userId: number): StudyGuideSummary[] {
+  return db
+    .select({
+      moduleId: studyGuides.moduleId,
+      code: modules.code,
+      name: modules.name,
+      sourceNote: studyGuides.sourceNote,
+      generatedAt: studyGuides.generatedAt,
+    })
+    .from(studyGuides)
+    .innerJoin(modules, eq(modules.id, studyGuides.moduleId))
+    .where(eq(modules.userId, userId))
+    .orderBy(desc(studyGuides.generatedAt))
+    .all();
 }

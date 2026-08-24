@@ -54,6 +54,14 @@ export const items = sqliteTable("items", {
   category: text("category", { enum: ["deliverable", "routine"] }),  // deadline tier; null = unclassified, treated as deliverable
 }, (t) => [uniqueIndex("items_user_source").on(t.userId, t.source, t.sourceId)]);
 
+export const studyGuides = sqliteTable("study_guides", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  markdown: text("markdown").notNull(),
+  sourceNote: text("source_note"),        // provenance line, e.g. "8 decks, 351 slides"
+  generatedAt: integer("generated_at").notNull(),
+}, (t) => [uniqueIndex("study_guides_module").on(t.moduleId)]);
+
 export const syncRuns = sqliteTable("sync_runs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull(),
