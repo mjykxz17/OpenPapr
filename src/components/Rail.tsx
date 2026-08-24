@@ -9,17 +9,6 @@ function HomeIcon() {
   );
 }
 
-function ModulesIcon() {
-  return (
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect width="7" height="7" x="3" y="3" rx="1" />
-      <rect width="7" height="7" x="14" y="3" rx="1" />
-      <rect width="7" height="7" x="14" y="14" rx="1" />
-      <rect width="7" height="7" x="3" y="14" rx="1" />
-    </svg>
-  );
-}
-
 function MailIcon() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -40,7 +29,6 @@ function StudyIcon() {
 
 const NAV = [
   { href: "/", label: "Home", Icon: HomeIcon },
-  { href: "/#modules", label: "Modules", Icon: ModulesIcon },
   { href: "/study", label: "Study guides", Icon: StudyIcon },
   { href: "/mail", label: "Mail", Icon: MailIcon },
 ] as const;
