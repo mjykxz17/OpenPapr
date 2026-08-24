@@ -112,7 +112,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           {announcements.length === 0 ? (
             <p className="text-sm text-ink-3">No announcements yet.</p>
           ) : (
-            <ul className="max-h-[560px] divide-y divide-line overflow-y-auto pr-2">
+            <ul className="max-h-[560px] max-w-xl divide-y divide-line overflow-y-auto pr-2">
               {announcements.map((a) => {
                 const text = htmlToText(a.body);
                 const posted = a.sourceCreatedAt ?? a.firstSeenAt;
@@ -125,7 +125,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
                           {new Date(posted).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
                         </span>
                       </summary>
-                      {text && <p className="mt-2 whitespace-pre-line text-xs leading-relaxed text-ink-2">{text}</p>}
+                      {text && <p className="mt-2 whitespace-pre-line text-sm leading-[1.7] text-ink-2">{text}</p>}
                     </details>
                   </li>
                 );

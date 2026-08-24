@@ -13,10 +13,10 @@ import { MermaidDiagram } from "@/components/MermaidDiagram";
 const components: Components = {
   h1: ({ children }) => <h1 className="mt-8 mb-3 text-xl font-medium text-ink first:mt-0">{children}</h1>,
   h2: ({ children }) => <h2 className="mt-2 mb-3 text-base font-medium text-ink">{children}</h2>,
-  h3: ({ children }) => <h3 className="mt-6 mb-2 text-sm font-medium uppercase tracking-wide text-ink-2">{children}</h3>,
-  p: ({ children }) => <p className="my-3 text-sm leading-relaxed text-ink">{children}</p>,
-  ul: ({ children }) => <ul className="my-3 list-disc space-y-1.5 pl-5 text-sm leading-relaxed text-ink">{children}</ul>,
-  ol: ({ children }) => <ol className="my-3 list-decimal space-y-1.5 pl-5 text-sm leading-relaxed text-ink">{children}</ol>,
+  h3: ({ children }) => <h3 className="mt-7 mb-2 text-sm font-medium uppercase tracking-wide text-ink-2">{children}</h3>,
+  p: ({ children }) => <p className="my-3.5 text-[15px] leading-[1.75] text-ink">{children}</p>,
+  ul: ({ children }) => <ul className="my-3.5 list-disc space-y-2 pl-5 text-[15px] leading-[1.75] text-ink">{children}</ul>,
+  ol: ({ children }) => <ol className="my-3.5 list-decimal space-y-2 pl-5 text-[15px] leading-[1.75] text-ink">{children}</ol>,
   li: ({ children }) => <li className="marker:text-ink-3">{children}</li>,
   strong: ({ children }) => <strong className="font-medium text-ink">{children}</strong>,
   em: ({ children }) => <em className="italic text-ink-2">{children}</em>,
@@ -39,7 +39,7 @@ const components: Components = {
     );
   },
   blockquote: ({ children }) => (
-    <blockquote className="my-3 border-l-2 border-line pl-4 text-sm italic text-ink-2">{children}</blockquote>
+    <blockquote className="my-4 border-l-2 border-line pl-4 text-[15px] italic leading-[1.75] text-ink-2">{children}</blockquote>
   ),
   hr: () => <hr className="my-6 border-line" />,
   table: ({ children }) => (
@@ -96,7 +96,7 @@ export function StudyGuide({ markdown }: { markdown: string }) {
         ))}
       </div>
 
-      <div className="pt-2">
+      <div className="pt-4">
         <Body markdown={chapters[active].markdown} />
       </div>
     </div>
