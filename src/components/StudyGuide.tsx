@@ -104,7 +104,7 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
 
   // Width grows with the viewport (adaptive) rather than sitting at a fixed
   // narrow measure that wastes space on large screens.
-  const widthClass = "w-full max-w-3xl md:max-w-4xl xl:max-w-5xl";
+  const widthClass = "w-full max-w-3xl md:max-w-4xl xl:max-w-6xl";
 
   // No chapters to tab — render the whole thing as before.
   if (chapters.length === 0) {
