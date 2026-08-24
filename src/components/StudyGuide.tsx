@@ -32,9 +32,9 @@ function componentsFor(moduleId: number): Components {
   h3: ({ children }) => (
     <h3 id={slugifyHeading(nodeText(children))} className="mt-7 mb-2 scroll-mt-24 text-sm font-medium uppercase tracking-wide text-ink-2">{children}</h3>
   ),
-  p: ({ children }) => <p className="my-3.5 text-[15px] leading-[1.75] text-ink">{children}</p>,
-  ul: ({ children }) => <ul className="my-3.5 list-disc space-y-2 pl-5 text-[15px] leading-[1.75] text-ink">{children}</ul>,
-  ol: ({ children }) => <ol className="my-3.5 list-decimal space-y-2 pl-5 text-[15px] leading-[1.75] text-ink">{children}</ol>,
+  p: ({ children }) => <p className="my-3.5 text-base leading-[1.75] text-ink">{children}</p>,
+  ul: ({ children }) => <ul className="my-3.5 list-disc space-y-2 pl-5 text-base leading-[1.75] text-ink">{children}</ul>,
+  ol: ({ children }) => <ol className="my-3.5 list-decimal space-y-2 pl-5 text-base leading-[1.75] text-ink">{children}</ol>,
   li: ({ children }) => <li className="marker:text-ink-3">{children}</li>,
   strong: ({ children }) => <strong className="font-medium text-ink">{children}</strong>,
   em: ({ children }) => <em className="italic text-ink-2">{children}</em>,
@@ -83,7 +83,7 @@ function componentsFor(moduleId: number): Components {
     );
   },
   blockquote: ({ children }) => (
-    <blockquote className="my-4 border-l-2 border-line pl-4 text-[15px] italic leading-[1.75] text-ink-2">{children}</blockquote>
+    <blockquote className="my-4 border-l-2 border-line pl-4 text-base italic leading-[1.75] text-ink-2">{children}</blockquote>
   ),
   hr: () => <hr className="my-6 border-line" />,
   table: ({ children }) => (
@@ -114,24 +114,27 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
   const subs = chapters.length ? extractSubheadings(chapters[active].markdown) : [];
   const spyKey = subs.map((s) => s.slug).join("|");
 
-  // Scroll-spy: highlight the outline entry for the section nearest the top.
+  // Scroll-spy: the active section is the last heading scrolled above the
+  // sticky bar. A plain scroll listener tracks this reliably even in the long
+  // gaps between headings (where an IntersectionObserver band goes stale).
   useEffect(() => {
-    setActiveSlug(null);
     const ids = spyKey ? spyKey.split("|") : [];
-    const els = ids.map((id) => document.getElementById(id)).filter((el): el is HTMLElement => !!el);
-    if (els.length === 0) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((e) => e.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible.length > 0) setActiveSlug(visible[0].target.id);
-      },
-      // Active band is just below the sticky tab bar down to ~1/3 of the viewport.
-      { rootMargin: "-80px 0px -66% 0px", threshold: 0 },
-    );
-    els.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
+    if (ids.length === 0) {
+      setActiveSlug(null);
+      return;
+    }
+    const onScroll = () => {
+      let current = ids[0];
+      for (const id of ids) {
+        const el = document.getElementById(id);
+        if (el && el.getBoundingClientRect().top <= 96) current = id; // 96px ≈ below the sticky tab bar
+      }
+      setActiveSlug(current);
+    };
+    onScroll();
+    // Capture phase so it fires regardless of which element actually scrolls.
+    window.addEventListener("scroll", onScroll, { passive: true, capture: true });
+    return () => window.removeEventListener("scroll", onScroll, { capture: true });
   }, [spyKey]);
 
   const widthClass = "w-full max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl";
@@ -149,7 +152,7 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
     <div className={`${widthClass} lg:flex lg:gap-8`}>
       {/* Notion-style outline: chapters, with the active chapter's sections. */}
       <nav className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] w-52 shrink-0 self-start overflow-y-auto pr-2 lg:block">
-        <ul className="space-y-1.5 text-xs">
+        <ul className="space-y-2 text-[13px]">
           {chapters.map((c, i) => (
             <li key={c.label}>
               <button
@@ -169,7 +172,7 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
                         href={`#${h.slug}`}
                         onClick={() => setActiveSlug(h.slug)}
                         className={`block leading-snug ${
-                          activeSlug === h.slug ? "text-accent" : "text-ink-3 hover:text-accent"
+                          activeSlug === h.slug ? "font-medium text-accent" : "text-ink-3 hover:text-ink-2"
                         }`}
                       >
                         {h.label}
@@ -197,7 +200,7 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
               role="tab"
               aria-selected={i === active}
               onClick={() => setActive(i)}
-              className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-xs transition-colors ${
+              className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-[13px] transition-colors ${
                 i === active ? "border-accent text-ink" : "border-transparent text-ink-3 hover:text-ink-2"
               }`}
             >
