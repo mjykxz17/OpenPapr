@@ -144,7 +144,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
               generated {new Date(guide.generatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
             </span>
           </div>
-          <StudyGuide markdown={guide.markdown} />
+          <StudyGuide markdown={guide.markdown} moduleId={mod.id} />
         </section>
       )}
     </AppShell>

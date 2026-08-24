@@ -5,12 +5,16 @@ import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import { splitGuideIntoChapters } from "@/lib/study-chapters";
+import { parseSlideCitation, deckProxyUrl } from "@/lib/slide-citation";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
 
 // Quiet-ink element mapping. The guide markdown is self-authored and trusted;
 // react-markdown does not render raw HTML unless asked, so this is safe.
-// A ```mermaid fenced block is rendered as a diagram instead of a code block.
-const components: Components = {
+// A ```mermaid fenced block is rendered as a diagram; a [text](slide:deck#N)
+// link becomes a chip that opens the source deck at page N. moduleId is needed
+// to build the deck-proxy URL, so the map is produced per module.
+function componentsFor(moduleId: number): Components {
+  return {
   h1: ({ children }) => <h1 className="mt-8 mb-3 text-xl font-medium text-ink first:mt-0">{children}</h1>,
   h2: ({ children }) => <h2 className="mt-2 mb-3 text-base font-medium text-ink">{children}</h2>,
   h3: ({ children }) => <h3 className="mt-7 mb-2 text-sm font-medium uppercase tracking-wide text-ink-2">{children}</h3>,
@@ -20,11 +24,27 @@ const components: Components = {
   li: ({ children }) => <li className="marker:text-ink-3">{children}</li>,
   strong: ({ children }) => <strong className="font-medium text-ink">{children}</strong>,
   em: ({ children }) => <em className="italic text-ink-2">{children}</em>,
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer" className="underline decoration-line hover:text-accent">
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) => {
+    const cite = href ? parseSlideCitation(href) : null;
+    if (cite) {
+      return (
+        <a
+          href={deckProxyUrl(moduleId, cite.deck, cite.page)}
+          target="_blank"
+          rel="noreferrer"
+          title={`${cite.deck} · slide ${cite.page}`}
+          className="mx-0.5 inline-flex items-baseline rounded border border-line px-1.5 py-px align-baseline text-[0.7rem] tabular-nums text-ink-3 no-underline hover:border-accent hover:text-accent"
+        >
+          {children}
+        </a>
+      );
+    }
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className="underline decoration-line hover:text-accent">
+        {children}
+      </a>
+    );
+  },
   code: ({ className, children }) => {
     if (className?.includes("language-mermaid")) return <MermaidDiagram chart={String(children).trim()} />;
     return <code className="rounded bg-ink/5 px-1 py-0.5 font-mono text-[0.85em] text-ink">{children}</code>;
@@ -51,17 +71,18 @@ const components: Components = {
     <th className="border-b border-line py-2 pr-3 text-left text-xs font-medium uppercase tracking-wide text-ink-3">{children}</th>
   ),
   td: ({ children }) => <td className="border-b border-line py-2 pr-3 align-top text-ink">{children}</td>,
-};
+  };
+}
 
-function Body({ markdown }: { markdown: string }) {
+function Body({ markdown, moduleId }: { markdown: string; moduleId: number }) {
   return (
-    <Markdown remarkPlugins={[remarkGfm]} components={components}>
+    <Markdown remarkPlugins={[remarkGfm]} urlTransform={(u) => u} components={componentsFor(moduleId)}>
       {markdown}
     </Markdown>
   );
 }
 
-export function StudyGuide({ markdown }: { markdown: string }) {
+export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId: number }) {
   const { preamble, chapters } = splitGuideIntoChapters(markdown);
   const [active, setActive] = useState(0);
 
@@ -73,14 +94,14 @@ export function StudyGuide({ markdown }: { markdown: string }) {
   if (chapters.length === 0) {
     return (
       <div className={widthClass}>
-        <Body markdown={markdown} />
+        <Body markdown={markdown} moduleId={moduleId} />
       </div>
     );
   }
 
   return (
     <div className={widthClass}>
-      {preamble && <Body markdown={preamble} />}
+      {preamble && <Body markdown={preamble} moduleId={moduleId} />}
 
       <div role="tablist" aria-label="Chapters" className="mt-4 flex gap-1 overflow-x-auto border-b border-line">
         {chapters.map((c, i) => (
@@ -101,7 +122,7 @@ export function StudyGuide({ markdown }: { markdown: string }) {
       </div>
 
       <div className="pt-4">
-        <Body markdown={chapters[active].markdown} />
+        <Body markdown={chapters[active].markdown} moduleId={moduleId} />
       </div>
     </div>
   );
