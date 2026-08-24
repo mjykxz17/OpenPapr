@@ -112,7 +112,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           {announcements.length === 0 ? (
             <p className="text-sm text-ink-3">No announcements yet.</p>
           ) : (
-            <ul className="max-h-[560px] max-w-xl divide-y divide-line overflow-y-auto pr-2">
+            <ul className="max-h-[560px] max-w-3xl divide-y divide-line overflow-y-auto pr-2">
               {announcements.map((a) => {
                 const text = htmlToText(a.body);
                 const posted = a.sourceCreatedAt ?? a.firstSeenAt;
