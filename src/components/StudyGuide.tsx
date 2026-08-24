@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkUnwrapImages from "remark-unwrap-images";
 import type { Components } from "react-markdown";
 import { splitGuideIntoChapters } from "@/lib/study-chapters";
 import { parseSlideCitation, deckProxyUrl, parseSlideImage, slideImageUrl } from "@/lib/slide-citation";
@@ -50,8 +51,15 @@ function componentsFor(moduleId: number): Components {
   img: ({ src, alt }) => {
     const fig = typeof src === "string" ? parseSlideImage(src) : null;
     const url = fig ? slideImageUrl(moduleId, fig.deck, fig.page) : typeof src === "string" ? src : "";
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={url} alt={alt ?? (fig ? `${fig.deck} slide ${fig.page}` : "")} loading="lazy" className="my-5 block w-full rounded border border-line" />;
+    // remark-unwrap-images lifts a lone image out of its <p>, so a block
+    // <figure> here is valid and won't be dropped on hydration.
+    return (
+      <figure className="my-5">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt={alt ?? (fig ? `${fig.deck} slide ${fig.page}` : "")} loading="lazy" className="block w-full rounded border border-line" />
+        {alt && <figcaption className="mt-1.5 text-xs text-ink-3">{alt}</figcaption>}
+      </figure>
+    );
   },
   code: ({ className, children }) => {
     if (className?.includes("language-mermaid")) return <MermaidDiagram chart={String(children).trim()} />;
@@ -84,7 +92,7 @@ function componentsFor(moduleId: number): Components {
 
 function Body({ markdown, moduleId }: { markdown: string; moduleId: number }) {
   return (
-    <Markdown remarkPlugins={[remarkGfm]} urlTransform={(u) => u} components={componentsFor(moduleId)}>
+    <Markdown remarkPlugins={[remarkGfm, remarkUnwrapImages]} urlTransform={(u) => u} components={componentsFor(moduleId)}>
       {markdown}
     </Markdown>
   );
