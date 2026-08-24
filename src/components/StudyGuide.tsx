@@ -25,16 +25,16 @@ function nodeText(node: ReactNode): string {
 // scroll-mt keeps anchored headings clear of the sticky tab bar.
 function componentsFor(moduleId: number): Components {
   return {
-  h1: ({ children }) => <h1 className="mt-8 mb-3 text-xl font-medium text-ink first:mt-0">{children}</h1>,
+  h1: ({ children }) => <h1 className="mt-8 mb-4 text-2xl font-semibold text-ink first:mt-0">{children}</h1>,
   h2: ({ children }) => (
-    <h2 id={slugifyHeading(nodeText(children))} className="mt-2 mb-3 scroll-mt-24 text-base font-medium text-ink">{children}</h2>
+    <h2 id={slugifyHeading(nodeText(children))} className="mt-2 mb-4 scroll-mt-24 text-xl font-semibold text-ink">{children}</h2>
   ),
   h3: ({ children }) => (
-    <h3 id={slugifyHeading(nodeText(children))} className="mt-7 mb-2 scroll-mt-24 text-sm font-medium uppercase tracking-wide text-ink-2">{children}</h3>
+    <h3 id={slugifyHeading(nodeText(children))} className="mt-8 mb-2 scroll-mt-24 text-lg font-semibold text-ink">{children}</h3>
   ),
-  p: ({ children }) => <p className="my-3.5 text-base leading-[1.75] text-ink">{children}</p>,
-  ul: ({ children }) => <ul className="my-3.5 list-disc space-y-2 pl-5 text-base leading-[1.75] text-ink">{children}</ul>,
-  ol: ({ children }) => <ol className="my-3.5 list-decimal space-y-2 pl-5 text-base leading-[1.75] text-ink">{children}</ol>,
+  p: ({ children }) => <p className="my-3.5 text-[17px] leading-[1.75] text-ink">{children}</p>,
+  ul: ({ children }) => <ul className="my-3.5 list-disc space-y-2 pl-5 text-[17px] leading-[1.75] text-ink">{children}</ul>,
+  ol: ({ children }) => <ol className="my-3.5 list-decimal space-y-2 pl-5 text-[17px] leading-[1.75] text-ink">{children}</ol>,
   li: ({ children }) => <li className="marker:text-ink-3">{children}</li>,
   strong: ({ children }) => <strong className="font-medium text-ink">{children}</strong>,
   em: ({ children }) => <em className="italic text-ink-2">{children}</em>,
@@ -79,11 +79,11 @@ function componentsFor(moduleId: number): Components {
     const cls = (child as { props?: { className?: string } })?.props?.className ?? "";
     if (cls.includes("language-mermaid")) return <>{children}</>;
     return (
-      <pre className="my-3 overflow-x-auto rounded border border-line bg-ink/[0.03] p-3 text-xs leading-relaxed">{children}</pre>
+      <pre className="my-3 overflow-x-auto rounded border border-line bg-ink/[0.03] p-3 text-sm leading-relaxed">{children}</pre>
     );
   },
   blockquote: ({ children }) => (
-    <blockquote className="my-4 border-l-2 border-line pl-4 text-base italic leading-[1.75] text-ink-2">{children}</blockquote>
+    <blockquote className="my-4 border-l-2 border-line pl-4 text-[17px] italic leading-[1.75] text-ink-2">{children}</blockquote>
   ),
   hr: () => <hr className="my-6 border-line" />,
   table: ({ children }) => (
@@ -150,40 +150,28 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
 
   return (
     <div className={`${widthClass} lg:flex lg:gap-8`}>
-      {/* Notion-style outline: chapters, with the active chapter's sections. */}
-      <nav className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] w-52 shrink-0 self-start overflow-y-auto pr-2 lg:block">
-        <ul className="space-y-2 text-[13px]">
-          {chapters.map((c, i) => (
-            <li key={c.label}>
-              <button
-                type="button"
-                onClick={() => setActive(i)}
-                className={`block w-full text-left leading-snug ${
-                  i === active ? "font-medium text-ink" : "text-ink-3 hover:text-ink-2"
-                }`}
-              >
-                {c.label}
-              </button>
-              {i === active && subs.length > 0 && (
-                <ul className="mt-1 space-y-1 border-l border-line pl-3">
-                  {subs.map((h) => (
-                    <li key={h.slug}>
-                      <a
-                        href={`#${h.slug}`}
-                        onClick={() => setActiveSlug(h.slug)}
-                        className={`block leading-snug ${
-                          activeSlug === h.slug ? "font-medium text-accent" : "text-ink-3 hover:text-ink-2"
-                        }`}
-                      >
-                        {h.label}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
-        </ul>
+      {/* Outline for the CURRENT chapter only — switch chapters via the tabs. */}
+      <nav className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] w-60 shrink-0 self-start overflow-y-auto pr-2 lg:block">
+        <div className="mb-3 text-[15px] font-semibold leading-snug text-ink">{chapters[active].label}</div>
+        {subs.length > 0 && (
+          <ul className="space-y-1 border-l border-line text-[15px]">
+            {subs.map((h) => (
+              <li key={h.slug}>
+                <a
+                  href={`#${h.slug}`}
+                  onClick={() => setActiveSlug(h.slug)}
+                  className={`-ml-px block border-l-2 py-0.5 pl-3 leading-snug ${
+                    activeSlug === h.slug
+                      ? "border-accent font-medium text-accent"
+                      : "border-transparent text-ink-3 hover:text-ink-2"
+                  }`}
+                >
+                  {h.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
       </nav>
 
       <div className="min-w-0 lg:flex-1">
