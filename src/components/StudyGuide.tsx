@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, isValidElement, type ReactNode } from "react";
+import { useState, useEffect, isValidElement, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkUnwrapImages from "remark-unwrap-images";
@@ -109,6 +109,30 @@ function Body({ markdown, moduleId }: { markdown: string; moduleId: number }) {
 export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId: number }) {
   const { preamble, chapters } = splitGuideIntoChapters(markdown);
   const [active, setActive] = useState(0);
+  const [activeSlug, setActiveSlug] = useState<string | null>(null);
+
+  const subs = chapters.length ? extractSubheadings(chapters[active].markdown) : [];
+  const spyKey = subs.map((s) => s.slug).join("|");
+
+  // Scroll-spy: highlight the outline entry for the section nearest the top.
+  useEffect(() => {
+    setActiveSlug(null);
+    const ids = spyKey ? spyKey.split("|") : [];
+    const els = ids.map((id) => document.getElementById(id)).filter((el): el is HTMLElement => !!el);
+    if (els.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible.length > 0) setActiveSlug(visible[0].target.id);
+      },
+      // Active band is just below the sticky tab bar down to ~1/3 of the viewport.
+      { rootMargin: "-80px 0px -66% 0px", threshold: 0 },
+    );
+    els.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [spyKey]);
 
   const widthClass = "w-full max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl";
 
@@ -120,8 +144,6 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
       </div>
     );
   }
-
-  const subs = extractSubheadings(chapters[active].markdown);
 
   return (
     <div className={`${widthClass} lg:flex lg:gap-8`}>
@@ -143,7 +165,13 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
                 <ul className="mt-1 space-y-1 border-l border-line pl-3">
                   {subs.map((h) => (
                     <li key={h.slug}>
-                      <a href={`#${h.slug}`} className="block leading-snug text-ink-3 hover:text-accent">
+                      <a
+                        href={`#${h.slug}`}
+                        onClick={() => setActiveSlug(h.slug)}
+                        className={`block leading-snug ${
+                          activeSlug === h.slug ? "text-accent" : "text-ink-3 hover:text-accent"
+                        }`}
+                      >
                         {h.label}
                       </a>
                     </li>
