@@ -65,17 +65,21 @@ export function StudyGuide({ markdown }: { markdown: string }) {
   const { preamble, chapters } = splitGuideIntoChapters(markdown);
   const [active, setActive] = useState(0);
 
+  // Width grows with the viewport (adaptive) rather than sitting at a fixed
+  // narrow measure that wastes space on large screens.
+  const widthClass = "w-full max-w-3xl md:max-w-4xl xl:max-w-5xl";
+
   // No chapters to tab — render the whole thing as before.
   if (chapters.length === 0) {
     return (
-      <div className="max-w-[68ch]">
+      <div className={widthClass}>
         <Body markdown={markdown} />
       </div>
     );
   }
 
   return (
-    <div className="max-w-[72ch]">
+    <div className={widthClass}>
       {preamble && <Body markdown={preamble} />}
 
       <div role="tablist" aria-label="Chapters" className="mt-4 flex gap-1 overflow-x-auto border-b border-line">
