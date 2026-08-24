@@ -50,21 +50,33 @@ function StaticTile({ m }: { m: Module }) {
   );
 }
 
-// Edit mode: the tile is draggable (and jiggles); clicking does nothing so a
-// rearrange never accidentally navigates.
-function SortableTile({ m }: { m: Module }) {
+// Edit mode: the tile is draggable (and jiggles), and carries a hide (×) badge.
+// Clicking the body does nothing so a rearrange never accidentally navigates.
+function SortableTile({ m, onHide }: { m: Module; onHide: (id: number) => void }) {
   const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: m.id });
   const style = { transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined };
   return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...listeners}
-      className={`${CARD} touch-none ${
-        isDragging ? "z-10 scale-[1.03] cursor-grabbing shadow-lg" : "tile-wobble cursor-grab border-ink-3"
-      }`}
-    >
-      <TileFace m={m} />
+    <div className="relative">
+      <div
+        ref={setNodeRef}
+        style={style}
+        {...listeners}
+        className={`${CARD} touch-none ${
+          isDragging ? "z-10 scale-[1.03] cursor-grabbing shadow-lg" : "tile-wobble cursor-grab border-ink-3"
+        }`}
+      >
+        <TileFace m={m} />
+      </div>
+      <button
+        type="button"
+        aria-label={`Hide ${m.code}`}
+        title="Hide from home"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => onHide(m.id)}
+        className="absolute -left-2 -top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-surface text-xs leading-none text-ink-2 shadow-sm hover:border-danger hover:text-danger"
+      >
+        ×
+      </button>
     </div>
   );
 }
@@ -74,16 +86,32 @@ export function ModuleGrid({ modules }: { modules: Module[] }) {
   const [editing, setEditing] = useState(false);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
+  const visible = items.filter((m) => !m.hidden);
+  const hidden = items.filter((m) => m.hidden);
+
+  function persistOrder(next: Module[]) {
+    void fetch("/api/modules/order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: next.map((m) => m.id) }),
+    }).catch(() => {});
+  }
+
   function onDragEnd({ active, over }: DragEndEvent) {
     if (!over || active.id === over.id) return;
     const from = items.findIndex((m) => m.id === active.id);
     const to = items.findIndex((m) => m.id === over.id);
     const next = arrayMove(items, from, to);
     setItems(next);
-    void fetch("/api/modules/order", {
+    persistOrder(next);
+  }
+
+  function setHidden(id: number, hide: boolean) {
+    setItems((prev) => prev.map((m) => (m.id === id ? { ...m, hidden: hide } : m)));
+    void fetch(`/api/modules/${id}/hidden`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: next.map((m) => m.id) }),
+      body: JSON.stringify({ hidden: hide }),
     }).catch(() => {});
   }
 
@@ -92,7 +120,7 @@ export function ModuleGrid({ modules }: { modules: Module[] }) {
   return (
     <div>
       <div className="mb-3 flex items-center justify-between">
-        <span className="text-xs text-ink-3">{editing ? "Drag tiles to reorder" : ""}</span>
+        <span className="text-xs text-ink-3">{editing ? "Drag to reorder · × to hide" : ""}</span>
         <button
           type="button"
           onClick={() => setEditing((e) => !e)}
@@ -106,18 +134,40 @@ export function ModuleGrid({ modules }: { modules: Module[] }) {
       </div>
 
       {editing ? (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-          <SortableContext items={items.map((m) => m.id)} strategy={rectSortingStrategy}>
-            <div className={GRID}>
-              {items.map((m) => (
-                <SortableTile key={m.id} m={m} />
-              ))}
+        <>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+            <SortableContext items={visible.map((m) => m.id)} strategy={rectSortingStrategy}>
+              <div className={GRID}>
+                {visible.map((m) => (
+                  <SortableTile key={m.id} m={m} onHide={(id) => setHidden(id, true)} />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+
+          {hidden.length > 0 && (
+            <div className="mt-8">
+              <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-3">Hidden</h2>
+              <ul className="flex flex-wrap gap-2">
+                {hidden.map((m) => (
+                  <li key={m.id}>
+                    <button
+                      type="button"
+                      onClick={() => setHidden(m.id, false)}
+                      className="flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-xs text-ink-2 hover:border-accent hover:text-accent"
+                    >
+                      <span>{m.code}</span>
+                      <span className="text-ink-3">+ show</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             </div>
-          </SortableContext>
-        </DndContext>
+          )}
+        </>
       ) : (
         <div className={GRID}>
-          {items.map((m) => (
+          {visible.map((m) => (
             <StaticTile key={m.id} m={m} />
           ))}
         </div>

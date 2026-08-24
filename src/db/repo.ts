@@ -122,6 +122,12 @@ export function shouldAttemptWeightage(componentCount: number, checkedAt: number
   return now - checkedAt > WEIGHTAGE_RETRY_MS;
 }
 
+// Hide/unhide a module from the home grid — a user preference; the module and
+// its data are untouched. Ownership-checked.
+export function setModuleHidden(db: Db, userId: number, moduleId: number, hidden: boolean): void {
+  db.update(modules).set({ hidden }).where(and(eq(modules.id, moduleId), eq(modules.userId, userId))).run();
+}
+
 // Persist the home-grid order: each id gets its index as `position`, but only
 // for modules the user owns — a foreign id in the list is ignored.
 export function setModuleOrder(db: Db, userId: number, orderedIds: number[]): void {

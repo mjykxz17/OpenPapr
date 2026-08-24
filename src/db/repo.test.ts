@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDb } from "./client";
 import { items, components, users, modules, studyGuides } from "./schema";
-import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, upsertStudyGuide, getStudyGuide, listStudyGuides, setModuleOrder } from "./repo";
+import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, upsertStudyGuide, getStudyGuide, listStudyGuides, setModuleOrder, setModuleHidden } from "./repo";
 import { eq } from "drizzle-orm";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 
@@ -208,5 +208,27 @@ describe("setModuleOrder", () => {
     setModuleOrder(db, 1, [4, 1]); // id 4 belongs to user 2
     expect(db.select().from(modules).where(eq(modules.id, 4)).get()!.position).toBeNull();
     expect(db.select().from(modules).where(eq(modules.id, 1)).get()!.position).toBe(1);
+  });
+});
+
+describe("setModuleHidden", () => {
+  const seed = () => {
+    const db = setup();
+    db.insert(users).values({ name: "b" }).run();
+    db.insert(modules).values({ userId: 1, canvasCourseId: 20, code: "A", name: "A" }).run();
+    db.insert(modules).values({ userId: 2, canvasCourseId: 21, code: "X", name: "X" }).run();
+    return db;
+  };
+  it("hides and unhides a module", () => {
+    const db = seed();
+    setModuleHidden(db, 1, 1, true);
+    expect(db.select().from(modules).where(eq(modules.id, 1)).get()!.hidden).toBe(true);
+    setModuleHidden(db, 1, 1, false);
+    expect(db.select().from(modules).where(eq(modules.id, 1)).get()!.hidden).toBe(false);
+  });
+  it("will not touch a module owned by another user", () => {
+    const db = seed();
+    setModuleHidden(db, 1, 2, true); // id 2 belongs to user 2
+    expect(db.select().from(modules).where(eq(modules.id, 2)).get()!.hidden).toBe(false);
   });
 });

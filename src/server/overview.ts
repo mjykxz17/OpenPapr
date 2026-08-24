@@ -11,7 +11,7 @@ export interface Overview {
   whatsNew: ItemRow[]; // firstSeenAt > lastSeenAt, newest first, cap 20
   todos: TodoEntry[]; // assignment/event/deadline, !dismissed, !submitted; past events + past routine deadlines hidden after 12h grace; recurring event series collapsed to next occurrence; overdue first, then dueAt asc, nulls last
   mail: { important: ItemRow[]; filteredCount: number }; // important = triage in (important,ambiguous,unscored) & !dismissed, newest 20; filteredCount = garbage count
-  modules: { id: number; code: string; name: string; components: ComponentRow[]; latestAnnouncements: ItemRow[]; unaccountedPct: number | null }[];
+  modules: { id: number; code: string; name: string; components: ComponentRow[]; latestAnnouncements: ItemRow[]; unaccountedPct: number | null; hidden: boolean }[];
   syncStatus: { source: string; lastOkAt: number | null; stale: boolean }[]; // stale = now - lastOkAt > 3 * pollIntervalMs
   graphAuthBroken: boolean; // latest graph sync_run failed with /401|invalid_grant/ — drives the reconnect banner
 }
@@ -128,7 +128,7 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
     const latestAnnouncements = allItems
       .filter((i) => i.moduleId === m.id && i.type === "announcement")
       .sort(byNewestFirst);
-    return { id: m.id, code: m.code, name: m.name, components: comps, latestAnnouncements, unaccountedPct };
+    return { id: m.id, code: m.code, name: m.name, components: comps, latestAnnouncements, unaccountedPct, hidden: m.hidden };
   });
 
   const allSyncRuns = db.select().from(syncRuns).where(eq(syncRuns.userId, userId)).all();
