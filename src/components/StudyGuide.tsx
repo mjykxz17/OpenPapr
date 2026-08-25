@@ -109,6 +109,11 @@ function Body({ markdown, moduleId, wide }: { markdown: string; moduleId: number
 }
 
 const WIDTH_KEY = "sg-width";
+
+// Collapsed-outline bar length, scaled to the heading it stands for and
+// clamped so the rail stays a tidy ragged edge rather than a jagged one.
+const barWidth = (label: string, min = 16, max = 40) =>
+  `${Math.round(min + Math.min(1, label.length / 46) * (max - min))}px`;
 const posKey = (moduleId: number) => `sg-pos:${moduleId}`;
 
 export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId: number }) {
@@ -239,28 +244,62 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
   return (
     <div className={`${widthClass} lg:flex lg:gap-8`}>
       {/* Outline for the CURRENT chapter only — switch chapters via the tabs. */}
-      <nav className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] w-60 shrink-0 self-start overflow-y-auto pr-2 lg:block">
-        <div className="mb-3 text-[15px] font-semibold leading-snug text-ink">{chapters[active].label}</div>
-        {subs.length > 0 && (
-          <ul className="space-y-1 border-l border-line text-[15px]">
-            {subs.map((h) => (
-              <li key={h.slug}>
-                <a
-                  href={`#${h.slug}`}
-                  onClick={() => setActiveSlug(h.slug)}
-                  className={`-ml-px block border-l-2 py-0.5 pl-3 leading-snug ${
-                    activeSlug === h.slug
-                      ? "border-accent font-medium text-accent"
-                      : "border-transparent text-ink-3 hover:text-ink-2"
-                  }`}
-                >
-                  {h.label}
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-      </nav>
+      {/* Collapsed to a minimap of bars, expanding to labels on hover or
+          keyboard focus — the outline is glanceable while reading and only
+          takes the page over when you reach for it. The collapsed rail keeps
+          its narrow width in the flow and the expanded panel overlays, so the
+          prose never reflows underneath the pointer. */}
+      <div className="hidden w-14 shrink-0 self-start lg:block">
+        <nav
+          aria-label="On this page"
+          className="group sticky top-6 z-30 w-14"
+        >
+          <div className="w-14 rounded-md py-2 pl-1 pr-2 transition-[width,box-shadow,background-color] duration-200 ease-out group-focus-within:w-[19rem] group-focus-within:bg-surface group-focus-within:shadow-lg group-focus-within:ring-1 group-focus-within:ring-line group-hover:w-[19rem] group-hover:bg-surface group-hover:shadow-lg group-hover:ring-1 group-hover:ring-line motion-reduce:transition-none">
+            <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto">
+              <div className="px-2 pb-2">
+                <span className="block h-[3px] rounded-full bg-ink/70 group-hover:hidden group-focus-within:hidden" style={{ width: barWidth(chapters[active].label, 34, 44) }} />
+                <span className="hidden text-[13px] font-semibold leading-snug text-ink group-focus-within:block group-hover:block">
+                  {chapters[active].label}
+                </span>
+              </div>
+
+              {subs.length > 0 && (
+                <ul className="space-y-[7px] group-focus-within:space-y-0.5 group-hover:space-y-0.5">
+                  {subs.map((h) => {
+                    const current = activeSlug === h.slug;
+                    return (
+                      <li key={h.slug}>
+                        <a
+                          href={`#${h.slug}`}
+                          onClick={() => setActiveSlug(h.slug)}
+                          title={h.label}
+                          className={`block rounded px-2 py-1 group-focus-within:py-1 group-hover:py-1 ${
+                            current ? "" : "hover:bg-ink/[0.04]"
+                          }`}
+                        >
+                          <span
+                            className={`block h-[3px] rounded-full transition-colors group-focus-within:hidden group-hover:hidden ${
+                              current ? "bg-accent" : "bg-ink/25"
+                            }`}
+                            style={{ width: barWidth(h.label) }}
+                          />
+                          <span
+                            className={`hidden text-[13px] leading-snug group-focus-within:block group-hover:block ${
+                              current ? "font-medium text-accent" : "text-ink-3"
+                            }`}
+                          >
+                            {h.label}
+                          </span>
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        </nav>
+      </div>
 
       <div className="min-w-0 lg:flex-1">
         {preamble && <Body markdown={preamble} moduleId={moduleId} wide={wide} />}
