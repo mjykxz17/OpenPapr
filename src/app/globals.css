@@ -62,9 +62,13 @@ body {
    is the same split Notion makes when it lets images escape the text column. */
 .guide {
   display: grid;
+  /* Text is LEFT-aligned in the track, not centred. Centring works on a page
+     with nothing beside it; here the outline sits to the left, so a centred
+     column opened a dead gap between the two and left the prose aligned with
+     nothing on the page. Left-aligning gives prose, figures, the outline and
+     the page header a shared left edge; figures simply run further right. */
   grid-template-columns:
-    [full-start] minmax(0, 1fr)
-    [text-start] min(var(--measure, 34em), 100%) [text-end]
+    [full-start text-start] min(var(--measure, 36em), 100%) [text-end]
     minmax(0, 1fr) [full-end];
 }
 .guide > * {
@@ -76,7 +80,13 @@ body {
 .guide > .guide-wide {
   grid-column: full;
 }
-/* Wide mode: one track, everything full width. */
+/* Wide mode — the default. Prose uses the column it is given rather than
+   sitting in a ribbon with empty margins either side. Capped at 76em so an
+   ultra-wide display does not push a line past ~145 characters, where the eye
+   stops being able to find the start of the next line at all. Below that cap
+   nothing is constrained, so ordinary laptop widths fill completely. */
 .guide[data-width="wide"] {
-  grid-template-columns: [full-start text-start] minmax(0, 1fr) [text-end full-end];
+  grid-template-columns:
+    [full-start text-start] minmax(0, 76em) [text-end]
+    minmax(0, auto) [full-end];
 }

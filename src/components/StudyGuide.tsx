@@ -117,11 +117,12 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   // Reading width is a per-reader preference, not per-guide: someone who wants
   // the full width wants it everywhere, so the key is not scoped to a module.
-  const [wide, setWideState] = useState(false);
+  const [wide, setWideState] = useState(true);
 
   useEffect(() => {
     try {
-      setWideState(localStorage.getItem(WIDTH_KEY) === "wide");
+      // Full width is the default; "measure" is the stored opt-out.
+      setWideState(localStorage.getItem(WIDTH_KEY) !== "measure");
     } catch {
       // Private browsing or storage disabled — the default is fine.
     }

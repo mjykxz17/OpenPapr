@@ -22,7 +22,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
 
   if (!mod || mod.userId !== userId) {
     return (
-      <AppShell>
+      <AppShell wide>
         <p className="text-sm text-ink-3">Module not found.</p>
         <Link href="/" className="mt-2 inline-block text-sm text-accent underline">
           Back home
@@ -43,7 +43,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
   const guide = getStudyGuide(db, mod.id);
 
   return (
-    <AppShell>
+    <AppShell wide>
       <h1 className="text-lg font-medium text-ink">
         {mod.code} <span className="font-normal text-ink-2">— {mod.name}</span>
       </h1>
