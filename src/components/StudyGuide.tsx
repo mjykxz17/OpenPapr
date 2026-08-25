@@ -112,7 +112,7 @@ const WIDTH_KEY = "sg-width";
 
 // Collapsed-outline bar length, scaled to the heading it stands for and
 // clamped so the rail stays a tidy ragged edge rather than a jagged one.
-const barWidth = (label: string, min = 16, max = 40) =>
+const barWidth = (label: string, min = 14, max = 30) =>
   `${Math.round(min + Math.min(1, label.length / 46) * (max - min))}px`;
 const posKey = (moduleId: number) => `sg-pos:${moduleId}`;
 
@@ -249,15 +249,22 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
           takes the page over when you reach for it. The collapsed rail keeps
           its narrow width in the flow and the expanded panel overlays, so the
           prose never reflows underneath the pointer. */}
-      <div className="hidden w-14 shrink-0 self-start lg:block">
+      {/* No self-start: the wrapper must stretch to the full height of the
+          flex row, because a sticky child can only travel inside its
+          containing block. Shrink-wrapping it pinned the rail to the top of
+          a 200px-tall box and it scrolled away with the page. */}
+      <div className="hidden w-16 shrink-0 lg:block">
         <nav
           aria-label="On this page"
-          className="group sticky top-6 z-30 w-14"
+          className="group sticky top-6 z-30 w-16"
         >
-          <div className="w-14 rounded-md py-2 pl-1 pr-2 transition-[width,box-shadow,background-color] duration-200 ease-out group-focus-within:w-[19rem] group-focus-within:bg-surface group-focus-within:shadow-lg group-focus-within:ring-1 group-focus-within:ring-line group-hover:w-[19rem] group-hover:bg-surface group-hover:shadow-lg group-hover:ring-1 group-hover:ring-line motion-reduce:transition-none">
-            <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto">
+          <div className="w-16 rounded-md py-2 pl-1 pr-2 transition-[width,box-shadow,background-color] duration-200 ease-out group-focus-within:w-[19rem] group-focus-within:bg-surface group-focus-within:shadow-lg group-focus-within:ring-1 group-focus-within:ring-line group-hover:w-[19rem] group-hover:bg-surface group-hover:shadow-lg group-hover:ring-1 group-hover:ring-line motion-reduce:transition-none">
+            {/* overflow-x must be stated: CSS computes a non-visible value on
+                one axis to `auto` on the other, so overflow-y-auto alone gave
+                the collapsed rail a horizontal scrollbar under its bars. */}
+            <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto overflow-x-hidden">
               <div className="px-2 pb-2">
-                <span className="block h-[3px] rounded-full bg-ink/70 group-hover:hidden group-focus-within:hidden" style={{ width: barWidth(chapters[active].label, 34, 44) }} />
+                <span className="block h-[3px] rounded-full bg-ink/70 group-hover:hidden group-focus-within:hidden" style={{ width: barWidth(chapters[active].label, 24, 34) }} />
                 <span className="hidden text-[13px] font-semibold leading-snug text-ink group-focus-within:block group-hover:block">
                   {chapters[active].label}
                 </span>

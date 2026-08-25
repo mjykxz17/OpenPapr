@@ -86,7 +86,11 @@ body {
    stops being able to find the start of the next line at all. Below that cap
    nothing is constrained, so ordinary laptop widths fill completely. */
 .guide[data-width="wide"] {
+  /* One track, and a FIXED one. minmax(0, 76em) was shrinkable to zero: when a
+     mermaid diagram finished rendering, its intrinsic width grew the adjacent
+     track and the text column collapsed from 1216px to 658px — text looked
+     narrow on exactly the chapters that had diagrams, and only after they
+     rendered. min() is a fixed length, so no sibling can steal from it. */
   grid-template-columns:
-    [full-start text-start] minmax(0, 76em) [text-end]
-    minmax(0, auto) [full-end];
+    [full-start text-start] min(76em, 100%) [text-end full-end];
 }
