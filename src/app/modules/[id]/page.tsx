@@ -40,15 +40,31 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     .filter((i) => i.type === "announcement")
     .sort((a, b) => b.firstSeenAt - a.firstSeenAt);
   const evidenceRows = rows.filter((c) => c.source === "llm_syllabus" && c.evidence);
+  // Canvas names courses "CS4238 Computer Security Practice [2610]" — the code
+  // and the term code are already shown separately, so strip both rather than
+  // printing the module code twice in one line.
+  const termCode = mod.name.match(/\[(\d+)\]\s*$/)?.[1] ?? null;
+  const displayName = mod.name
+    .replace(new RegExp(`^${mod.code}\\b[\\s:—-]*`), "")
+    .replace(/\s*\[\d+\]\s*$/, "")
+    .trim() || mod.name;
   const guide = getStudyGuide(db, mod.id);
 
   return (
     <AppShell wide>
-      <h1 className="text-lg font-medium text-ink">
-        {mod.code} <span className="font-normal text-ink-2">— {mod.name}</span>
-      </h1>
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className="text-lg font-medium text-ink">{mod.code}</h1>
+        <p className="text-lg font-normal text-ink-2">{displayName}</p>
+        {termCode && (
+          <span className="rounded border border-line px-1.5 py-0.5 text-[11px] tabular-nums text-ink-3">{termCode}</span>
+        )}
+      </header>
 
-      <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-[minmax(340px,440px)_1fr] lg:items-start">
+      {/* Capped independently of the page: the guide below wants the whole
+          screen, but these two columns are a pair and stretching them across
+          1800px flings each announcement's date a thousand pixels from its
+          title. */}
+      <div className="mt-8 grid max-w-[1180px] grid-cols-1 gap-x-12 gap-y-8 lg:grid-cols-[minmax(320px,400px)_1fr] lg:items-start">
         <div className="space-y-8">
           <section>
             <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Components (all sources)</h2>
@@ -102,10 +118,17 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
             </details>
           )}
 
-          <section>
-            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Add manual component</h2>
-            <ManualComponentForm moduleId={mod.id} />
-          </section>
+          {/* Folded away: entering a weightage by hand is a once-a-semester
+              act, and an always-open form of three inputs sat between the data
+              and the reading. */}
+          <details>
+            <summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wide text-ink-3 hover:text-ink-2">
+              Add component
+            </summary>
+            <div className="mt-3">
+              <ManualComponentForm moduleId={mod.id} />
+            </div>
+          </details>
         </div>
 
         <section>
@@ -113,20 +136,24 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           {announcements.length === 0 ? (
             <p className="text-sm text-ink-3">No announcements yet.</p>
           ) : (
-            <ul className="max-h-[560px] max-w-3xl divide-y divide-line overflow-y-auto pr-2">
+            <ul className="max-h-[560px] divide-y divide-line overflow-y-auto pr-2">
               {announcements.map((a) => {
                 const text = htmlToText(a.body);
                 const posted = a.sourceCreatedAt ?? a.firstSeenAt;
                 return (
                   <li key={a.id} className="py-3">
                     <details className="group">
-                      <summary className="flex cursor-pointer select-none items-baseline justify-between gap-3">
-                        <span className="text-sm text-ink group-open:font-medium">{a.title}</span>
-                        <span className="shrink-0 text-xs tabular-nums text-ink-3">
+                      {/* Date leads in a fixed column rather than being pushed
+                          to the far edge: justify-between put 575px between a
+                          short title and its date, so the two stopped reading
+                          as one row. Leading dates also align down the list. */}
+                      <summary className="flex cursor-pointer select-none items-baseline gap-3">
+                        <span className="w-[52px] shrink-0 text-xs tabular-nums text-ink-3">
                           {new Date(posted).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
                         </span>
+                        <span className="text-sm text-ink group-open:font-medium">{a.title}</span>
                       </summary>
-                      {text && <p className="mt-2 whitespace-pre-line text-sm leading-[1.7] text-ink-2">{text}</p>}
+                      {text && <p className="mt-2 pl-[64px] whitespace-pre-line text-sm leading-[1.7] text-ink-2">{text}</p>}
                     </details>
                   </li>
                 );
@@ -137,14 +164,16 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
       </div>
 
       {guide && (
-        <section id="study" className="mt-12 scroll-mt-6 border-t border-line pt-8">
-          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h2 className="text-xs font-medium uppercase tracking-wide text-ink-3">Study guide</h2>
-            <span className="text-xs text-ink-3">
-              {guide.sourceNote ? `${guide.sourceNote} · ` : ""}
+        <section id="study" className="mt-14 scroll-mt-6 border-t border-line pt-10">
+          {/* sourceNote is dropped here on purpose: it repeats the guide's own
+              opening paragraph almost word for word, and the two sat a
+              thousand pixels apart on the same line. */}
+          <h2 className="mb-6 text-xs font-medium uppercase tracking-wide text-ink-3">
+            Study guide
+            <span className="ml-2 font-normal normal-case tracking-normal text-ink-3/70">
               generated {new Date(guide.generatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
             </span>
-          </div>
+          </h2>
           <StudyGuide markdown={guide.markdown} moduleId={mod.id} />
         </section>
       )}

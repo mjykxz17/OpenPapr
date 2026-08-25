@@ -40,8 +40,10 @@ test("a session reaches the dashboard, modules, reminders and mail", async ({ pa
   await expect(page.getByRole("link", { name: /ST2334/ })).toHaveAttribute("href", "/modules/2");
 
   await page.goto("/modules/2");
-  await expect(page.getByText(/Components/i)).toBeVisible();
-  await expect(page.getByText(/manual/i).first()).toBeVisible();
+  await expect(page.getByText(/Components \(all sources\)/i)).toBeVisible();
+  // The manual-weightage form is folded into a disclosure now; assert the
+  // control exists rather than the fields, which are collapsed by default.
+  await expect(page.getByText(/^Add component$/i)).toBeVisible();
 
   await page.goto("/reminders");
   await expect(page.getByRole("heading", { name: "Reminders" })).toBeVisible();

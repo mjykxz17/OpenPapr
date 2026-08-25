@@ -117,7 +117,12 @@ const barWidth = (label: string, min = 14, max = 30) =>
 const posKey = (moduleId: number) => `sg-pos:${moduleId}`;
 
 export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId: number }) {
-  const { preamble, chapters } = splitGuideIntoChapters(markdown);
+  const { preamble: rawPreamble, chapters } = splitGuideIntoChapters(markdown);
+  // Drop the guide's own H1. The page already names the module in its header
+  // and again in the "Study guide" label, so rendering "<Module> — Study
+  // Guide" a third time is pure repetition. Removed rather than hidden with
+  // CSS, so the document outline stays honest for screen readers.
+  const preamble = rawPreamble.replace(/^\s*#\s+.*(?:\n|$)/, "").trim();
   const [active, setActive] = useState(0);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   // Reading width is a per-reader preference, not per-guide: someone who wants
