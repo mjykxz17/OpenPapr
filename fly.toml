@@ -1,11 +1,11 @@
 # fly.toml
-app = "one-ring"
+app = "openpapr"
 primary_region = "sin"
 [build]
 [env]
-  DATABASE_PATH = "/data/one-ring.db"
+  DATABASE_PATH = "/data/openpapr.db"
 [mounts]
-  source = "one_ring_data"
+  source = "openpapr_data"
   destination = "/data"
 [http_service]
   internal_port = 3000

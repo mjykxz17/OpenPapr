@@ -177,5 +177,5 @@ async function loop(): Promise<void> {
   }
   setTimeout(loop, env.POLL_INTERVAL_MS);
 }
-console.log("one-ring worker starting");
+console.log("openpapr worker starting");
 void loop();

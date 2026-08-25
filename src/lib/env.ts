@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const EnvSchema = z.object({
-  DATABASE_PATH: z.string().default("data/one-ring.db"),
+  DATABASE_PATH: z.string().default("data/openpapr.db"),
   SECRET_KEY: z.string().regex(/^[0-9a-f]{64}$/i, "SECRET_KEY must be 64 hex chars (openssl rand -hex 32)"),
   APP_PASSWORD: z.string().min(8),
   CANVAS_BASE_URL: z.string().url().default("https://canvas.nus.edu.sg"),

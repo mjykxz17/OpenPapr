@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "one-ring",
+  title: "OpenPapr",
   description: "Canvas + NUS Outlook dashboard",
 };
 

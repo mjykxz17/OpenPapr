@@ -12,7 +12,7 @@ describe("loadEnv", () => {
     expect(env.CANVAS_BASE_URL).toBe("https://canvas.nus.edu.sg");
     expect(env.ANTHROPIC_MODEL).toBe("claude-haiku-4-5");
     expect(env.POLL_INTERVAL_MS).toBe(300000);
-    expect(env.DATABASE_PATH).toBe("data/one-ring.db");
+    expect(env.DATABASE_PATH).toBe("data/openpapr.db");
   });
   it("rejects a short SECRET_KEY", () => {
     expect(() => loadEnv({ ...good, SECRET_KEY: "abc" } as never)).toThrow();
