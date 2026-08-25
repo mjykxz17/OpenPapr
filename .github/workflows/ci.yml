@@ -25,8 +25,14 @@ jobs:
           node-version: 22
           cache: npm
 
+      # `npm install`, not `npm ci`: npm records some nested platform-specific
+      # optional deps (esbuild's per-OS binaries) without their optional flag,
+      # so `npm ci` either demands an AIX binary on Linux or calls the lock
+      # out of sync. `npm install` resolves per-platform correctly. The cost is
+      # that CI is not bit-reproducible against the lock; the gates below still
+      # verify the code.
       - name: Install dependencies
-        run: npm ci
+        run: npm install --no-audit --no-fund
 
       - name: Typecheck
         run: npx tsc --noEmit
