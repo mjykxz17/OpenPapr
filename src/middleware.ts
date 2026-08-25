@@ -19,12 +19,19 @@ const timingSafeEqualStr = (a: string, b: string): boolean => {
   return diff === 0;
 };
 
+// Mirrors verifySession in server/auth.ts: payload is "<userId>.<expiryMs>"
+// and the signature covers it, so the user id cannot be swapped in the cookie.
+// This gate only answers "is this a valid session" — route handlers and pages
+// re-verify with server/auth.ts to learn *which* user it is.
 async function verifySessionEdge(value: string | undefined, secretHex: string): Promise<boolean> {
   if (!value) return false;
-  const [exp, sig] = value.split(".");
-  if (!exp || !sig || Number(exp) < Date.now()) return false;
+  const parts = value.split(".");
+  if (parts.length !== 3) return false;
+  const [rawId, exp, sig] = parts as [string, string, string];
+  if (!/^\d+$/.test(rawId) || !/^\d+$/.test(exp)) return false;
+  if (Number(exp) < Date.now()) return false;
   const key = await crypto.subtle.importKey("raw", hexToBytes(secretHex), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(exp));
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${rawId}.${exp}`));
   const want = bytesToHex(new Uint8Array(mac));
   return timingSafeEqualStr(want, sig);
 }

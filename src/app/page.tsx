@@ -1,4 +1,5 @@
 import { getDb } from "@/server/db";
+import { requireUserId } from "@/server/session";
 import { getOverview } from "@/server/overview";
 import { loadEnv } from "@/lib/env";
 import { AppShell } from "@/components/AppShell";
@@ -7,9 +8,10 @@ import { ModuleGrid } from "@/components/ModuleGrid";
 
 export const dynamic = "force-dynamic";
 
-export default function Home() {
+export default async function Home() {
+  const userId = await requireUserId();
   const now = Date.now();
-  const overview = getOverview(getDb(), 1, now, loadEnv().POLL_INTERVAL_MS);
+  const overview = getOverview(getDb(), userId, now, loadEnv().POLL_INTERVAL_MS);
   const dateLabel = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" }).format(now);
 
   return (

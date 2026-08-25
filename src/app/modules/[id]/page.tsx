@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUserId } from "@/server/session";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { components, items, modules } from "@/db/schema";
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
 export default async function ModulePage({ params }: PageProps<"/modules/[id]">) {
   const { id } = await params;
   const moduleId = Number(id);
-  const userId = 1;
+  const userId = await requireUserId();
   const db = getDb();
 
   const mod = Number.isFinite(moduleId) ? db.select().from(modules).where(eq(modules.id, moduleId)).get() : undefined;

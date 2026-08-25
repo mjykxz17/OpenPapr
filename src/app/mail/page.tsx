@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireUserId } from "@/server/session";
 import { eq, and } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { items } from "@/db/schema";
@@ -10,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function MailPage({ searchParams }: PageProps<"/mail">) {
   const sp = await searchParams;
   const showFiltered = sp.filtered === "1";
-  const userId = 1;
+  const userId = await requireUserId();
 
   const mail = getDb()
     .select()

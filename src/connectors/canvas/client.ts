@@ -1,6 +1,6 @@
 import type {
   CanvasAnnouncement, CanvasAssignmentGroup, CanvasCalendarEvent,
-  CanvasCourse, CanvasFile, CanvasPage,
+  CanvasCourse, CanvasFile, CanvasPage, CanvasSelf,
 } from "./types";
 
 function nextLink(header: string | null): string | null {
@@ -37,6 +37,9 @@ export function createCanvasClient(baseUrl: string, token: string, fetchFn: type
   }
 
   return {
+    // Identity check. Doubles as token validation at sign-in: a bad or revoked
+    // token fails here before any account is created.
+    getSelf: () => getOne<CanvasSelf>("/users/self"),
     listActiveCourses: () =>
       getAllPages<CanvasCourse>("/courses?enrollment_state=active&per_page=100&include[]=term&include[]=syllabus_body"),
     listAssignmentGroups: (courseId: number) =>

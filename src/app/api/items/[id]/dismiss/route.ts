@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
+import { currentUserId } from "@/server/session";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { items } from "@/db/schema";
 
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const userId = 1; // TODO(phase-3): session → userId
+  const userId = await currentUserId();
+  if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   getDb()
     .update(items)
     .set({ dismissed: true })

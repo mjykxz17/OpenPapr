@@ -1,18 +1,27 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const mac = (exp: string, keyHex: string) =>
-  createHmac("sha256", Buffer.from(keyHex, "hex")).update(exp).digest("hex");
+// Session format: "<userId>.<expiryMs>.<hmac>", where the HMAC covers
+// "<userId>.<expiryMs>". The user id is inside the signed payload, so a
+// session cannot be re-pointed at another account by editing the cookie.
+const mac = (payload: string, keyHex: string) =>
+  createHmac("sha256", Buffer.from(keyHex, "hex")).update(payload).digest("hex");
 
-export function signSession(secretHex: string, ttlMs = 30 * 24 * 3_600_000): string {
-  const exp = String(Date.now() + ttlMs);
-  return `${exp}.${mac(exp, secretHex)}`;
+export function signSession(userId: number, secretHex: string, ttlMs = 30 * 24 * 3_600_000): string {
+  const payload = `${userId}.${Date.now() + ttlMs}`;
+  return `${payload}.${mac(payload, secretHex)}`;
 }
 
-export function verifySession(value: string | undefined, secretHex: string): boolean {
-  if (!value) return false;
-  const [exp, sig] = value.split(".");
-  if (!exp || !sig || Number(exp) < Date.now()) return false;
-  const want = Buffer.from(mac(exp, secretHex));
+// Returns the authenticated user id, or null. Never returns a default id:
+// a caller that cannot identify the user must not fall back to one.
+export function verifySession(value: string | undefined, secretHex: string): number | null {
+  if (!value) return null;
+  const parts = value.split(".");
+  if (parts.length !== 3) return null;
+  const [rawId, exp, sig] = parts as [string, string, string];
+  if (!/^\d+$/.test(rawId) || !/^\d+$/.test(exp)) return null;
+  if (Number(exp) < Date.now()) return null;
+  const want = Buffer.from(mac(`${rawId}.${exp}`, secretHex));
   const got = Buffer.from(sig);
-  return want.length === got.length && timingSafeEqual(want, got);
+  if (want.length !== got.length || !timingSafeEqual(want, got)) return null;
+  return Number(rawId);
 }

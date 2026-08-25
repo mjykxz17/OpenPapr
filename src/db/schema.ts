@@ -3,11 +3,19 @@ import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlit
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
+  // Canvas is the identity provider: a person proves who they are by pasting a
+  // token, and this is the Canvas account it belongs to. Nullable only so the
+  // pre-multi-user row can be adopted on its owner's first sign-in.
+  canvasUserId: integer("canvas_user_id"),
   canvasTokenEnc: text("canvas_token_enc"),
   msRefreshTokenEnc: text("ms_refresh_token_enc"),
   msDeltaLink: text("ms_delta_link"),
   lastSeenAt: integer("last_seen_at").notNull().default(0),
-});
+  createdAt: integer("created_at").notNull().default(0),
+  // When this user's sync last began. The worker polls whoever is due rather
+  // than everyone at once, which spreads Canvas load across the interval.
+  lastSyncStartedAt: integer("last_sync_started_at").notNull().default(0),
+}, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId)]);
 
 export const modules = sqliteTable("modules", {
   id: integer("id").primaryKey({ autoIncrement: true }),

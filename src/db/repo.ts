@@ -1,8 +1,64 @@
-import { and, asc, eq, desc, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, desc, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { components, items, modules, studyGuides } from "./schema";
+import { components, items, modules, studyGuides, users } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 import type { MailItem } from "../connectors/graph/normalize";
+import { decrypt, encrypt } from "../lib/crypto";
+
+// Maps a validated Canvas identity to a local account, creating one if needed.
+// Canvas is the identity provider here: possession of a working token is the
+// proof, and canvas_user_id is the durable key (tokens get rotated).
+export function resolveCanvasUser(
+  db: Db,
+  self: { id: number; name: string },
+  token: string,
+  secretHex: string,
+  now: number,
+): number {
+  const tokenEnc = encrypt(token, secretHex);
+
+  const existing = db.select().from(users).where(eq(users.canvasUserId, self.id)).get();
+  if (existing) {
+    db.update(users).set({ name: self.name, canvasTokenEnc: tokenEnc }).where(eq(users.id, existing.id)).run();
+    return existing.id;
+  }
+
+  // Pre-multi-user rows have no canvas_user_id. Adopt one only when the token
+  // presented decrypts to the token already stored there — that proves the
+  // person signing in is the account's original owner, not merely the first to
+  // arrive. Anything weaker would hand over an existing user's Canvas data.
+  const legacy = db.select().from(users).where(isNull(users.canvasUserId)).all();
+  for (const row of legacy) {
+    if (!row.canvasTokenEnc) continue;
+    let stored: string | null = null;
+    try { stored = decrypt(row.canvasTokenEnc, secretHex); } catch { continue; }
+    if (stored !== token) continue;
+    db.update(users).set({ canvasUserId: self.id, name: self.name, canvasTokenEnc: tokenEnc })
+      .where(eq(users.id, row.id)).run();
+    return row.id;
+  }
+
+  return db.insert(users)
+    .values({ name: self.name, canvasUserId: self.id, canvasTokenEnc: tokenEnc, createdAt: now })
+    .returning().get().id;
+}
+
+// Users whose next sync is due, longest-waiting first, at most `cap` of them.
+// The worker ticks more often than the poll interval and takes a slice each
+// time, so a cohort that signs up together does not stay synchronised: their
+// sync times fan out over the first interval and stay spread thereafter.
+export function selectDueUsers(db: Db, now: number, intervalMs: number, cap: number) {
+  return db.select().from(users)
+    .where(lte(users.lastSyncStartedAt, now - intervalMs))
+    .orderBy(asc(users.lastSyncStartedAt), asc(users.id))
+    .limit(cap).all();
+}
+
+// Stamped before the sync runs, not after, so a long or crashing sync cannot
+// cause the same user to be picked again on the next tick.
+export function markSyncStarted(db: Db, userId: number, now: number): void {
+  db.update(users).set({ lastSyncStartedAt: now }).where(eq(users.id, userId)).run();
+}
 
 // How many times deadline extraction may fail on one item before we stop
 // retrying it. The extractor returns null on both transient failures (provider

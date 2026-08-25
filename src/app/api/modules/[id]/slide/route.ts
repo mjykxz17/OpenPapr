@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { currentUserId } from "@/server/session";
 import { getDb } from "@/server/db";
 import { loadDeckPdf } from "@/server/deck";
 import { renderPdfPage } from "@/lib/pdf-render";
@@ -8,6 +9,8 @@ import { renderPdfPage } from "@/lib/pdf-render";
 // present (e.g. from a PowerPoint deck), else the Canvas PDF. PDF-only.
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const userId = await currentUserId();
+  if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const moduleId = Number(id);
   const url = new URL(request.url);
   const name = url.searchParams.get("name");
@@ -16,7 +19,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
 
-  const res = await loadDeckPdf(getDb(), 1, moduleId, name);
+  const res = await loadDeckPdf(getDb(), userId, moduleId, name);
   if ("error" in res) return NextResponse.json({ error: res.error }, { status: res.status });
 
   const png = await renderPdfPage(res.bytes, page);

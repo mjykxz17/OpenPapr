@@ -57,6 +57,13 @@
       "when": 1787642810647,
       "tag": "0007_chilly_retro_girl",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1787643887365,
+      "tag": "0008_clammy_ben_urich",
+      "breakpoints": true
     }
   ]
 }

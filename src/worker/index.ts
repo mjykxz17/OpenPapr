@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
-import { applyCanvasSync, applyExtractedActions, recordActionFailure, selectActionCandidates, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
+import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient, isPdfFile } from "../connectors/canvas/client";
@@ -164,16 +164,34 @@ async function enrich(userId: number): Promise<void> {
 }
 
 const guard = createGuard(env.POLL_INTERVAL_MS);
+
+// Rather than sweeping every user once per interval — which sends one burst at
+// Canvas and grows the cycle time linearly with signups — tick often and sync
+// only whoever is due. Each user still gets POLL_INTERVAL_MS freshness, but
+// their sync times fan out across the window.
+const TICKS_PER_INTERVAL = 10;
+const TICK_MS = Math.max(15_000, Math.floor(env.POLL_INTERVAL_MS / TICKS_PER_INTERVAL));
+
 async function loop(): Promise<void> {
-  for (const user of db.select().from(users).all()) {
-    await runUserSync({
-      db, now: Date.now,
-      canvasSync: guard("canvas", canvasSync),
-      mailSync: guard("graph", mailSync),
-      enrich: guard("enrich", enrich),
-    }, user.id);
+  try {
+    const total = db.select().from(users).all().length;
+    // Size the slice so a full sweep still finishes within one interval.
+    const cap = Math.max(1, Math.ceil(total / TICKS_PER_INTERVAL));
+    for (const user of selectDueUsers(db, Date.now(), env.POLL_INTERVAL_MS, cap)) {
+      // Stamped first: a sync that hangs or throws must not put the same user
+      // straight back at the head of the queue on the next tick.
+      markSyncStarted(db, user.id, Date.now());
+      await runUserSync({
+        db, now: Date.now,
+        canvasSync: guard("canvas", canvasSync),
+        mailSync: guard("graph", mailSync),
+        enrich: guard("enrich", enrich),
+      }, user.id);
+    }
+  } catch (err) {
+    console.error("worker tick failed", err);
   }
-  setTimeout(loop, env.POLL_INTERVAL_MS);
+  setTimeout(loop, TICK_MS);
 }
 console.log("openpapr worker starting");
 void loop();

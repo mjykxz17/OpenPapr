@@ -1,4 +1,5 @@
 import { getDb } from "@/server/db";
+import { requireUserId } from "@/server/session";
 import { getOverview } from "@/server/overview";
 import { loadEnv } from "@/lib/env";
 import { AppShell } from "@/components/AppShell";
@@ -6,9 +7,10 @@ import { TodoList } from "@/components/TodoList";
 
 export const dynamic = "force-dynamic";
 
-export default function RemindersPage() {
+export default async function RemindersPage() {
+  const userId = await requireUserId();
   const now = Date.now();
-  const overview = getOverview(getDb(), 1, now, loadEnv().POLL_INTERVAL_MS);
+  const overview = getOverview(getDb(), userId, now, loadEnv().POLL_INTERVAL_MS);
   const overdue = overview.todos.filter((t) => t.dueAt !== null && t.dueAt < now).length;
 
   return (

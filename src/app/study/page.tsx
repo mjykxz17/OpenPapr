@@ -1,12 +1,14 @@
 import Link from "next/link";
+import { requireUserId } from "@/server/session";
 import { getDb } from "@/server/db";
 import { listStudyGuides } from "@/db/repo";
 import { AppShell } from "@/components/AppShell";
 
 export const dynamic = "force-dynamic";
 
-export default function StudyIndex() {
-  const guides = listStudyGuides(getDb(), 1);
+export default async function StudyIndex() {
+  const userId = await requireUserId();
+  const guides = listStudyGuides(getDb(), userId);
 
   return (
     <AppShell>
