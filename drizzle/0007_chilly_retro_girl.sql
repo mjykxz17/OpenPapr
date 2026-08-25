@@ -1,0 +1,1 @@
+ALTER TABLE `items` ADD `actions_attempts` integer DEFAULT 0 NOT NULL;

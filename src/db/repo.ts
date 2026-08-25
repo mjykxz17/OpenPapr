@@ -1,8 +1,40 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, eq, desc, inArray, isNull, lt, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { components, items, modules, studyGuides } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 import type { MailItem } from "../connectors/graph/normalize";
+
+// How many times deadline extraction may fail on one item before we stop
+// retrying it. The extractor returns null on both transient failures (provider
+// down) and permanent ones (a body it can never parse); without this bound the
+// permanent case is retried every poll cycle forever, and because the candidate
+// pool is capped, those stuck items also starve newer ones out of the queue.
+export const MAX_ACTION_ATTEMPTS = 5;
+
+// Items still awaiting deadline extraction, oldest first, bounded by `cap`.
+// Announcements must belong to an active module; emails must have been triaged
+// important. Items that have exhausted their retries are excluded.
+export function selectActionCandidates(db: Db, userId: number, activeModuleIds: Set<number>, cap = 25) {
+  return db.select().from(items).where(and(
+    eq(items.userId, userId),
+    isNull(items.actionsExtractedAt),
+    lt(items.actionsAttempts, MAX_ACTION_ATTEMPTS),
+    inArray(items.type, ["announcement", "email"]),
+  )).orderBy(asc(items.firstSeenAt), asc(items.id)).all().filter((i) =>
+    i.type === "announcement"
+      ? i.moduleId !== null && activeModuleIds.has(i.moduleId)
+      : i.triage === "important",
+  ).slice(0, cap);
+}
+
+// Records one failed extraction attempt. Deliberately leaves actionsExtractedAt
+// null: giving up is not the same as having extracted, and conflating them
+// would make a failed item indistinguishable from a processed one.
+export function recordActionFailure(db: Db, itemId: number): void {
+  db.update(items)
+    .set({ actionsAttempts: sql`${items.actionsAttempts} + 1` })
+    .where(eq(items.id, itemId)).run();
+}
 
 export function applyCanvasSync(db: Db, userId: number, sync: NormalizedCanvasSync, now: number): { moduleId: number } {
   const mod = db.insert(modules).values({ userId, ...sync.module })

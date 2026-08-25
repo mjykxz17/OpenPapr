@@ -53,6 +53,7 @@ export const items = sqliteTable("items", {
   importance: real("importance"),
   importanceReason: text("importance_reason"),
   actionsExtractedAt: integer("actions_extracted_at"),   // deadline-extraction marker: null = not yet processed
+  actionsAttempts: integer("actions_attempts").notNull().default(0),  // failed extraction tries; bounds the retry loop
   category: text("category", { enum: ["deliverable", "routine"] }),  // deadline tier; null = unclassified, treated as deliverable
 }, (t) => [uniqueIndex("items_user_source").on(t.userId, t.source, t.sourceId)]);
 
