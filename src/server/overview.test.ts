@@ -165,3 +165,48 @@ describe("reminder aging", () => {
     expect(titles).toEqual(["ancient assignment", "missed recently"]);
   });
 });
+
+// Semantics pinned before bounding the sync_runs read: getOverview used to
+// pull every run for the user (thousands of rows, growing ~585/day) to compute
+// three maxima. These fix the behaviour the bounded queries must preserve.
+describe("getOverview sync status", () => {
+  it("takes lastOkAt from the newest ok run, ignoring later failures", () => {
+    const { db } = setup();
+    db.insert(syncRuns).values([
+      { userId: 1, source: "canvas" as const, startedAt: 100, finishedAt: 200, ok: true },
+      { userId: 1, source: "canvas" as const, startedAt: 300, finishedAt: 400, ok: true },
+      { userId: 1, source: "canvas" as const, startedAt: 500, finishedAt: 600, ok: false, error: "boom" },
+    ]).run();
+    const s = getOverview(db, 1, 700, 300_000).syncStatus.find((x) => x.source === "canvas")!;
+    expect(s.lastOkAt).toBe(400);
+  });
+
+  it("falls back to startedAt when an ok run has no finishedAt", () => {
+    const { db } = setup();
+    db.insert(syncRuns).values({ userId: 1, source: "canvas" as const, startedAt: 900, finishedAt: null, ok: true }).run();
+    expect(getOverview(db, 1, 1000, 300_000).syncStatus.find((x) => x.source === "canvas")!.lastOkAt).toBe(900);
+  });
+
+  it("reports never-run sources as stale with a null lastOkAt", () => {
+    const { db } = setup();
+    const s = getOverview(db, 1, 1000, 300_000).syncStatus.find((x) => x.source === "canvas")!;
+    expect(s.lastOkAt).toBeNull();
+    expect(s.stale).toBe(true);
+  });
+
+  it("ignores another user's runs", () => {
+    const { db } = setup();
+    db.insert(users).values({ name: "b" }).run();
+    db.insert(syncRuns).values({ userId: 2, source: "canvas" as const, startedAt: 100, finishedAt: 200, ok: true }).run();
+    expect(getOverview(db, 1, 300, 300_000).syncStatus.find((x) => x.source === "canvas")!.lastOkAt).toBeNull();
+  });
+
+  it("clears graphAuthBroken when a later graph run succeeds", () => {
+    const { db } = setup();
+    db.insert(syncRuns).values([
+      { userId: 1, source: "graph" as const, startedAt: 100, finishedAt: 150, ok: false, error: "Graph 401: invalid_grant" },
+      { userId: 1, source: "graph" as const, startedAt: 200, finishedAt: 250, ok: true },
+    ]).run();
+    expect(getOverview(db, 1, 300, 300_000).graphAuthBroken).toBe(false);
+  });
+});

@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { components, items, modules, syncRuns, users } from "../db/schema";
 
@@ -131,17 +131,24 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
     return { id: m.id, code: m.code, name: m.name, components: comps, latestAnnouncements, unaccountedPct, hidden: m.hidden };
   });
 
-  const allSyncRuns = db.select().from(syncRuns).where(eq(syncRuns.userId, userId)).all();
-
+  // sync_runs grows about 585 rows/day and this function runs on every render
+  // of the home, reminders and study pages, all force-dynamic. Reading the
+  // whole table to compute a handful of maxima is free on in-process SQLite
+  // and untenable over a network driver, so the aggregation stays in SQL.
   const syncStatus = SYNC_SOURCES.map((source) => {
-    const okRuns = allSyncRuns.filter((r) => r.source === source && r.ok);
-    const lastOkAt = okRuns.length ? Math.max(...okRuns.map((r) => r.finishedAt ?? r.startedAt)) : null;
+    const row = db.select({ at: sql<number | null>`max(coalesce(${syncRuns.finishedAt}, ${syncRuns.startedAt}))` })
+      .from(syncRuns)
+      .where(and(eq(syncRuns.userId, userId), eq(syncRuns.source, source), eq(syncRuns.ok, true)))
+      .get();
+    const lastOkAt = row?.at ?? null;
     const stale = lastOkAt === null ? true : now - lastOkAt > 3 * pollIntervalMs;
     return { source, lastOkAt, stale };
   });
 
-  const graphRuns = allSyncRuns.filter((r) => r.source === "graph");
-  const latestGraphRun = graphRuns.length ? graphRuns.reduce((latest, r) => (r.startedAt > latest.startedAt ? r : latest)) : null;
+  const latestGraphRun = db.select().from(syncRuns)
+    .where(and(eq(syncRuns.userId, userId), eq(syncRuns.source, "graph")))
+    .orderBy(desc(syncRuns.startedAt), desc(syncRuns.id))
+    .limit(1).get() ?? null;
   const graphAuthBroken = !!latestGraphRun && latestGraphRun.ok === false && !!latestGraphRun.error && /401|invalid_grant/.test(latestGraphRun.error);
 
   return { lastSeenAt, whatsNew, todos, mail: { important, filteredCount }, modules: modulesOut, syncStatus, graphAuthBroken };
