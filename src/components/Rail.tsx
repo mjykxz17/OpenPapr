@@ -18,6 +18,16 @@ function MailIcon() {
   );
 }
 
+function RemindersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M8 2v3M16 2v3M3.5 9h17" />
+      <rect width="17" height="16" x="3.5" y="5" rx="2" />
+      <path d="m8.5 14 2 2 4-4" />
+    </svg>
+  );
+}
+
 function StudyIcon() {
   return (
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -29,6 +39,7 @@ function StudyIcon() {
 
 const NAV = [
   { href: "/", label: "Home", Icon: HomeIcon },
+  { href: "/reminders", label: "Reminders", Icon: RemindersIcon },
   { href: "/study", label: "Study guides", Icon: StudyIcon },
   { href: "/mail", label: "Mail", Icon: MailIcon },
 ] as const;

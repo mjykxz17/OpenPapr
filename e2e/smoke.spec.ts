@@ -16,6 +16,11 @@ test("login, module grid, module detail, mail", async ({ page }) => {
   await expect(page.getByText(/Components/i)).toBeVisible();
   await expect(page.getByText(/manual/i).first()).toBeVisible();
 
+  // Reminders have their own tab; the seed carries an overdue deliverable.
+  await page.goto("/reminders");
+  await expect(page.getByRole("heading", { name: "Reminders" })).toBeVisible();
+  await expect(page.getByText(/overdue/i).first()).toBeVisible();
+
   // Mail lives behind the rail now; its triaged content is on /mail.
   await page.goto("/mail");
   await expect(page.getByText(/filtered/i)).toBeVisible();
