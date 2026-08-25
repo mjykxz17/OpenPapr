@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { modules, users } from "@/db/schema";
@@ -11,8 +11,17 @@ export const deckStem = (name: string) => name.replace(/\.[^.]+$/, "");
 
 // Where a locally-converted deck PDF lives (e.g. a PowerPoint deck turned to
 // PDF by scripts/cache-decks.ts). Keyed by Canvas course id + filename stem.
-export const deckCachePath = (courseId: number, name: string) =>
-  join(process.cwd(), "data", "deck-cache", String(courseId), `${deckStem(name)}.pdf`);
+//
+// Anchored to the database's directory, not process.cwd(): in production the
+// database sits on the mounted Fly volume (/data) while cwd is the image's
+// /app, which is read-only-ish, excluded from the image by .dockerignore, and
+// wiped on every deploy. Keying off cwd meant the cache never hit and every
+// deck was re-downloaded from Canvas on every request.
+export const deckCachePath = (
+  courseId: number,
+  name: string,
+  dbPath: string = process.env.DATABASE_PATH ?? "data/openpapr.db",
+) => join(dirname(dbPath), "deck-cache", String(courseId), `${deckStem(name)}.pdf`);
 
 export type DeckResult = { bytes: Uint8Array } | { error: string; status: number };
 
