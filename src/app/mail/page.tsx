@@ -5,6 +5,9 @@ import { getDb } from "@/server/db";
 import { items } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { MailList } from "@/components/MailList";
+import { OutlookConnect } from "@/components/OutlookConnect";
+import { users } from "@/db/schema";
+import { loadEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +15,7 @@ export default async function MailPage({ searchParams }: PageProps<"/mail">) {
   const sp = await searchParams;
   const showFiltered = sp.filtered === "1";
   const userId = await requireUserId();
+  const me = getDb().select().from(users).where(eq(users.id, userId)).get();
 
   const mail = getDb()
     .select()
@@ -26,7 +30,11 @@ export default async function MailPage({ searchParams }: PageProps<"/mail">) {
 
   return (
     <AppShell>
-      <h1 className="mb-8 text-lg font-medium text-ink">Mail</h1>
+      <h1 className="mb-6 text-lg font-medium text-ink">Mail</h1>
+
+      <div className="mb-8 max-w-3xl">
+        <OutlookConnect connected={Boolean(me?.msRefreshTokenEnc)} configured={Boolean(loadEnv().MS_CLIENT_ID)} />
+      </div>
 
       <section>
         <MailList items={important} dismissible emptyLabel="No mail yet." />

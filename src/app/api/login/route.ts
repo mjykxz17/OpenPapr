@@ -5,7 +5,7 @@ import { pruneRateLimits, rateLimit } from "@/server/rate-limit";
 import { getDb } from "@/server/db";
 import { resolveCanvasUser } from "@/db/repo";
 import { createCanvasClient } from "@/connectors/canvas/client";
-import { loadEnv } from "@/lib/env";
+import { loadEnv, sessionSigningKey } from "@/lib/env";
 
 const sameSecret = (a: string, b: string) =>
   timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest());
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
   const userId = resolveCanvasUser(getDb(), self, token, env.SECRET_KEY, Date.now());
 
   const res = NextResponse.json({ ok: true, name: self.name });
-  res.cookies.set("session", signSession(userId, env.SECRET_KEY), {
+  res.cookies.set("session", signSession(userId, sessionSigningKey(env)), {
     httpOnly: true,
     sameSite: "lax",
     secure: true,

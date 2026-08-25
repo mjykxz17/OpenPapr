@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SignOutButton } from "./SignOutButton";
 
 function HomeIcon() {
   return (
@@ -58,6 +59,9 @@ export function Rail() {
           <Icon />
         </Link>
       ))}
+      <div className="mt-auto">
+        <SignOutButton />
+      </div>
     </nav>
   );
 }

@@ -38,7 +38,7 @@ async function verifySessionEdge(value: string | undefined, secretHex: string): 
 
 export async function middleware(req: NextRequest) {
   if (req.nextUrl.pathname.startsWith("/api/login") || req.nextUrl.pathname === "/login") return NextResponse.next();
-  const ok = await verifySessionEdge(req.cookies.get("session")?.value, process.env.SECRET_KEY ?? "");
+  const ok = await verifySessionEdge(req.cookies.get("session")?.value, process.env.SESSION_KEY ?? process.env.SECRET_KEY ?? "");
   if (ok) return NextResponse.next();
   return req.nextUrl.pathname.startsWith("/api")
     ? NextResponse.json({ error: "unauthorized" }, { status: 401 })
