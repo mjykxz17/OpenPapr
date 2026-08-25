@@ -49,3 +49,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .canvas-token
+
+# generated study guides (derived from copyrighted lecture material)
+pre-study/
