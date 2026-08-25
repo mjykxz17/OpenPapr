@@ -12,3 +12,10 @@ primary_region = "sin"
   force_https = true
   auto_stop_machines = false   # worker must keep polling
   min_machines_running = 1
+
+# Pinned so a deploy can't silently pick a larger (costlier) machine.
+# 1GB is the floor: this container runs both the Next server and the tsx
+# worker, and the slide-render path retains ~400MB natively.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
