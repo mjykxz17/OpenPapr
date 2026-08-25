@@ -142,6 +142,8 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
     }
   };
   const pendingScroll = useRef<string | null>(null); // section to scroll to after a restored chapter renders
+  const tabsRef = useRef<HTMLDivElement | null>(null);      // the sticky chapter bar
+  const tabsAnchor = useRef<HTMLDivElement | null>(null);   // zero-height marker at the bar's resting position
   const restored = useRef(false);
 
   const subs = chapters.length ? extractSubheadings(chapters[active].markdown) : [];
@@ -198,11 +200,34 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
     } catch {}
   }, [moduleId, active, activeSlug]);
 
-  // Switching chapters via a tab starts that chapter from the top.
+  // The chapter bar is the top of the reading area. Once it is stuck, nothing
+  // should scroll above it — the guide's title and its long preamble are read
+  // once, and jumping back to them on every tab or outline click loses the
+  // reader's place. The sentinel sits at the bar's resting position, so its
+  // document offset is exactly the point past which the bar is pinned.
+  function tabsCeiling(): number {
+    const el = tabsAnchor.current;
+    return el ? Math.round(el.getBoundingClientRect().top + window.scrollY) : 0;
+  }
+
+  function scrollToY(y: number) {
+    window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+  }
+
+  // Switching chapters starts that chapter at the bar, not at the guide title.
   function selectChapter(i: number) {
     pendingScroll.current = null;
     setActive(i);
-    document.getElementById("study")?.scrollIntoView();
+    scrollToY(tabsCeiling());
+  }
+
+  // Outline clicks land the heading just under the bar, and never above it.
+  function scrollToHeading(slug: string) {
+    const el = document.getElementById(slug);
+    if (!el) return;
+    const barH = tabsRef.current?.offsetHeight ?? 0;
+    const target = el.getBoundingClientRect().top + window.scrollY - barH - 12;
+    scrollToY(Math.max(target, tabsCeiling()));
   }
 
   // Scroll-spy: the active section is the last heading scrolled above the
@@ -242,7 +267,7 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
   }
 
   return (
-    <div className={`${widthClass} lg:flex lg:gap-8`}>
+    <div className={`${widthClass} lg:flex lg:gap-14`}>
       {/* Outline for the CURRENT chapter only — switch chapters via the tabs. */}
       {/* Collapsed to a minimap of bars, expanding to labels on hover or
           keyboard focus — the outline is glanceable while reading and only
@@ -278,7 +303,7 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
                       <li key={h.slug}>
                         <a
                           href={`#${h.slug}`}
-                          onClick={() => setActiveSlug(h.slug)}
+                          onClick={(e) => { e.preventDefault(); setActiveSlug(h.slug); scrollToHeading(h.slug); }}
                           title={h.label}
                           className={`block rounded px-2 py-1 group-focus-within:py-1 group-hover:py-1 ${
                             current ? "" : "hover:bg-ink/[0.04]"
@@ -311,7 +336,8 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
       <div className="min-w-0 lg:flex-1">
         {preamble && <Body markdown={preamble} moduleId={moduleId} wide={wide} />}
 
-        <div className="sticky top-0 z-20 mt-4 flex items-stretch border-b border-line bg-surface">
+        <div ref={tabsAnchor} aria-hidden className="h-0" />
+        <div ref={tabsRef} className="sticky top-0 z-20 mt-4 flex items-stretch border-b border-line bg-surface">
         <div role="tablist" aria-label="Chapters" className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
           {chapters.map((c, i) => (
             <button
