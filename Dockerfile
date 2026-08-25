@@ -4,7 +4,9 @@ WORKDIR /app
 # better-sqlite3 has no prebuilt musl binary; build tools compile it from source.
 RUN apk add --no-cache python3 make g++
 COPY package*.json ./
-RUN npm ci
+# npm ci rejects this lockfile on linux: npm records nested platform-specific
+# esbuild binaries without their optional flag. Same reason CI uses npm install.
+RUN npm install --no-audit --no-fund
 COPY . .
 RUN npm run build
 
