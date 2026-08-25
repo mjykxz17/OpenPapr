@@ -42,3 +42,41 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .tile-wobble { animation: none; }
 }
+
+/* Study-guide reading column.
+
+   Prose is capped at a measure — the characters-per-line the eye can track
+   without losing its place on the return sweep. The long-standing typographic
+   range is 45-75 characters, around 66 being the classic target; the guide sat
+   near 105 at wide viewports, which is why it read as a wall.
+
+   Measured in em, not px or ch, so the column follows the font size and the
+   reader's zoom. em rather than ch because ch is the width of "0", which in
+   this typeface is 0.62em — a 72ch column measured out at 764px, about 90
+   characters. Average lowercase runs near 0.5em, so characters-per-line is
+   roughly twice the em value: 34em lands around 68 characters.
+
+   The grid gives two tracks. Prose takes the centre "text" column; figures,
+   diagrams, code and tables take "full" and break out of it, because a slide
+   image or a mermaid diagram is easier to read wide while prose is not. This
+   is the same split Notion makes when it lets images escape the text column. */
+.guide {
+  display: grid;
+  grid-template-columns:
+    [full-start] minmax(0, 1fr)
+    [text-start] min(var(--measure, 34em), 100%) [text-end]
+    minmax(0, 1fr) [full-end];
+}
+.guide > * {
+  grid-column: text;
+  min-width: 0;
+}
+.guide > figure,
+.guide > pre,
+.guide > .guide-wide {
+  grid-column: full;
+}
+/* Wide mode: one track, everything full width. */
+.guide[data-width="wide"] {
+  grid-template-columns: [full-start text-start] minmax(0, 1fr) [text-end full-end];
+}

@@ -30,10 +30,10 @@ export function MermaidDiagram({ chart }: { chart: string }) {
 
   if (failed) {
     return (
-      <pre className="my-4 overflow-x-auto rounded border border-line bg-ink/[0.03] p-3 text-xs leading-relaxed text-ink-2">
+      <pre className="guide-wide my-4 overflow-x-auto rounded border border-line bg-ink/[0.03] p-3 text-xs leading-relaxed text-ink-2">
         {chart}
       </pre>
     );
   }
-  return <div ref={ref} className="my-5 flex justify-center overflow-x-auto [&_svg]:max-w-full" aria-label="diagram" />;
+  return <div ref={ref} className="guide-wide my-5 flex justify-center overflow-x-auto [&_svg]:max-w-full" aria-label="diagram" />;
 }

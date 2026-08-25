@@ -87,7 +87,7 @@ function componentsFor(moduleId: number): Components {
   ),
   hr: () => <hr className="my-6 border-line" />,
   table: ({ children }) => (
-    <div className="my-4 overflow-x-auto">
+    <div className="guide-wide my-4 overflow-x-auto">
       <table className="w-full border-collapse text-sm tabular-nums">{children}</table>
     </div>
   ),
@@ -98,20 +98,43 @@ function componentsFor(moduleId: number): Components {
   };
 }
 
-function Body({ markdown, moduleId }: { markdown: string; moduleId: number }) {
+function Body({ markdown, moduleId, wide }: { markdown: string; moduleId: number; wide: boolean }) {
   return (
-    <Markdown remarkPlugins={[remarkGfm, remarkUnwrapImages]} urlTransform={(u) => u} components={componentsFor(moduleId)}>
-      {markdown}
-    </Markdown>
+    <div className="guide" data-width={wide ? "wide" : "measure"}>
+      <Markdown remarkPlugins={[remarkGfm, remarkUnwrapImages]} urlTransform={(u) => u} components={componentsFor(moduleId)}>
+        {markdown}
+      </Markdown>
+    </div>
   );
 }
 
+const WIDTH_KEY = "sg-width";
 const posKey = (moduleId: number) => `sg-pos:${moduleId}`;
 
 export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId: number }) {
   const { preamble, chapters } = splitGuideIntoChapters(markdown);
   const [active, setActive] = useState(0);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
+  // Reading width is a per-reader preference, not per-guide: someone who wants
+  // the full width wants it everywhere, so the key is not scoped to a module.
+  const [wide, setWideState] = useState(false);
+
+  useEffect(() => {
+    try {
+      setWideState(localStorage.getItem(WIDTH_KEY) === "wide");
+    } catch {
+      // Private browsing or storage disabled — the default is fine.
+    }
+  }, []);
+
+  const setWide = (next: boolean) => {
+    setWideState(next);
+    try {
+      localStorage.setItem(WIDTH_KEY, next ? "wide" : "measure");
+    } catch {
+      // Preference simply will not persist; the toggle still works this visit.
+    }
+  };
   const pendingScroll = useRef<string | null>(null); // section to scroll to after a restored chapter renders
   const restored = useRef(false);
 
@@ -199,13 +222,15 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
     return () => window.removeEventListener("scroll", onScroll, { capture: true });
   }, [spyKey]);
 
-  const widthClass = "w-full max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl";
+  // Prose width is governed by the measure grid in globals.css, not here, so
+  // this only has to stop figures from spanning the whole 1280px shell.
+  const widthClass = "w-full";
 
   // No chapters to tab — render the whole thing as before.
   if (chapters.length === 0) {
     return (
       <div className={widthClass}>
-        <Body markdown={markdown} moduleId={moduleId} />
+        <Body markdown={markdown} moduleId={moduleId} wide={wide} />
       </div>
     );
   }
@@ -237,13 +262,10 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
       </nav>
 
       <div className="min-w-0 lg:flex-1">
-        {preamble && <Body markdown={preamble} moduleId={moduleId} />}
+        {preamble && <Body markdown={preamble} moduleId={moduleId} wide={wide} />}
 
-        <div
-          role="tablist"
-          aria-label="Chapters"
-          className="sticky top-0 z-20 mt-4 flex gap-1 overflow-x-auto border-b border-line bg-surface"
-        >
+        <div className="sticky top-0 z-20 mt-4 flex items-stretch border-b border-line bg-surface">
+        <div role="tablist" aria-label="Chapters" className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
           {chapters.map((c, i) => (
             <button
               key={c.label}
@@ -258,9 +280,19 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
             </button>
           ))}
         </div>
+          <button
+            type="button"
+            onClick={() => setWide(!wide)}
+            title={wide ? "Use a comfortable reading width" : "Use the full width"}
+            aria-pressed={wide}
+            className="ml-2 hidden shrink-0 self-center whitespace-nowrap border-l border-line py-1 pl-3 text-[13px] text-ink-3 hover:text-accent lg:block"
+          >
+            {wide ? "Comfortable" : "Full width"}
+          </button>
+        </div>
 
         <div className="pt-4">
-          <Body markdown={chapters[active].markdown} moduleId={moduleId} />
+          <Body markdown={chapters[active].markdown} moduleId={moduleId} wide={wide} />
         </div>
       </div>
     </div>
