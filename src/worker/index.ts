@@ -3,10 +3,11 @@ import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
-import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, selectRequestedUsers, takeSyncRequest, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
+import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, selectRequestedUsers, takeSyncRequest, upsertModuleFiles, type DiscoveredFile, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
-import { createCanvasClient, isPdfFile } from "../connectors/canvas/client";
+import { createCanvasClient, isPdfFile, type CanvasClient } from "../connectors/canvas/client";
+import { extractCanvasFileIds } from "../lib/canvas-file-links";
 import { normalizeCanvasCourse } from "../connectors/canvas/normalize";
 import { fetchInboxDelta } from "../connectors/graph/client";
 import { refreshAccessToken } from "../connectors/graph/auth";
@@ -45,6 +46,65 @@ if (compatCfg) console.log(`llm provider: openai-compat ${compatCfg.model} @ ${c
 
 const SYLLABUS_NAME_RE = /(syllabus|assessment|grading|outline)/i;
 
+// Records every file a module has, from two sources that barely overlap: the
+// Files listing, and links pasted into announcements or the syllabus. Some
+// courses keep their entire deck set in the second category — IFS4103's Files
+// tab holds two recruitment posters while its lecture slides are reachable
+// only by id, hidden from the listing, and the study guide for that module
+// consequently had no slides to cite.
+//
+// Only files LINKED FROM CONTENT the student can already read are harvested.
+// hidden:true can mean deliberately withheld as well as merely unlisted, and
+// following a link the course itself published is what keeps the distinction
+// honest.
+async function harvestFiles(
+  canvas: CanvasClient,
+  courseId: number,
+  moduleId: number,
+  html: (string | null)[],
+): Promise<void> {
+  const discovered = new Map<number, DiscoveredFile>();
+
+  const listed = await (async () => {
+    try { return await canvas.listCourseFiles(courseId); } catch { return []; }
+  })();
+  for (const f of listed) {
+    discovered.set(f.id, {
+      canvasFileId: f.id, displayName: f.display_name,
+      contentType: f["content-type"] ?? null, sizeBytes: f.size ?? null, hidden: false,
+    });
+  }
+
+  // Pages carry the links the Files tab omits: IFS4103 publishes its lecture
+  // decks on two content pages and nowhere else. Page counts are small (2-7
+  // across the active modules) so this is a handful of extra calls, but the
+  // cap stops a course with a large wiki from dominating a sync cycle.
+  const fromPages: (string | null)[] = [];
+  try {
+    for (const page of (await canvas.listPages(courseId)).slice(0, 25)) {
+      try { fromPages.push(await canvas.getPageBody(courseId, page.url)); } catch { /* single page unreadable */ }
+    }
+  } catch {
+    // Pages are disabled for some courses (CS4239 returns 404); not an error.
+  }
+
+  for (const id of extractCanvasFileIds([...html, ...fromPages])) {
+    if (discovered.has(id)) continue;
+    try {
+      const f = await canvas.getFile(id);
+      discovered.set(id, {
+        canvasFileId: f.id, displayName: f.display_name,
+        contentType: f["content-type"] ?? null, sizeBytes: f.size ?? null, hidden: true,
+      });
+    } catch {
+      // A link can point at a file the student cannot read, or one since
+      // deleted. Skip it rather than failing the whole course sync.
+    }
+  }
+
+  if (discovered.size > 0) upsertModuleFiles(db, moduleId, [...discovered.values()], Date.now());
+}
+
 async function canvasSync(userId: number): Promise<void> {
   const user = db.select().from(users).where(eq(users.id, userId)).get()!;
   if (!user.canvasTokenEnc) return;
@@ -57,6 +117,8 @@ async function canvasSync(userId: number): Promise<void> {
     ]);
     const sync = normalizeCanvasCourse(course, groups, announcements, events);
     const { moduleId } = applyCanvasSync(db, userId, sync, Date.now());
+
+    await harvestFiles(canvas, course.id, moduleId, [...announcements.map((a) => a.message), course.syllabus_body ?? null]);
 
     // Weightage extraction: component-less modules only, at most weekly.
     if (!extractor) continue;

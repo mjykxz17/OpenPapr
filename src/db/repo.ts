@@ -1,6 +1,6 @@
 import { and, asc, eq, desc, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { components, items, modules, studyGuides, users } from "./schema";
+import { components, files, items, modules, studyGuides, users } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 import type { MailItem } from "../connectors/graph/normalize";
 import { decrypt, encrypt } from "../lib/crypto";
@@ -41,6 +41,46 @@ export function resolveCanvasUser(
   return db.insert(users)
     .values({ name: self.name, canvasUserId: self.id, canvasTokenEnc: tokenEnc, createdAt: now })
     .returning().get().id;
+}
+
+export type DiscoveredFile = {
+  canvasFileId: number;
+  displayName: string;
+  contentType: string | null;
+  sizeBytes: number | null;
+  hidden: boolean;
+};
+
+// Records what a module's files are, from both the Files listing and links
+// harvested out of content HTML. A file already seen in the listing is never
+// demoted to hidden: the listing is the more trustworthy signal, and the two
+// sources overlap.
+export function upsertModuleFiles(db: Db, moduleId: number, discovered: DiscoveredFile[], now: number): void {
+  for (const f of discovered) {
+    const existing = db.select().from(files)
+      .where(and(eq(files.moduleId, moduleId), eq(files.canvasFileId, f.canvasFileId))).get();
+    if (existing) {
+      db.update(files).set({
+        displayName: f.displayName,
+        contentType: f.contentType,
+        sizeBytes: f.sizeBytes,
+        hidden: existing.hidden && f.hidden,
+      }).where(eq(files.id, existing.id)).run();
+      continue;
+    }
+    db.insert(files).values({ moduleId, ...f, discoveredAt: now }).run();
+  }
+}
+
+const stemOf = (name: string) => name.replace(/\.[^.]+$/, "").toLowerCase();
+
+// Looks a deck up by filename stem, preferring a listed file over a hidden one
+// when both carry the same name.
+export function findModuleFileByStem(db: Db, moduleId: number, name: string) {
+  const want = stemOf(name);
+  const rows = db.select().from(files).where(eq(files.moduleId, moduleId)).all()
+    .filter((r) => stemOf(r.displayName) === want);
+  return rows.find((r) => !r.hidden) ?? rows[0];
 }
 
 // "Sync now" from the web process. The worker has no inbox, so the request is

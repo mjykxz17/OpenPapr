@@ -35,6 +35,22 @@ export const modules = sqliteTable("modules", {
   hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),  // hidden from the home grid (user preference)
 }, (t) => [uniqueIndex("modules_user_course").on(t.userId, t.canvasCourseId)]);
 
+// Every Canvas file we know about for a module, from the Files listing AND
+// from links harvested out of announcement/page HTML. Download urls are signed
+// and expire, so only the id is stored — the url is re-fetched at read time.
+export const files = sqliteTable("files", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  canvasFileId: integer("canvas_file_id").notNull(),
+  displayName: text("display_name").notNull(),
+  contentType: text("content_type"),
+  sizeBytes: integer("size_bytes"),
+  // True for files reachable only by direct id — pasted into content rather
+  // than uploaded to the Files tab.
+  hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
+  discoveredAt: integer("discovered_at").notNull(),
+}, (t) => [uniqueIndex("files_module_canvas_file").on(t.moduleId, t.canvasFileId)]);
+
 export const components = sqliteTable("components", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   moduleId: integer("module_id").notNull().references(() => modules.id),

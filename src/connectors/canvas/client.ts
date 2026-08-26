@@ -53,6 +53,10 @@ export function createCanvasClient(baseUrl: string, token: string, fetchFn: type
       (await getOne<{ body: string | null }>(`/courses/${courseId}/pages/${encodeURIComponent(slug)}`)).body ?? "",
     listSyllabusFiles: (courseId: number) =>
       getAllPages<CanvasFile>(`/courses/${courseId}/files?search_term=syllabus&per_page=50`),
+    // Resolves one file by id. This is how hidden files are reached: they are
+    // absent from the course listing but fetch fine when asked for directly,
+    // and the response carries a freshly signed download url.
+    getFile: (fileId: number) => getOne<CanvasFile>(`/files/${fileId}`),
     listCourseFiles: (courseId: number) =>
       getAllPages<CanvasFile>(`/courses/${courseId}/files?per_page=100&sort=created_at`),
     downloadFile: async (url: string) => {

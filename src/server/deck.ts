@@ -1,8 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { modules, users } from "@/db/schema";
+import { findModuleFileByStem } from "@/db/repo";
 import { loadEnv } from "@/lib/env";
 import { decrypt } from "@/lib/crypto";
 import { createCanvasClient, isPdfFile } from "@/connectors/canvas/client";
@@ -23,6 +24,19 @@ export const deckCachePath = (
   dbPath: string = process.env.DATABASE_PATH ?? "data/openpapr.db",
 ) => join(dirname(dbPath), "deck-cache", String(courseId), `${deckStem(name)}.pdf`);
 
+// Decks are large — IFS4103's are 22MB — and a single guide page can request
+// thirty slide images from one deck. Writing the download to the volume turns
+// that into one fetch instead of thirty.
+function cacheDeck(path: string, bytes: Uint8Array): Uint8Array {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, bytes);
+  } catch {
+    // A read-only or full disk must not break serving the deck.
+  }
+  return bytes;
+}
+
 export type DeckResult = { bytes: Uint8Array } | { error: string; status: number };
 
 // Loads a module's slide deck as PDF bytes for the deck/slide routes.
@@ -39,11 +53,27 @@ export async function loadDeckPdf(db: Db, userId: number, moduleId: number, name
   const user = db.select().from(users).where(eq(users.id, userId)).get();
   if (!user?.canvasTokenEnc) return { error: "no canvas token", status: 502 };
   const canvas = createCanvasClient(env.CANVAS_BASE_URL, decrypt(user.canvasTokenEnc, env.SECRET_KEY));
+
+  // Harvested files first. Some courses keep their decks out of the Files
+  // listing entirely, so the listing below would never find them; the stored
+  // id resolves regardless of whether Canvas lists the file.
+  const known = findModuleFileByStem(db, moduleId, name);
+  if (known) {
+    try {
+      // Download urls are signed and expire, so the row holds the id and the
+      // url is fetched fresh here.
+      const fresh = await canvas.getFile(known.canvasFileId);
+      return { bytes: cacheDeck(cached, await canvas.downloadFile(fresh.url)) };
+    } catch {
+      // Fall through to the listing — the file may have been removed.
+    }
+  }
+
   try {
-    const files = await canvas.listCourseFiles(mod.canvasCourseId);
-    const file = files.find((f) => isPdfFile(f) && deckStem(f.display_name).toLowerCase() === deckStem(name).toLowerCase());
+    const listed = await canvas.listCourseFiles(mod.canvasCourseId);
+    const file = listed.find((f) => isPdfFile(f) && deckStem(f.display_name).toLowerCase() === deckStem(name).toLowerCase());
     if (!file) return { error: "deck not found", status: 404 };
-    return { bytes: await canvas.downloadFile(file.url) };
+    return { bytes: cacheDeck(cached, await canvas.downloadFile(file.url)) };
   } catch {
     return { error: "canvas unavailable", status: 502 };
   }

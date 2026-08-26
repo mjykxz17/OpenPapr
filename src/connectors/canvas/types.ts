@@ -7,7 +7,7 @@ export interface CanvasCalendarEvent { id: number; title: string; start_at: stri
 export interface CanvasPage { url: string; title: string; }
 // NB: the Canvas files API returns the MIME type under the HYPHENATED key
 // "content-type", not snake_case like every other field.
-export interface CanvasFile { id: number; display_name: string; url: string; "content-type"?: string; }
+export interface CanvasFile { id: number; display_name: string; url: string; "content-type"?: string; size?: number; hidden?: boolean; }
 
 // GET /api/v1/users/self — the signed-in Canvas account behind a token.
 export interface CanvasSelf { id: number; name: string; short_name?: string; primary_email?: string | null; }
