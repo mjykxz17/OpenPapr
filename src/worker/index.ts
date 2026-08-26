@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
-import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
+import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, takeSyncRequest, upsertMailItems } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient, isPdfFile } from "../connectors/canvas/client";
@@ -17,7 +17,7 @@ import { createCompatScorer, createCompatWeightageExtractor } from "./../enrich/
 import { createCompatActionExtractor } from "../enrich/actions";
 import { createCompatDeadlineClassifier } from "../enrich/classify";
 import { createWeightageExtractor, type WeightageSourceText, type WeightageSourcePdf } from "../enrich/weightage";
-import { createGuard, runUserSync } from "./sync";
+import { createGuard, runUserSync, shouldStartCycle } from "./sync";
 import { extractPdfText } from "../lib/pdf-text";
 import { focusAssessmentText } from "../lib/assessment-focus";
 
@@ -166,16 +166,27 @@ async function enrich(userId: number): Promise<void> {
 }
 
 const guard = createGuard(env.POLL_INTERVAL_MS);
-async function loop(): Promise<void> {
+const deps = {
+  db, now: Date.now,
+  canvasSync: guard("canvas", canvasSync),
+  mailSync: guard("graph", mailSync),
+  enrich: guard("enrich", enrich),
+};
+// Short tick so a manual "sync now" (users.syncRequestedAt, set by POST
+// /api/sync) is picked up within seconds; scheduled cycles still run once per
+// POLL_INTERVAL_MS per user.
+const TICK_MS = Math.min(2_000, env.POLL_INTERVAL_MS);
+const lastCycleAt = new Map<number, number>();
+async function tick(): Promise<void> {
   for (const user of db.select().from(users).all()) {
-    await runUserSync({
-      db, now: Date.now,
-      canvasSync: guard("canvas", canvasSync),
-      mailSync: guard("graph", mailSync),
-      enrich: guard("enrich", enrich),
-    }, user.id);
+    const requested = takeSyncRequest(db, user.id);
+    if (!shouldStartCycle({ lastCycleAt: lastCycleAt.get(user.id) ?? null, requested, now: Date.now(), pollIntervalMs: env.POLL_INTERVAL_MS })) continue;
+    if (requested) guard.resetUser(user.id);
+    lastCycleAt.set(user.id, Date.now());
+    if (requested) console.log(`manual sync requested for user ${user.id}`);
+    await runUserSync(deps, user.id);
   }
-  setTimeout(loop, env.POLL_INTERVAL_MS);
+  setTimeout(tick, TICK_MS);
 }
 console.log("openpapr worker starting");
-void loop();
+void tick();

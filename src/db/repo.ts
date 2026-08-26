@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "./client";
-import { components, items, modules, studyGuides } from "./schema";
+import { components, items, modules, studyGuides, syncRuns, users } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 import type { MailItem } from "../connectors/graph/normalize";
 
@@ -152,6 +152,37 @@ export function upsertStudyGuide(db: Db, moduleId: number, markdown: string, sou
 
 export function getStudyGuide(db: Db, moduleId: number) {
   return db.select().from(studyGuides).where(eq(studyGuides.moduleId, moduleId)).get();
+}
+
+// A run whose finishedAt never arrives (worker killed mid-cycle) must not pin
+// the UI on "running" forever.
+const RUN_STALE_MS = 10 * 60_000;
+
+export type SyncState = { pending: boolean; running: boolean; lastFinishedAt: number | null };
+
+// Manual-sync contract: POST /api/sync sets users.syncRequestedAt (`pending`);
+// the worker's next tick takes the request and starts a cycle, whose sync_runs
+// rows make the state `running` until the cycle's last source finishes.
+export function requestSync(db: Db, userId: number, now: number): void {
+  db.update(users).set({ syncRequestedAt: now }).where(eq(users.id, userId)).run();
+}
+
+export function takeSyncRequest(db: Db, userId: number): boolean {
+  const user = db.select().from(users).where(eq(users.id, userId)).get();
+  if (!user?.syncRequestedAt) return false;
+  db.update(users).set({ syncRequestedAt: null }).where(eq(users.id, userId)).run();
+  return true;
+}
+
+export function getSyncState(db: Db, userId: number, now: number): SyncState {
+  const user = db.select().from(users).where(eq(users.id, userId)).get();
+  const runs = db.select().from(syncRuns).where(eq(syncRuns.userId, userId)).all();
+  const finished = runs.map((r) => r.finishedAt).filter((t): t is number => t !== null);
+  return {
+    pending: (user?.syncRequestedAt ?? null) !== null,
+    running: runs.some((r) => r.finishedAt === null && now - r.startedAt < RUN_STALE_MS),
+    lastFinishedAt: finished.length ? Math.max(...finished) : null,
+  };
 }
 
 export type StudyGuideSummary = { moduleId: number; code: string; name: string; sourceNote: string | null; generatedAt: number };

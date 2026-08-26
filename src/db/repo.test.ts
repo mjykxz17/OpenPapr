@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDb } from "./client";
-import { items, components, users, modules, studyGuides } from "./schema";
-import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, upsertStudyGuide, getStudyGuide, listStudyGuides, setModuleOrder, setModuleHidden } from "./repo";
+import { items, components, users, modules, studyGuides, syncRuns } from "./schema";
+import { applyCanvasSync, applyExtractedActions, setModuleActivity, shouldAttemptWeightage, upsertStudyGuide, getStudyGuide, listStudyGuides, setModuleOrder, setModuleHidden, requestSync, takeSyncRequest, getSyncState } from "./repo";
 import { eq } from "drizzle-orm";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 
@@ -230,5 +230,38 @@ describe("setModuleHidden", () => {
     const db = seed();
     setModuleHidden(db, 1, 2, true); // id 2 belongs to user 2
     expect(db.select().from(modules).where(eq(modules.id, 2)).get()!.hidden).toBe(false);
+  });
+});
+
+describe("manual sync request + state", () => {
+  it("requestSync sets the flag, takeSyncRequest consumes it exactly once", () => {
+    const db = setup();
+    expect(takeSyncRequest(db, 1)).toBe(false);
+    requestSync(db, 1, 100);
+    expect(getSyncState(db, 1, 100).pending).toBe(true);
+    expect(takeSyncRequest(db, 1)).toBe(true);
+    expect(getSyncState(db, 1, 100).pending).toBe(false);
+    expect(takeSyncRequest(db, 1)).toBe(false);
+  });
+  it("running reflects an unfinished recent run, but not one older than the stale window", () => {
+    const db = setup();
+    db.insert(syncRuns).values({ userId: 1, source: "canvas", startedAt: 1000 }).run();
+    expect(getSyncState(db, 1, 2000).running).toBe(true);
+    expect(getSyncState(db, 1, 1000 + 11 * 60_000).running).toBe(false);
+  });
+  it("lastFinishedAt is the newest finished run across sources; null when nothing finished", () => {
+    const db = setup();
+    expect(getSyncState(db, 1, 0).lastFinishedAt).toBeNull();
+    db.insert(syncRuns).values({ userId: 1, source: "canvas", startedAt: 1, finishedAt: 5, ok: true }).run();
+    db.insert(syncRuns).values({ userId: 1, source: "enrich", startedAt: 6, finishedAt: 9, ok: true }).run();
+    expect(getSyncState(db, 1, 10).lastFinishedAt).toBe(9);
+  });
+  it("is scoped per user — user 2's request and runs do not leak into user 1's state", () => {
+    const db = setup();
+    db.insert(users).values({ name: "b" }).run();
+    requestSync(db, 2, 50);
+    db.insert(syncRuns).values({ userId: 2, source: "canvas", startedAt: 40 }).run();
+    const s = getSyncState(db, 1, 60);
+    expect(s).toEqual({ pending: false, running: false, lastFinishedAt: null });
   });
 });

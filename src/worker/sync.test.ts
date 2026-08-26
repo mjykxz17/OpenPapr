@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDb } from "../db/client";
 import { syncRuns, users } from "../db/schema";
-import { BackoffSkipError, computeBackoffMs, createGuard, runUserSync } from "./sync";
+import { BackoffSkipError, computeBackoffMs, createGuard, runUserSync, shouldStartCycle } from "./sync";
 
 const setup = () => {
   const db = createDb(":memory:");
@@ -137,5 +137,43 @@ describe("runUserSync + createGuard integration", () => {
     canvasRun = db.select().from(syncRuns).all().find((r) => r.source === "canvas" && r.startedAt === 2)!;
     expect(canvasRun.ok).toBe(false);
     expect(canvasRun.error).toContain("backing off");
+  });
+});
+
+describe("shouldStartCycle", () => {
+  it("a manual request always starts a cycle, even mid-interval", () => {
+    expect(shouldStartCycle({ lastCycleAt: 90, requested: true, now: 100, pollIntervalMs: 300_000 })).toBe(true);
+  });
+  it("without a request, starts only when the poll interval has elapsed (or never ran)", () => {
+    expect(shouldStartCycle({ lastCycleAt: null, requested: false, now: 0, pollIntervalMs: 300_000 })).toBe(true);
+    expect(shouldStartCycle({ lastCycleAt: 0, requested: false, now: 299_999, pollIntervalMs: 300_000 })).toBe(false);
+    expect(shouldStartCycle({ lastCycleAt: 0, requested: false, now: 300_000, pollIntervalMs: 300_000 })).toBe(true);
+  });
+});
+
+describe("createGuard.resetUser", () => {
+  it("clears backoff for that user so a manual sync retries immediately", async () => {
+    let clock = 0;
+    const guard = createGuard(300_000, () => clock);
+    const fn = vi.fn(async () => { throw new Error("down"); });
+    const wrapped = guard("canvas", fn);
+
+    await expect(wrapped(1)).rejects.toThrow("down");
+    clock = 100_000; // within the backoff window
+    guard.resetUser(1);
+    fn.mockClear();
+    await expect(wrapped(1)).rejects.toThrow("down"); // real attempt, not a BackoffSkipError
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+  it("leaves other users' backoff state untouched", async () => {
+    let clock = 0;
+    const guard = createGuard(300_000, () => clock);
+    const fn = vi.fn(async () => { throw new Error("down"); });
+    const wrapped = guard("canvas", fn);
+
+    await expect(wrapped(2)).rejects.toThrow("down");
+    clock = 100_000;
+    guard.resetUser(1);
+    await expect(wrapped(2)).rejects.toThrow(BackoffSkipError);
   });
 });

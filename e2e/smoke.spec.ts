@@ -8,6 +8,7 @@ test("login, module grid, module detail, mail", async ({ page }) => {
   await expect(page).toHaveURL("/");
 
   // Home is now the draggable module grid — each tile is a link to its module.
+  await expect(page.getByRole("button", { name: /sync now/i })).toBeVisible();
   await expect(page.getByText("CS2103T").first()).toBeVisible();
   await expect(page.getByRole("link", { name: /ST2334/ })).toHaveAttribute("href", "/modules/2");
 

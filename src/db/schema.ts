@@ -7,6 +7,7 @@ export const users = sqliteTable("users", {
   msRefreshTokenEnc: text("ms_refresh_token_enc"),
   msDeltaLink: text("ms_delta_link"),
   lastSeenAt: integer("last_seen_at").notNull().default(0),
+  syncRequestedAt: integer("sync_requested_at"),  // manual "sync now" flag; worker clears it when it starts the cycle
 });
 
 export const modules = sqliteTable("modules", {

@@ -2,6 +2,7 @@ import { getDb } from "@/server/db";
 import { getOverview } from "@/server/overview";
 import { loadEnv } from "@/lib/env";
 import { AppShell } from "@/components/AppShell";
+import { SyncButton } from "@/components/SyncButton";
 import { SyncStatus } from "@/components/SyncStatus";
 import { ModuleGrid } from "@/components/ModuleGrid";
 
@@ -25,7 +26,10 @@ export default function Home() {
           <div className="text-lg font-medium tabular-nums text-ink">{dateLabel}</div>
           <div className="text-xs uppercase tracking-wide text-ink-3">AY26/27</div>
         </div>
-        <SyncStatus syncStatus={overview.syncStatus} />
+        <div className="flex items-center gap-4">
+          <SyncStatus syncStatus={overview.syncStatus} />
+          <SyncButton />
+        </div>
       </header>
 
       <ModuleGrid modules={overview.modules} />

@@ -33,11 +33,19 @@ export function computeBackoffMs(consecutiveFailures: number, baseMs: number): n
 
 export class BackoffSkipError extends Error {}
 
+// The worker ticks every few seconds instead of sleeping a whole poll
+// interval, so a manual sync request is picked up promptly; a cycle still
+// starts on its own only once per pollIntervalMs.
+export function shouldStartCycle(opts: { lastCycleAt: number | null; requested: boolean; now: number; pollIntervalMs: number }): boolean {
+  if (opts.requested) return true;
+  return opts.lastCycleAt === null || opts.now - opts.lastCycleAt >= opts.pollIntervalMs;
+}
+
 export function createGuard(baseMs: number, now: () => number = Date.now) {
   const failures = new Map<string, number>();
   const lastFailAt = new Map<string, number>();
   const lastError = new Map<string, string>();
-  return function guard(source: string, fn: (userId: number) => Promise<void>) {
+  const guard = function (source: string, fn: (userId: number) => Promise<void>) {
     return async (userId: number) => {
       const key = `${source}:${userId}`;
       const n = failures.get(key) ?? 0;
@@ -55,4 +63,11 @@ export function createGuard(baseMs: number, now: () => number = Date.now) {
       }
     };
   };
+  // A manual sync is an explicit retry: forget this user's failure history so
+  // the cycle runs instead of hitting BackoffSkipError mid-backoff.
+  const resetUser = (userId: number): void => {
+    for (const m of [failures, lastFailAt, lastError])
+      for (const key of [...m.keys()]) if (key.endsWith(`:${userId}`)) m.delete(key);
+  };
+  return Object.assign(guard, { resetUser });
 }
