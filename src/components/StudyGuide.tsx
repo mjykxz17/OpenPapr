@@ -27,14 +27,14 @@ function componentsFor(moduleId: number): Components {
   return {
   h1: ({ children }) => <h1 className="mt-8 mb-4 text-2xl font-semibold text-ink first:mt-0">{children}</h1>,
   h2: ({ children }) => (
-    <h2 id={slugifyHeading(nodeText(children))} className="mt-2 mb-4 scroll-mt-24 text-xl font-semibold text-ink">{children}</h2>
+    <h2 id={slugifyHeading(nodeText(children))} className="mt-2 mb-5 scroll-mt-24 text-[26px] font-semibold leading-tight text-ink">{children}</h2>
   ),
   h3: ({ children }) => (
-    <h3 id={slugifyHeading(nodeText(children))} className="mt-8 mb-2 scroll-mt-24 text-lg font-semibold text-ink">{children}</h3>
+    <h3 id={slugifyHeading(nodeText(children))} className="mt-10 mb-3 scroll-mt-24 text-[18px] font-semibold leading-snug text-ink">{children}</h3>
   ),
-  p: ({ children }) => <p className="my-3.5 text-[17px] leading-[1.75] text-ink">{children}</p>,
-  ul: ({ children }) => <ul className="my-3.5 list-disc space-y-2 pl-5 text-[17px] leading-[1.75] text-ink">{children}</ul>,
-  ol: ({ children }) => <ol className="my-3.5 list-decimal space-y-2 pl-5 text-[17px] leading-[1.75] text-ink">{children}</ol>,
+  p: ({ children }) => <p className="my-4 text-[16px] leading-[1.65] text-ink">{children}</p>,
+  ul: ({ children }) => <ul className="my-4 list-disc space-y-1.5 pl-5 text-[16px] leading-[1.65] text-ink">{children}</ul>,
+  ol: ({ children }) => <ol className="my-4 list-decimal space-y-1.5 pl-5 text-[16px] leading-[1.65] text-ink">{children}</ol>,
   li: ({ children }) => <li className="marker:text-ink-3">{children}</li>,
   strong: ({ children }) => <strong className="font-medium text-ink">{children}</strong>,
   em: ({ children }) => <em className="italic text-ink-2">{children}</em>,
@@ -83,7 +83,7 @@ function componentsFor(moduleId: number): Components {
     );
   },
   blockquote: ({ children }) => (
-    <blockquote className="my-4 border-l-2 border-line pl-4 text-[17px] italic leading-[1.75] text-ink-2">{children}</blockquote>
+    <blockquote className="my-5 rounded-lg border border-line bg-ink/[0.02] px-4 py-3 text-[15px] leading-[1.6] text-ink-2">{children}</blockquote>
   ),
   hr: () => <hr className="my-6 border-line" />,
   table: ({ children }) => (
@@ -98,9 +98,9 @@ function componentsFor(moduleId: number): Components {
   };
 }
 
-function Body({ markdown, moduleId, wide }: { markdown: string; moduleId: number; wide: boolean }) {
+function Body({ markdown, moduleId }: { markdown: string; moduleId: number }) {
   return (
-    <div className="guide" data-width={wide ? "wide" : "measure"}>
+    <div className="guide">
       <Markdown remarkPlugins={[remarkGfm, remarkUnwrapImages]} urlTransform={(u) => u} components={componentsFor(moduleId)}>
         {markdown}
       </Markdown>
@@ -108,7 +108,6 @@ function Body({ markdown, moduleId, wide }: { markdown: string; moduleId: number
   );
 }
 
-const WIDTH_KEY = "sg-width";
 
 // Collapsed-outline bar length, scaled to the heading it stands for and
 // clamped so the rail stays a tidy ragged edge rather than a jagged one.
@@ -125,27 +124,6 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
   const preamble = rawPreamble.replace(/^\s*#\s+.*(?:\n|$)/, "").trim();
   const [active, setActive] = useState(0);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
-  // Reading width is a per-reader preference, not per-guide: someone who wants
-  // the full width wants it everywhere, so the key is not scoped to a module.
-  const [wide, setWideState] = useState(true);
-
-  useEffect(() => {
-    try {
-      // Full width is the default; "measure" is the stored opt-out.
-      setWideState(localStorage.getItem(WIDTH_KEY) !== "measure");
-    } catch {
-      // Private browsing or storage disabled — the default is fine.
-    }
-  }, []);
-
-  const setWide = (next: boolean) => {
-    setWideState(next);
-    try {
-      localStorage.setItem(WIDTH_KEY, next ? "wide" : "measure");
-    } catch {
-      // Preference simply will not persist; the toggle still works this visit.
-    }
-  };
   const pendingScroll = useRef<string | null>(null); // section to scroll to after a restored chapter renders
   const tabsRef = useRef<HTMLDivElement | null>(null);      // the sticky chapter bar
   const tabsAnchor = useRef<HTMLDivElement | null>(null);   // zero-height marker at the bar's resting position
@@ -258,121 +236,86 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
     return () => window.removeEventListener("scroll", onScroll, { capture: true });
   }, [spyKey]);
 
-  // Prose width is governed by the measure grid in globals.css, not here, so
-  // this only has to stop figures from spanning the whole 1280px shell.
-  const widthClass = "w-full";
-
-  // No chapters to tab — render the whole thing as before.
+  // Layout follows a documentation three-column shape: chapters on the left,
+  // the reading column in the middle, the current chapter's sections on the
+  // right. Navigation on both flanks is what lets the prose stay a comfortable
+  // width without leaving the page half empty — the problem a single centred
+  // column had.
   if (chapters.length === 0) {
     return (
-      <div className={widthClass}>
-        <Body markdown={markdown} moduleId={moduleId} wide={wide} />
+      <div className="w-full">
+        <Body markdown={markdown} moduleId={moduleId} />
       </div>
     );
   }
 
-  return (
-    <div className={`${widthClass} lg:flex lg:gap-14`}>
-      {/* Outline for the CURRENT chapter only — switch chapters via the tabs. */}
-      {/* Collapsed to a minimap of bars, expanding to labels on hover or
-          keyboard focus — the outline is glanceable while reading and only
-          takes the page over when you reach for it. The collapsed rail keeps
-          its narrow width in the flow and the expanded panel overlays, so the
-          prose never reflows underneath the pointer. */}
-      {/* No self-start: the wrapper must stretch to the full height of the
-          flex row, because a sticky child can only travel inside its
-          containing block. Shrink-wrapping it pinned the rail to the top of
-          a 200px-tall box and it scrolled away with the page. */}
-      <div className="hidden w-16 shrink-0 lg:block">
-        <nav
-          aria-label="On this page"
-          className="group sticky top-6 z-30 w-16"
-        >
-          <div className="w-16 rounded-md py-2 pl-1 pr-2 transition-[width,box-shadow,background-color] duration-200 ease-out group-focus-within:w-[19rem] group-focus-within:bg-surface group-focus-within:shadow-lg group-focus-within:ring-1 group-focus-within:ring-line group-hover:w-[19rem] group-hover:bg-surface group-hover:shadow-lg group-hover:ring-1 group-hover:ring-line motion-reduce:transition-none">
-            {/* overflow-x must be stated: CSS computes a non-visible value on
-                one axis to `auto` on the other, so overflow-y-auto alone gave
-                the collapsed rail a horizontal scrollbar under its bars. */}
-            <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto overflow-x-hidden">
-              <div className="px-2 pb-2">
-                <span className="block h-[3px] rounded-full bg-ink/70 group-hover:hidden group-focus-within:hidden" style={{ width: barWidth(chapters[active].label, 24, 34) }} />
-                <span className="hidden text-[13px] font-semibold leading-snug text-ink group-focus-within:block group-hover:block">
-                  {chapters[active].label}
-                </span>
-              </div>
-
-              {subs.length > 0 && (
-                <ul className="space-y-[7px] group-focus-within:space-y-0.5 group-hover:space-y-0.5">
-                  {subs.map((h) => {
-                    const current = activeSlug === h.slug;
-                    return (
-                      <li key={h.slug}>
-                        <a
-                          href={`#${h.slug}`}
-                          onClick={(e) => { e.preventDefault(); setActiveSlug(h.slug); scrollToHeading(h.slug); }}
-                          title={h.label}
-                          className={`block rounded px-2 py-1 group-focus-within:py-1 group-hover:py-1 ${
-                            current ? "" : "hover:bg-ink/[0.04]"
-                          }`}
-                        >
-                          <span
-                            className={`block h-[3px] rounded-full transition-colors group-focus-within:hidden group-hover:hidden ${
-                              current ? "bg-accent" : "bg-ink/25"
-                            }`}
-                            style={{ width: barWidth(h.label) }}
-                          />
-                          <span
-                            className={`hidden text-[13px] leading-snug group-focus-within:block group-hover:block ${
-                              current ? "font-medium text-accent" : "text-ink-3"
-                            }`}
-                          >
-                            {h.label}
-                          </span>
-                        </a>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          </div>
-        </nav>
-      </div>
-
-      <div className="min-w-0 lg:flex-1">
-        {preamble && <Body markdown={preamble} moduleId={moduleId} wide={wide} />}
-
-        <div ref={tabsAnchor} aria-hidden className="h-0" />
-        <div ref={tabsRef} className="sticky top-0 z-20 mt-4 flex items-stretch border-b border-line bg-surface">
-        <div role="tablist" aria-label="Chapters" className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
-          {chapters.map((c, i) => (
+  const chapterNav = (
+    <nav aria-label="Chapters" className="sticky top-6 hidden self-start lg:block">
+      <p className="mb-2 px-2 text-[11px] font-medium uppercase tracking-wide text-ink-3">Chapters</p>
+      <ul className="space-y-0.5">
+        {chapters.map((c, i) => (
+          <li key={c.label}>
             <button
-              key={c.label}
-              role="tab"
-              aria-selected={i === active}
+              type="button"
+              aria-current={i === active ? "true" : undefined}
               onClick={() => selectChapter(i)}
-              className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-[13px] transition-colors ${
-                i === active ? "border-accent text-ink" : "border-transparent text-ink-3 hover:text-ink-2"
+              className={`block w-full rounded-md px-2 py-1.5 text-left text-[14px] leading-snug transition-colors ${
+                i === active
+                  ? "bg-ink/[0.07] font-medium text-ink"
+                  : "text-ink-3 hover:bg-ink/[0.04] hover:text-ink-2"
               }`}
             >
               {c.label}
             </button>
-          ))}
-        </div>
-          <button
-            type="button"
-            onClick={() => setWide(!wide)}
-            title={wide ? "Use a comfortable reading width" : "Use the full width"}
-            aria-pressed={wide}
-            className="ml-2 hidden shrink-0 self-center whitespace-nowrap border-l border-line py-1 pl-3 text-[13px] text-ink-3 hover:text-accent lg:block"
-          >
-            {wide ? "Comfortable" : "Full width"}
-          </button>
-        </div>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
 
-        <div className="pt-4">
-          <Body markdown={chapters[active].markdown} moduleId={moduleId} wide={wide} />
-        </div>
+  const sectionNav = (
+    <nav aria-label="On this page" className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] self-start overflow-y-auto lg:block">
+      {subs.length > 0 && (
+        <>
+          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ink-3">On this page</p>
+          <ul className="border-l border-line">
+            {subs.map((h) => {
+              const current = activeSlug === h.slug;
+              return (
+                <li key={h.slug}>
+                  <a
+                    href={`#${h.slug}`}
+                    onClick={(e) => { e.preventDefault(); setActiveSlug(h.slug); scrollToHeading(h.slug); }}
+                    className={`-ml-px block border-l-2 py-1 pl-3 text-[13px] leading-snug transition-colors ${
+                      current ? "border-ink font-medium text-ink" : "border-transparent text-ink-3 hover:text-ink-2"
+                    }`}
+                  >
+                    {h.label}
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+    </nav>
+  );
+
+  return (
+    <div className="w-full lg:grid lg:grid-cols-[13.5rem_minmax(0,1fr)_12rem] lg:items-start lg:gap-10">
+      {chapterNav}
+
+      <div className="min-w-0">
+        <div ref={tabsAnchor} aria-hidden className="h-0" />
+        {preamble && (
+          <div className="mb-10">
+            <Body markdown={preamble} moduleId={moduleId} />
+          </div>
+        )}
+        <Body markdown={chapters[active].markdown} moduleId={moduleId} />
       </div>
+
+      {sectionNav}
     </div>
   );
 }

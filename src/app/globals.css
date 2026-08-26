@@ -45,31 +45,16 @@ body {
 
 /* Study-guide reading column.
 
-   Prose is capped at a measure — the characters-per-line the eye can track
-   without losing its place on the return sweep. The long-standing typographic
-   range is 45-75 characters, around 66 being the classic target; the guide sat
-   near 105 at wide viewports, which is why it read as a wall.
-
-   Measured in em, not px or ch, so the column follows the font size and the
-   reader's zoom. em rather than ch because ch is the width of "0", which in
-   this typeface is 0.62em — a 72ch column measured out at 764px, about 90
-   characters. Average lowercase runs near 0.5em, so characters-per-line is
-   roughly twice the em value: 34em lands around 68 characters.
-
-   The grid gives two tracks. Prose takes the centre "text" column; figures,
-   diagrams, code and tables take "full" and break out of it, because a slide
-   image or a mermaid diagram is easier to read wide while prose is not. This
-   is the same split Notion makes when it lets images escape the text column. */
+   The guide sits in a three-column documentation layout — chapters left,
+   sections right — so the reading column is already bounded by its grid track
+   and needs no measure cap of its own. What this grid still does is let
+   figures, diagrams, code and tables break out of the prose column, because a
+   slide image reads better wide while prose does not. */
 .guide {
   display: grid;
-  /* Text is LEFT-aligned in the track, not centred. Centring works on a page
-     with nothing beside it; here the outline sits to the left, so a centred
-     column opened a dead gap between the two and left the prose aligned with
-     nothing on the page. Left-aligning gives prose, figures, the outline and
-     the page header a shared left edge; figures simply run further right. */
   grid-template-columns:
-    [full-start text-start] min(var(--measure, 36em), 100%) [text-end]
-    minmax(0, 1fr) [full-end];
+    [full-start text-start] min(100%, 62rem) [text-end]
+    minmax(0, auto) [full-end];
 }
 .guide > * {
   grid-column: text;
@@ -79,18 +64,4 @@ body {
 .guide > pre,
 .guide > .guide-wide {
   grid-column: full;
-}
-/* Wide mode — the default. Prose uses the column it is given rather than
-   sitting in a ribbon with empty margins either side. Capped at 76em so an
-   ultra-wide display does not push a line past ~145 characters, where the eye
-   stops being able to find the start of the next line at all. Below that cap
-   nothing is constrained, so ordinary laptop widths fill completely. */
-.guide[data-width="wide"] {
-  /* One track, and a FIXED one. minmax(0, 76em) was shrinkable to zero: when a
-     mermaid diagram finished rendering, its intrinsic width grew the adjacent
-     track and the text column collapsed from 1216px to 658px — text looked
-     narrow on exactly the chapters that had diagrams, and only after they
-     rendered. min() is a fixed length, so no sibling can steal from it. */
-  grid-template-columns:
-    [full-start text-start] min(76em, 100%) [text-end full-end];
 }
