@@ -93,6 +93,27 @@ export const studyGuides = sqliteTable("study_guides", {
   generatedAt: integer("generated_at").notNull(),
 }, (t) => [uniqueIndex("study_guides_module").on(t.moduleId)]);
 
+// One study-guide generation, from the moment it is asked for. Doubles as the
+// request queue: a row with startedAt null is work the worker has not picked
+// up yet. Generation takes minutes rather than seconds — a single spinner over
+// that is indistinguishable from a hang — so the counters exist to say "4 of 7
+// sections" rather than merely "working".
+export const guideRuns = sqliteTable("guide_runs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  requestedAt: integer("requested_at").notNull(),
+  startedAt: integer("started_at"),
+  finishedAt: integer("finished_at"),
+  ok: integer("ok", { mode: "boolean" }),
+  error: text("error"),
+  stage: text("stage"),                    // human-readable: "Writing section 4 of 7"
+  decksTotal: integer("decks_total").notNull().default(0),
+  decksDone: integer("decks_done").notNull().default(0),
+  sectionsTotal: integer("sections_total").notNull().default(0),
+  sectionsDone: integer("sections_done").notNull().default(0),
+});
+
 export const syncRuns = sqliteTable("sync_runs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull(),

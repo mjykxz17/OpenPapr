@@ -3,11 +3,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
-import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, selectRequestedUsers, takeSyncRequest, upsertModuleFiles, type DiscoveredFile, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
+import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, selectRequestedUsers, takeSyncRequest, upsertModuleFiles, type DiscoveredFile,
+  claimNextGuideRun, updateGuideRun, failStaleGuideRuns, upsertStudyGuide, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient, isPdfFile, type CanvasClient } from "../connectors/canvas/client";
 import { extractCanvasFileIds } from "../lib/canvas-file-links";
+import { generateModuleGuide } from "../enrich/generate-guide";
 import { normalizeCanvasCourse } from "../connectors/canvas/normalize";
 import { fetchInboxDelta } from "../connectors/graph/client";
 import { refreshAccessToken } from "../connectors/graph/auth";
@@ -250,6 +252,48 @@ async function runFor(userId: number): Promise<void> {
   await runUserSync(deps, userId);
 }
 
+// One generation at a time, on the same tick as everything else. It takes
+// minutes, so it runs after the fast paths and writes progress as it goes for
+// the module page to poll.
+async function runGuideJob(): Promise<void> {
+  failStaleGuideRuns(db, Date.now());
+  const run = claimNextGuideRun(db, Date.now());
+  if (!run) return;
+
+  const user = db.select().from(users).where(eq(users.id, run.userId)).get();
+  if (!user?.canvasTokenEnc || !compatCfg) {
+    updateGuideRun(db, run.id, {
+      finishedAt: Date.now(), ok: false, stage: "Unavailable",
+      error: !compatCfg ? "no LLM provider configured" : "no canvas token",
+    });
+    return;
+  }
+
+  console.log(`generating study guide for module ${run.moduleId}`);
+  try {
+    const canvas = createCanvasClient(env.CANVAS_BASE_URL, decrypt(user.canvasTokenEnc, env.SECRET_KEY));
+    const result = await generateModuleGuide({
+      db, canvas, cfg: compatCfg, moduleId: run.moduleId,
+      onProgress: (p) => updateGuideRun(db, run.id, {
+        stage: p.stage, decksTotal: p.decksTotal, decksDone: p.decksDone,
+        sectionsTotal: p.sectionsTotal, sectionsDone: p.sectionsDone,
+      }),
+    });
+    upsertStudyGuide(db, run.moduleId, result.markdown, result.sourceNote, Date.now());
+    updateGuideRun(db, run.id, {
+      finishedAt: Date.now(), ok: true, stage: "Done",
+      error: result.problems.length ? result.problems.slice(0, 5).join("; ") : null,
+    });
+    console.log(`guide stored for module ${run.moduleId}: ${result.markdown.length} chars`);
+  } catch (err) {
+    updateGuideRun(db, run.id, {
+      finishedAt: Date.now(), ok: false, stage: "Failed",
+      error: String(err instanceof Error ? err.message : err).slice(0, 300),
+    });
+    console.error(`guide generation failed for module ${run.moduleId}`, err);
+  }
+}
+
 async function tick(): Promise<void> {
   try {
     for (const user of selectRequestedUsers(db)) {
@@ -269,6 +313,7 @@ async function tick(): Promise<void> {
         await runFor(user.id);
       }
     }
+    await runGuideJob();
   } catch (err) {
     console.error("worker tick failed", err);
   }

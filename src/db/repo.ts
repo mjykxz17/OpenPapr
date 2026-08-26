@@ -1,6 +1,6 @@
 import { and, asc, eq, desc, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { components, files, items, modules, studyGuides, users } from "./schema";
+import { components, files, guideRuns, items, modules, studyGuides, users } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 import type { MailItem } from "../connectors/graph/normalize";
 import { decrypt, encrypt } from "../lib/crypto";
@@ -81,6 +81,44 @@ export function findModuleFileByStem(db: Db, moduleId: number, name: string) {
   const rows = db.select().from(files).where(eq(files.moduleId, moduleId)).all()
     .filter((r) => stemOf(r.displayName) === want);
   return rows.find((r) => !r.hidden) ?? rows[0];
+}
+
+// --- study-guide generation queue -------------------------------------
+// A row with startedAt null is work the worker has not begun. One outstanding
+// request per module: pressing the button twice should not generate twice.
+export function requestGuide(db: Db, userId: number, moduleId: number, now: number): void {
+  const pending = db.select().from(guideRuns)
+    .where(and(eq(guideRuns.moduleId, moduleId), isNull(guideRuns.finishedAt))).get();
+  if (pending) return;
+  db.insert(guideRuns).values({ userId, moduleId, requestedAt: now }).run();
+}
+
+export function claimNextGuideRun(db: Db, now: number) {
+  const next = db.select().from(guideRuns)
+    .where(and(isNull(guideRuns.startedAt), isNull(guideRuns.finishedAt)))
+    .orderBy(asc(guideRuns.requestedAt), asc(guideRuns.id)).limit(1).get();
+  if (!next) return undefined;
+  db.update(guideRuns).set({ startedAt: now, stage: "Starting" }).where(eq(guideRuns.id, next.id)).run();
+  return next;
+}
+
+export function updateGuideRun(db: Db, runId: number, patch: Partial<typeof guideRuns.$inferInsert>): void {
+  db.update(guideRuns).set(patch).where(eq(guideRuns.id, runId)).run();
+}
+
+export function latestGuideRun(db: Db, moduleId: number) {
+  return db.select().from(guideRuns).where(eq(guideRuns.moduleId, moduleId))
+    .orderBy(desc(guideRuns.id)).limit(1).get();
+}
+
+// A run whose worker died would otherwise pin the module forever.
+export function failStaleGuideRuns(db: Db, now: number, maxAgeMs = 30 * 60_000): void {
+  for (const r of db.select().from(guideRuns).where(isNull(guideRuns.finishedAt)).all()) {
+    if (now - (r.startedAt ?? r.requestedAt) < maxAgeMs) continue;
+    db.update(guideRuns)
+      .set({ finishedAt: now, ok: false, error: "timed out", stage: "Timed out" })
+      .where(eq(guideRuns.id, r.id)).run();
+  }
 }
 
 // "Sync now" from the web process. The worker has no inbox, so the request is

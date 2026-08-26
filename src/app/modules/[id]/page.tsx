@@ -7,6 +7,7 @@ import { getStudyGuide } from "@/db/repo";
 import { AppShell } from "@/components/AppShell";
 import { ManualComponentForm } from "@/components/ManualComponentForm";
 import { StudyGuide } from "@/components/StudyGuide";
+import { GenerateGuideButton } from "@/components/GenerateGuideButton";
 import { htmlToText } from "@/lib/html-text";
 import { withShadowFlags, SOURCE_LABEL } from "@/lib/component-display";
 
@@ -163,17 +164,30 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
         </section>
       </div>
 
+      {!guide && (
+        <section className="mt-14 border-t border-line pt-10">
+          <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-3">Study guide</h2>
+          <p className="mb-4 max-w-prose text-sm text-ink-3">
+            No guide yet. One can be written from this module&apos;s own lecture slides — it takes a few minutes per deck.
+          </p>
+          <GenerateGuideButton moduleId={mod.id} hasGuide={false} />
+        </section>
+      )}
+
       {guide && (
         <section id="study" className="mt-14 scroll-mt-6 border-t border-line pt-10">
           {/* sourceNote is dropped here on purpose: it repeats the guide's own
               opening paragraph almost word for word, and the two sat a
               thousand pixels apart on the same line. */}
-          <h2 className="mb-6 text-xs font-medium uppercase tracking-wide text-ink-3">
-            Study guide
-            <span className="ml-2 font-normal normal-case tracking-normal text-ink-3/70">
-              generated {new Date(guide.generatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-            </span>
-          </h2>
+          <div className="mb-6 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+            <h2 className="text-xs font-medium uppercase tracking-wide text-ink-3">
+              Study guide
+              <span className="ml-2 font-normal normal-case tracking-normal text-ink-3/70">
+                generated {new Date(guide.generatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+              </span>
+            </h2>
+            <GenerateGuideButton moduleId={mod.id} hasGuide />
+          </div>
           <StudyGuide markdown={guide.markdown} moduleId={mod.id} />
         </section>
       )}

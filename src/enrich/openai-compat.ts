@@ -43,6 +43,36 @@ export async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system:
   return extractJson(data.choices?.[0]?.message?.content ?? "");
 }
 
+// Prose completion, for generated long-form content. chatJson is the wrong
+// shape for a study guide: it hunts for the first { and last } and would
+// mangle markdown. Carries a timeout because the shared client has none and a
+// stalled generation would otherwise hang a script indefinitely.
+export async function chatText(
+  cfg: CompatConfig,
+  system: string,
+  user: string,
+  opts: { maxTokens?: number; temperature?: number; timeoutMs?: number; fetchFn?: typeof fetch } = {},
+): Promise<string> {
+  const { maxTokens = 20_000, temperature = 0.3, timeoutMs = 600_000, fetchFn = fetch } = opts;
+  const res = await fetchFn(`${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: cfg.model,
+      max_tokens: maxTokens,
+      temperature,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`llm ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
 const SCORER_SYSTEM = `You triage university email for an NUS undergraduate. Important: anything from professors or the university that affects their modules, grades, deadlines, exams, or enrolment. Garbage: newsletters, event promotion, mass CC blasts, vendor marketing. Reply with ONLY a JSON object, no prose, no code fences: {"important": boolean, "score": number 0..1 (1 = must see today), "reason": "one short line a student can read at a glance"}`;
 
 export function createCompatScorer(cfg: CompatConfig, fetchFn: typeof fetch = fetch) {
