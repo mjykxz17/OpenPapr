@@ -139,3 +139,32 @@ describe("runUserSync + createGuard integration", () => {
     expect(canvasRun.error).toContain("backing off");
   });
 });
+
+describe("guard.resetUser", () => {
+  it("clears a user's backoff so a manual sync is not skipped mid-penalty", async () => {
+    let now = 0;
+    const guard = createGuard(1000, () => now);
+    const failing = guard("canvas", async () => { throw new Error("canvas down"); });
+
+    await expect(failing(1)).rejects.toThrow("canvas down");
+    // Still inside the backoff window: a scheduled run would be skipped.
+    await expect(failing(1)).rejects.toThrow(BackoffSkipError);
+
+    // A manual sync is an explicit retry — forget the failure history.
+    guard.resetUser(1);
+    let ran = false;
+    const ok = guard("canvas", async () => { ran = true; });
+    await ok(1);
+    expect(ran).toBe(true);
+  });
+
+  it("only resets the user asked for", async () => {
+    let now = 0;
+    const guard = createGuard(1000, () => now);
+    const failing = guard("canvas", async () => { throw new Error("down"); });
+    await expect(failing(1)).rejects.toThrow("down");
+    await expect(failing(2)).rejects.toThrow("down");
+    guard.resetUser(1);
+    await expect(failing(2)).rejects.toThrow(BackoffSkipError);
+  });
+});

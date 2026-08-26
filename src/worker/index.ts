@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
-import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
+import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, selectRequestedUsers, takeSyncRequest, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient, isPdfFile } from "../connectors/canvas/client";
@@ -165,33 +165,52 @@ async function enrich(userId: number): Promise<void> {
 
 const guard = createGuard(env.POLL_INTERVAL_MS);
 
-// Rather than sweeping every user once per interval — which sends one burst at
-// Canvas and grows the cycle time linearly with signups — tick often and sync
-// only whoever is due. Each user still gets POLL_INTERVAL_MS freshness, but
-// their sync times fan out across the window.
-const TICKS_PER_INTERVAL = 10;
-const TICK_MS = Math.max(15_000, Math.floor(env.POLL_INTERVAL_MS / TICKS_PER_INTERVAL));
+const deps = {
+  db, now: Date.now,
+  canvasSync: guard("canvas", canvasSync),
+  mailSync: guard("graph", mailSync),
+  enrich: guard("enrich", enrich),
+};
 
-async function loop(): Promise<void> {
+// Two cadences on one timer. The fast tick exists so "Sync now" is picked up
+// within seconds — the web server and the worker are separate processes, so a
+// request reaches here as a database flag rather than a call. The scheduled
+// sweep stays slow and capped so signups keep fanning out across the interval
+// instead of hitting Canvas in one burst; running it on the fast tick would
+// admit everyone at once and undo the stagger.
+const TICKS_PER_INTERVAL = 10;
+const TICK_MS = 2_000;
+const SWEEP_MS = Math.max(15_000, Math.floor(env.POLL_INTERVAL_MS / TICKS_PER_INTERVAL));
+let lastSweepAt = 0;
+
+async function runFor(userId: number): Promise<void> {
+  markSyncStarted(db, userId, Date.now());
+  await runUserSync(deps, userId);
+}
+
+async function tick(): Promise<void> {
   try {
-    const total = db.select().from(users).all().length;
-    // Size the slice so a full sweep still finishes within one interval.
-    const cap = Math.max(1, Math.ceil(total / TICKS_PER_INTERVAL));
-    for (const user of selectDueUsers(db, Date.now(), env.POLL_INTERVAL_MS, cap)) {
-      // Stamped first: a sync that hangs or throws must not put the same user
-      // straight back at the head of the queue on the next tick.
-      markSyncStarted(db, user.id, Date.now());
-      await runUserSync({
-        db, now: Date.now,
-        canvasSync: guard("canvas", canvasSync),
-        mailSync: guard("graph", mailSync),
-        enrich: guard("enrich", enrich),
-      }, user.id);
+    for (const user of selectRequestedUsers(db)) {
+      // Clear first: an unclaimed flag would restart the cycle every 2s.
+      if (!takeSyncRequest(db, user.id)) continue;
+      guard.resetUser(user.id);
+      console.log(`manual sync requested for user ${user.id}`);
+      await runFor(user.id);
+    }
+
+    const now = Date.now();
+    if (now - lastSweepAt >= SWEEP_MS) {
+      lastSweepAt = now;
+      const total = db.select().from(users).all().length;
+      const cap = Math.max(1, Math.ceil(total / TICKS_PER_INTERVAL));
+      for (const user of selectDueUsers(db, Date.now(), env.POLL_INTERVAL_MS, cap)) {
+        await runFor(user.id);
+      }
     }
   } catch (err) {
     console.error("worker tick failed", err);
   }
-  setTimeout(loop, TICK_MS);
+  setTimeout(tick, TICK_MS);
 }
 console.log("openpapr worker starting");
-void loop();
+void tick();

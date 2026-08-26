@@ -15,6 +15,10 @@ export const users = sqliteTable("users", {
   // When this user's sync last began. The worker polls whoever is due rather
   // than everyone at once, which spreads Canvas load across the interval.
   lastSyncStartedAt: integer("last_sync_started_at").notNull().default(0),
+  // Set by "Sync now"; the worker clears it as it picks the request up. A flag
+  // in the database rather than a call into the worker, because the web server
+  // and the worker are separate processes with no channel between them.
+  syncRequestedAt: integer("sync_requested_at"),
 }, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId)]);
 
 export const modules = sqliteTable("modules", {

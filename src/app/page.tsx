@@ -4,6 +4,7 @@ import { getOverview } from "@/server/overview";
 import { loadEnv } from "@/lib/env";
 import { AppShell } from "@/components/AppShell";
 import { SyncStatus } from "@/components/SyncStatus";
+import { SyncButton } from "@/components/SyncButton";
 import { ModuleGrid } from "@/components/ModuleGrid";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export default async function Home() {
     <AppShell>
       {overview.graphAuthBroken && (
         <div className="mb-6 border border-warn bg-warn/10 px-4 py-3 text-sm text-warn">
-          Reconnect Microsoft — run scripts/connect-microsoft.ts
+          Reconnect Microsoft — <a href="/mail" className="underline underline-offset-2">reconnect on the Mail tab</a>
         </div>
       )}
 
@@ -27,7 +28,10 @@ export default async function Home() {
           <div className="text-lg font-medium tabular-nums text-ink">{dateLabel}</div>
           <div className="text-xs uppercase tracking-wide text-ink-3">AY26/27</div>
         </div>
-        <SyncStatus syncStatus={overview.syncStatus} />
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <SyncStatus syncStatus={overview.syncStatus} />
+          <SyncButton />
+        </div>
       </header>
 
       <ModuleGrid modules={overview.modules} />

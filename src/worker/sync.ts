@@ -37,7 +37,7 @@ export function createGuard(baseMs: number, now: () => number = Date.now) {
   const failures = new Map<string, number>();
   const lastFailAt = new Map<string, number>();
   const lastError = new Map<string, string>();
-  return function guard(source: string, fn: (userId: number) => Promise<void>) {
+  const guard = function (source: string, fn: (userId: number) => Promise<void>) {
     return async (userId: number) => {
       const key = `${source}:${userId}`;
       const n = failures.get(key) ?? 0;
@@ -55,4 +55,14 @@ export function createGuard(baseMs: number, now: () => number = Date.now) {
       }
     };
   };
+
+  // A manual sync is an explicit retry: drop this user's failure history so
+  // the cycle actually runs instead of hitting BackoffSkipError part-way
+  // through a penalty the user is trying to override.
+  const resetUser = (userId: number): void => {
+    for (const m of [failures, lastFailAt, lastError])
+      for (const key of [...m.keys()]) if (key.endsWith(`:${userId}`)) m.delete(key);
+  };
+
+  return Object.assign(guard, { resetUser });
 }

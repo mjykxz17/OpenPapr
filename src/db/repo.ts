@@ -1,4 +1,4 @@
-import { and, asc, eq, desc, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, asc, eq, desc, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
 import { components, items, modules, studyGuides, users } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
@@ -41,6 +41,26 @@ export function resolveCanvasUser(
   return db.insert(users)
     .values({ name: self.name, canvasUserId: self.id, canvasTokenEnc: tokenEnc, createdAt: now })
     .returning().get().id;
+}
+
+// "Sync now" from the web process. The worker has no inbox, so the request is
+// left in the database for it to find on its next tick.
+export function requestSync(db: Db, userId: number, now: number): void {
+  db.update(users).set({ syncRequestedAt: now }).where(eq(users.id, userId)).run();
+}
+
+// Reads the flag and clears it in one step. Clearing matters: the worker ticks
+// every couple of seconds, so a request left standing would restart the cycle
+// on every tick rather than once.
+export function takeSyncRequest(db: Db, userId: number): boolean {
+  const row = db.select().from(users).where(eq(users.id, userId)).get();
+  if (!row?.syncRequestedAt) return false;
+  db.update(users).set({ syncRequestedAt: null }).where(eq(users.id, userId)).run();
+  return true;
+}
+
+export function selectRequestedUsers(db: Db) {
+  return db.select().from(users).where(isNotNull(users.syncRequestedAt)).all();
 }
 
 // Users whose next sync is due, longest-waiting first, at most `cap` of them.
