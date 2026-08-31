@@ -3,8 +3,13 @@
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+type Mode = "signin" | "setup";
+
 export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
   const router = useRouter();
+  const [mode, setMode] = useState<Mode>("signin");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [canvasToken, setCanvasToken] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -14,12 +19,15 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
     e.preventDefault();
     setPending(true);
     setError(null);
+    const body = mode === "signin"
+      ? { username, password }
+      : { inviteCode, canvasToken, username, password };
     let res: Response;
     try {
       res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ inviteCode, canvasToken }),
+        body: JSON.stringify(body),
       });
     } catch {
       setPending(false);
@@ -32,62 +40,92 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
       router.refresh();
       return;
     }
-    const body = await res.json().catch(() => null);
-    setError(body?.error ?? "Sign in failed. Try again.");
+    const parsed = await res.json().catch(() => null);
+    setError(parsed?.error ?? "Sign in failed. Try again.");
   }
 
   const field = "border border-line bg-surface px-3 py-2 text-ink outline-none focus:border-accent";
+  const label = "flex flex-col gap-1.5 text-sm text-ink-2";
 
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <label className="flex flex-col gap-1.5 text-sm text-ink-2">
-        Invite code
-        <input
-          type="password"
-          name="inviteCode"
-          autoComplete="off"
-          required
-          value={inviteCode}
-          onChange={(e) => setInviteCode(e.target.value)}
-          className={field}
-        />
-      </label>
+      <div className="flex gap-1 border-b border-line text-[13px]">
+        {(["signin", "setup"] as Mode[]).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => { setMode(m); setError(null); }}
+            aria-selected={mode === m}
+            className={`-mb-px border-b-2 px-2 py-1.5 transition-colors ${
+              mode === m ? "border-accent text-ink" : "border-transparent text-ink-3 hover:text-ink-2"
+            }`}
+          >
+            {m === "signin" ? "Sign in" : "First time"}
+          </button>
+        ))}
+      </div>
 
-      <label className="flex flex-col gap-1.5 text-sm text-ink-2">
-        Canvas access token
+      {mode === "setup" && (
+        <>
+          <label className={label}>
+            Invite code
+            <input type="password" autoComplete="off" required value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)} className={field} />
+          </label>
+          <label className={label}>
+            Canvas access token
+            <input type="password" autoComplete="off" required spellCheck={false} value={canvasToken}
+              onChange={(e) => setCanvasToken(e.target.value)} className={field} />
+          </label>
+          <p className="-mt-1 text-xs leading-relaxed text-ink-3">
+            Create one in Canvas under{" "}
+            <a href={`${canvasBaseUrl}/profile/settings`} target="_blank" rel="noreferrer"
+               className="text-accent underline underline-offset-2">
+              Account → Settings → New access token
+            </a>
+            . It is stored encrypted, and you only paste it once.
+          </p>
+        </>
+      )}
+
+      <label className={label}>
+        Username
         <input
-          type="password"
-          name="canvasToken"
-          autoComplete="off"
+          name="username"
+          autoComplete="username"
           required
           spellCheck={false}
-          value={canvasToken}
-          onChange={(e) => setCanvasToken(e.target.value)}
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
           className={field}
         />
       </label>
 
-      <p className="-mt-1 text-xs leading-relaxed text-ink-3">
-        Create one in Canvas under{" "}
-        <a
-          href={`${canvasBaseUrl}/profile/settings`}
-          target="_blank"
-          rel="noreferrer"
-          className="text-accent underline underline-offset-2"
-        >
-          Account → Settings → New access token
-        </a>
-        . It is stored encrypted and is only used to read your own courses.
-      </p>
+      <label className={label}>
+        Password
+        <input
+          type="password"
+          name="password"
+          autoComplete={mode === "signin" ? "current-password" : "new-password"}
+          required
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className={field}
+        />
+      </label>
+
+      {mode === "setup" && (
+        <p className="-mt-1 text-xs leading-relaxed text-ink-3">
+          Pick a username and password now — after this you sign in with those alone,
+          and never need the token again.
+        </p>
+      )}
 
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
 
-      <button
-        type="submit"
-        disabled={pending}
-        className="border border-line bg-ink px-3 py-2 text-sm font-medium text-surface disabled:opacity-50"
-      >
-        {pending ? "Signing in…" : "Sign in"}
+      <button type="submit" disabled={pending}
+        className="border border-line bg-ink px-3 py-2 text-sm font-medium text-surface disabled:opacity-50">
+        {pending ? "Signing in…" : mode === "signin" ? "Sign in" : "Create account"}
       </button>
     </form>
   );

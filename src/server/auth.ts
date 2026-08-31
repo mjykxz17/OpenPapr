@@ -6,7 +6,13 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 const mac = (payload: string, keyHex: string) =>
   createHmac("sha256", Buffer.from(keyHex, "hex")).update(payload).digest("hex");
 
-export function signSession(userId: number, secretHex: string, ttlMs = 30 * 24 * 3_600_000): string {
+// One source of truth for how long a session lasts. The cookie's max-age is
+// derived from this: when the two drifted, the signed token stayed valid for
+// 30 days while the cookie carried no expiry at all, so the browser discarded
+// it on close and every visit began at the sign-in form.
+export const SESSION_TTL_MS = 30 * 24 * 3_600_000;
+
+export function signSession(userId: number, secretHex: string, ttlMs = SESSION_TTL_MS): string {
   const payload = `${userId}.${Date.now() + ttlMs}`;
   return `${payload}.${mac(payload, secretHex)}`;
 }

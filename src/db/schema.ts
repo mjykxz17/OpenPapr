@@ -7,6 +7,11 @@ export const users = sqliteTable("users", {
   // token, and this is the Canvas account it belongs to. Nullable only so the
   // pre-multi-user row can be adopted on its owner's first sign-in.
   canvasUserId: integer("canvas_user_id"),
+  // Sign-in identity. Set once, after which the stored Canvas token is used
+  // and never has to be pasted again. Nullable: accounts created before this
+  // existed, and anyone who has only ever signed in with a token, have none.
+  username: text("username"),
+  passwordHash: text("password_hash"),
   canvasTokenEnc: text("canvas_token_enc"),
   msRefreshTokenEnc: text("ms_refresh_token_enc"),
   msDeltaLink: text("ms_delta_link"),
@@ -19,7 +24,7 @@ export const users = sqliteTable("users", {
   // in the database rather than a call into the worker, because the web server
   // and the worker are separate processes with no channel between them.
   syncRequestedAt: integer("sync_requested_at"),
-}, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId)]);
+}, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId), uniqueIndex("users_username").on(t.username)]);
 
 export const modules = sqliteTable("modules", {
   id: integer("id").primaryKey({ autoIncrement: true }),

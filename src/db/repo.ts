@@ -83,6 +83,20 @@ export function findModuleFileByStem(db: Db, moduleId: number, name: string) {
   return rows.find((r) => !r.hidden) ?? rows[0];
 }
 
+// --- sign-in identity ---------------------------------------------------
+// Set once so the Canvas token never has to be pasted again. Returns false if
+// the name is taken by somebody else.
+export function setCredentials(db: Db, userId: number, username: string, passwordHash: string): boolean {
+  const taken = db.select().from(users).where(eq(users.username, username)).get();
+  if (taken && taken.id !== userId) return false;
+  db.update(users).set({ username, passwordHash }).where(eq(users.id, userId)).run();
+  return true;
+}
+
+export function findByUsername(db: Db, username: string) {
+  return db.select().from(users).where(eq(users.username, username)).get();
+}
+
 // --- study-guide generation queue -------------------------------------
 // A row with startedAt null is work the worker has not begun. One outstanding
 // request per module: pressing the button twice should not generate twice.

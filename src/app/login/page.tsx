@@ -13,8 +13,8 @@ export default function LoginPage() {
       <div className="w-full max-w-sm border border-line p-8">
         <h1 className="mb-1 text-base font-medium text-ink">OpenPapr</h1>
         <p className="mb-6 text-sm text-ink-3">
-          Sign in with your invite code and your own Canvas token. Your courses,
-          deadlines and notes stay yours.
+          Your courses, deadlines and notes stay yours. First time here, use your
+          invite code and Canvas token — after that, just your username.
         </p>
         <LoginForm canvasBaseUrl={CANVAS_BASE_URL} />
       </div>
