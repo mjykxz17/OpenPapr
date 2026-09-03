@@ -193,3 +193,20 @@ export function preferColourDeck(names: string[]): string[] {
   }
   return [...bySeries.values()].map((group) => group.find((n) => !isBw(n)) ?? group[0]!);
 }
+
+// Which of a module's files the guide is written from. Once the categoriser
+// has run, the answer is "the PDFs it called slides"; before that — a module
+// synced for the first time, or an LLM-less install — a filename pattern
+// stands in, so generation is never blocked on classification. Colour decks
+// win over their black-and-white twins either way.
+const DECK_NAME_RE = /(lect|lecture|week|unit|topic|part|chapter|intro)/i;
+
+export function selectGuideDecks<T extends { displayName: string; category: string | null }>(rows: T[]): T[] {
+  const categorised = rows.some((r) => r.category !== null);
+  const pdfs = rows
+    .filter((r) => /\.pdf$/i.test(r.displayName))
+    .filter((r) => (categorised ? r.category === "slides" : DECK_NAME_RE.test(r.displayName)))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true }));
+  const keep = new Set(preferColourDeck(pdfs.map((r) => r.displayName)));
+  return pdfs.filter((r) => keep.has(r.displayName));
+}

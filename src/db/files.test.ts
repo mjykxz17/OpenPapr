@@ -82,3 +82,41 @@ describe("findModuleFileByStem", () => {
     expect(findModuleFileByStem(db, 1, "Lect-1")).toBeUndefined();
   });
 });
+
+import { listModuleFiles, setFileCategory } from "./repo";
+
+describe("file categories and link context", () => {
+  it("stores where a harvested file was linked from and the text around the link", () => {
+    const db = setup();
+    upsertModuleFiles(db, 1, [{ ...f(5, "intro.pdf", true), linkedFrom: "Introduction — bring laptops", linkContext: "slides for today: intro.pdf" }], 100);
+    const row = db.select().from(files).get()!;
+    expect(row.linkedFrom).toBe("Introduction — bring laptops");
+    expect(row.linkContext).toBe("slides for today: intro.pdf");
+  });
+
+  it("re-syncing a file keeps the category already assigned to it", () => {
+    const db = setup();
+    upsertModuleFiles(db, 1, [f(5, "intro.pdf", true)], 100);
+    const id = db.select().from(files).get()!.id;
+    setFileCategory(db, id, "slides", "llm");
+    upsertModuleFiles(db, 1, [f(5, "intro.pdf", true)], 200);
+    expect(db.select().from(files).get()!.category).toBe("slides");
+  });
+
+  it("never lets a rule or model overwrite a manual category", () => {
+    const db = setup();
+    upsertModuleFiles(db, 1, [f(5, "intro.pdf")], 100);
+    const id = db.select().from(files).get()!.id;
+    setFileCategory(db, id, "reading", "manual");
+    setFileCategory(db, id, "slides", "rule");
+    setFileCategory(db, id, "slides", "llm");
+    const row = db.select().from(files).get()!;
+    expect([row.category, row.categorySource]).toEqual(["reading", "manual"]);
+  });
+
+  it("lists a module's files by name", () => {
+    const db = setup();
+    upsertModuleFiles(db, 1, [f(2, "Lect-2.pdf"), f(1, "Lect-1.pdf")], 100);
+    expect(listModuleFiles(db, 1).map((r) => r.displayName)).toEqual(["Lect-1.pdf", "Lect-2.pdf"]);
+  });
+});

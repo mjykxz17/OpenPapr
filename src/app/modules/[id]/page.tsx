@@ -3,13 +3,16 @@ import { requireUserId } from "@/server/session";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { components, items, modules } from "@/db/schema";
-import { getStudyGuide } from "@/db/repo";
+import { getStudyGuide, listModuleFiles } from "@/db/repo";
 import { AppShell } from "@/components/AppShell";
 import { ManualComponentForm } from "@/components/ManualComponentForm";
 import { StudyGuide } from "@/components/StudyGuide";
 import { GenerateGuideButton } from "@/components/GenerateGuideButton";
 import { htmlToText } from "@/lib/html-text";
 import { withShadowFlags, SOURCE_LABEL } from "@/lib/component-display";
+import { groupMaterials } from "@/lib/materials";
+import { loadEnv } from "@/lib/env";
+import { Materials } from "@/components/Materials";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +53,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     .replace(/\s*\[\d+\]\s*$/, "")
     .trim() || mod.name;
   const guide = getStudyGuide(db, mod.id);
+  const materials = groupMaterials(listModuleFiles(db, mod.id));
 
   return (
     <AppShell wide>
@@ -130,6 +134,11 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
               <ManualComponentForm moduleId={mod.id} />
             </div>
           </details>
+
+          <section>
+            <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Materials</h2>
+            <Materials groups={materials} canvasBaseUrl={loadEnv().CANVAS_BASE_URL} canvasCourseId={mod.canvasCourseId} />
+          </section>
         </div>
 
         <section>

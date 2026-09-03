@@ -3,7 +3,7 @@ import type { Db } from "../db/client";
 import { files, modules } from "../db/schema";
 import type { CanvasClient } from "../connectors/canvas/client";
 import { extractPdfText } from "../lib/pdf-text";
-import { createGuideGenerator, figureSlides, preferColourDeck, validateChapter, type CompatConfig } from "./study-guide-deps";
+import { createGuideGenerator, figureSlides, selectGuideDecks, validateChapter, type CompatConfig } from "./study-guide-deps";
 
 export type GuideProgress = {
   stage: string;
@@ -22,8 +22,6 @@ export type GuideResult = {
 
 const MIN_DECK_SLIDES = 8;
 
-const DECK_RE = /(lect|lecture|week|unit|topic|part|chapter|intro)/i;
-
 // Shared by the CLI script and the worker, so an in-app generation and a
 // terminal one produce the same guide. The caller decides what to do with
 // progress: print it, or write it to guide_runs for the UI to poll.
@@ -39,11 +37,7 @@ export async function generateModuleGuide(opts: {
   const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get();
   if (!mod) throw new Error(`no module ${moduleId}`);
 
-  const pdfs = db.select().from(files).where(eq(files.moduleId, moduleId)).all()
-    .filter((f) => /\.pdf$/i.test(f.displayName) && DECK_RE.test(f.displayName))
-    .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true }));
-  const keep = new Set(preferColourDeck(pdfs.map((f) => f.displayName)));
-  const decks = pdfs.filter((f) => keep.has(f.displayName));
+  const decks = selectGuideDecks(db.select().from(files).where(eq(files.moduleId, moduleId)).all());
   if (decks.length === 0) throw new Error("no lecture decks recorded — run a sync first");
 
   const progress: GuideProgress = {

@@ -128,3 +128,35 @@ describe("slidePages / figureSlides", () => {
     expect(figureSlides(wordy)).toEqual([]);
   });
 });
+
+import { selectGuideDecks } from "./study-guide";
+
+describe("selectGuideDecks", () => {
+  const row = (displayName: string, category: string | null = null) => ({ displayName, category });
+
+  it("takes the PDFs categorised as slides, in natural order, colour over black-and-white", () => {
+    const picked = selectGuideDecks([
+      row("IFS4103-Lect-10-v1.pdf", "slides"),
+      row("IFS4103-Lect-2-v1-BW.pdf", "slides"),
+      row("IFS4103-Lect-2-v1.pdf", "slides"),
+      row("assignment1.pdf", "assignment"),
+      row("intro.pdf", "slides"),
+      row("CS4238-Lec01A.pptx", "slides"),
+    ]);
+    expect(picked.map((r) => r.displayName)).toEqual(["IFS4103-Lect-2-v1.pdf", "IFS4103-Lect-10-v1.pdf", "intro.pdf"]);
+  });
+
+  it("leaves out slides-looking names that were categorised as something else", () => {
+    const picked = selectGuideDecks([row("Feedback for Lecture Topic 5.pdf", "admin"), row("U1-intro1.pdf", "slides")]);
+    expect(picked.map((r) => r.displayName)).toEqual(["U1-intro1.pdf"]);
+  });
+
+  it("falls back to the filename pattern only while nothing in the module is categorised yet", () => {
+    const picked = selectGuideDecks([row("U1-intro1.pdf"), row("assignment1.pdf"), row("Week 3 notes.pdf")]);
+    expect(picked.map((r) => r.displayName)).toEqual(["U1-intro1.pdf", "Week 3 notes.pdf"]);
+  });
+
+  it("does not fall back once any file has a category, even if no slides were found", () => {
+    expect(selectGuideDecks([row("U1-intro1.pdf", "reading")])).toEqual([]);
+  });
+});

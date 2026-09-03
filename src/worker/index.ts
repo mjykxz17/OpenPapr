@@ -8,7 +8,8 @@ import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFa
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient, isPdfFile, type CanvasClient } from "../connectors/canvas/client";
-import { extractCanvasFileIds } from "../lib/canvas-file-links";
+import { extractCanvasFileLinks, type FileLinkSource } from "../lib/canvas-file-links";
+import { categorizeModuleFiles, createCompatFileCategorizer } from "../enrich/file-category";
 import { generateModuleGuide } from "../enrich/generate-guide";
 import { normalizeCanvasCourse } from "../connectors/canvas/normalize";
 import { fetchInboxDelta } from "../connectors/graph/client";
@@ -44,6 +45,7 @@ const extractor = compatCfg
 const supportsPdfSources = Boolean(anthropic);
 const actionExtractor = compatCfg ? createCompatActionExtractor(compatCfg) : null; // Anthropic-path parity: future work
 const deadlineClassifier = compatCfg ? createCompatDeadlineClassifier(compatCfg) : null;
+const fileCategorizer = compatCfg ? createCompatFileCategorizer(compatCfg) : null;
 if (compatCfg) console.log(`llm provider: openai-compat ${compatCfg.model} @ ${compatCfg.baseUrl} (pdf sources disabled)`);
 
 const SYLLABUS_NAME_RE = /(syllabus|assessment|grading|outline)/i;
@@ -63,7 +65,7 @@ async function harvestFiles(
   canvas: CanvasClient,
   courseId: number,
   moduleId: number,
-  html: (string | null)[],
+  sources: FileLinkSource[],
 ): Promise<void> {
   const discovered = new Map<number, DiscoveredFile>();
 
@@ -81,22 +83,29 @@ async function harvestFiles(
   // decks on two content pages and nowhere else. Page counts are small (2-7
   // across the active modules) so this is a handful of extra calls, but the
   // cap stops a course with a large wiki from dominating a sync cycle.
-  const fromPages: (string | null)[] = [];
+  const fromPages: FileLinkSource[] = [];
   try {
     for (const page of (await canvas.listPages(courseId)).slice(0, 25)) {
-      try { fromPages.push(await canvas.getPageBody(courseId, page.url)); } catch { /* single page unreadable */ }
+      try { fromPages.push({ label: page.title, html: await canvas.getPageBody(courseId, page.url) }); } catch { /* single page unreadable */ }
     }
   } catch {
     // Pages are disabled for some courses (CS4239 returns 404); not an error.
   }
 
-  for (const id of extractCanvasFileIds([...html, ...fromPages])) {
-    if (discovered.has(id)) continue;
+  for (const link of extractCanvasFileLinks([...sources, ...fromPages])) {
+    const listed = discovered.get(link.id);
+    if (listed) {
+      // Listed AND linked: keep the link's context, it helps categorisation.
+      listed.linkedFrom = link.linkedFrom;
+      listed.linkContext = link.context;
+      continue;
+    }
     try {
-      const f = await canvas.getFile(id);
-      discovered.set(id, {
+      const f = await canvas.getFile(link.id);
+      discovered.set(link.id, {
         canvasFileId: f.id, displayName: f.display_name,
         contentType: f["content-type"] ?? null, sizeBytes: f.size ?? null, hidden: true,
+        linkedFrom: link.linkedFrom, linkContext: link.context,
       });
     } catch {
       // A link can point at a file the student cannot read, or one since
@@ -105,6 +114,7 @@ async function harvestFiles(
   }
 
   if (discovered.size > 0) upsertModuleFiles(db, moduleId, [...discovered.values()], Date.now());
+  await categorizeModuleFiles(db, moduleId, fileCategorizer);
 }
 
 async function canvasSync(userId: number): Promise<void> {
@@ -120,7 +130,10 @@ async function canvasSync(userId: number): Promise<void> {
     const sync = normalizeCanvasCourse(course, groups, announcements, events);
     const { moduleId } = applyCanvasSync(db, userId, sync, Date.now());
 
-    await harvestFiles(canvas, course.id, moduleId, [...announcements.map((a) => a.message), course.syllabus_body ?? null]);
+    await harvestFiles(canvas, course.id, moduleId, [
+      ...announcements.map((a) => ({ label: a.title, html: a.message })),
+      { label: "Syllabus", html: course.syllabus_body ?? null },
+    ]);
 
     // Weightage extraction: component-less modules only, at most weekly.
     if (!extractor) continue;

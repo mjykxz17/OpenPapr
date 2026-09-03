@@ -43,6 +43,10 @@ export const modules = sqliteTable("modules", {
 // Every Canvas file we know about for a module, from the Files listing AND
 // from links harvested out of announcement/page HTML. Download urls are signed
 // and expire, so only the id is stored — the url is re-fetched at read time.
+export const FILE_CATEGORIES = ["slides", "tutorial", "assignment", "reading", "practice", "admin", "image", "other"] as const;
+export type FileCategory = (typeof FILE_CATEGORIES)[number];
+export type FileCategorySource = "rule" | "llm" | "manual";
+
 export const files = sqliteTable("files", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   moduleId: integer("module_id").notNull().references(() => modules.id),
@@ -54,6 +58,15 @@ export const files = sqliteTable("files", {
   // than uploaded to the Files tab.
   hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),
   discoveredAt: integer("discovered_at").notNull(),
+  // What kind of material this is. null = not yet categorised. A manual
+  // category is the user's word and is never overwritten by a rule or model.
+  category: text("category", { enum: FILE_CATEGORIES }),
+  categorySource: text("category_source", { enum: ["rule", "llm", "manual"] }),
+  // For harvested files: the title of the announcement/page (or "Syllabus")
+  // that linked it, and the sentence around the link. The strongest clue to a
+  // file's category when its name says nothing ("intro.pdf", "image002.jpg").
+  linkedFrom: text("linked_from"),
+  linkContext: text("link_context"),
 }, (t) => [uniqueIndex("files_module_canvas_file").on(t.moduleId, t.canvasFileId)]);
 
 export const components = sqliteTable("components", {

@@ -1,6 +1,6 @@
 import { and, asc, eq, desc, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { components, files, guideRuns, items, modules, studyGuides, users } from "./schema";
+import { components, files, guideRuns, items, modules, studyGuides, users, type FileCategory, type FileCategorySource } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 import type { MailItem } from "../connectors/graph/normalize";
 import { decrypt, encrypt } from "../lib/crypto";
@@ -49,6 +49,8 @@ export type DiscoveredFile = {
   contentType: string | null;
   sizeBytes: number | null;
   hidden: boolean;
+  linkedFrom?: string | null;
+  linkContext?: string | null;
 };
 
 // Records what a module's files are, from both the Files listing and links
@@ -65,11 +67,32 @@ export function upsertModuleFiles(db: Db, moduleId: number, discovered: Discover
         contentType: f.contentType,
         sizeBytes: f.sizeBytes,
         hidden: existing.hidden && f.hidden,
+        // A file seen in the listing carries no link context; one harvested
+        // from content does. Keep whichever we have — the category and its
+        // source are untouched here, a re-sync is not a re-classification.
+        linkedFrom: f.linkedFrom ?? existing.linkedFrom,
+        linkContext: f.linkContext ?? existing.linkContext,
       }).where(eq(files.id, existing.id)).run();
       continue;
     }
-    db.insert(files).values({ moduleId, ...f, discoveredAt: now }).run();
+    db.insert(files).values({
+      moduleId, canvasFileId: f.canvasFileId, displayName: f.displayName, contentType: f.contentType,
+      sizeBytes: f.sizeBytes, hidden: f.hidden, linkedFrom: f.linkedFrom ?? null, linkContext: f.linkContext ?? null,
+      discoveredAt: now,
+    }).run();
   }
+}
+
+export function setFileCategory(db: Db, fileId: number, category: FileCategory, source: FileCategorySource): void {
+  const existing = db.select().from(files).where(eq(files.id, fileId)).get();
+  if (!existing) return;
+  if (existing.categorySource === "manual" && source !== "manual") return;
+  db.update(files).set({ category, categorySource: source }).where(eq(files.id, fileId)).run();
+}
+
+export function listModuleFiles(db: Db, moduleId: number) {
+  return db.select().from(files).where(eq(files.moduleId, moduleId)).all()
+    .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true, sensitivity: "base" }));
 }
 
 const stemOf = (name: string) => name.replace(/\.[^.]+$/, "").toLowerCase();

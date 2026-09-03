@@ -45,3 +45,39 @@ describe("extractCanvasFileIds", () => {
     expect(extractCanvasFileIds([a, null, b])).toEqual([10, 20]);
   });
 });
+
+import { extractCanvasFileLinks } from "./canvas-file-links";
+
+describe("extractCanvasFileLinks", () => {
+  const announcement = {
+    label: "Week 2 slides",
+    html: '<p>Hi all,</p><p>The deck for Thursday is here: <a href="/courses/96697/files/501/download?wrap=1">IFS4103-Lect-2.pdf</a>. Bring laptops.</p>',
+  };
+
+  it("records which source linked the file and the text around the link", () => {
+    const [link] = extractCanvasFileLinks([announcement]);
+    expect(link).toMatchObject({ id: 501, linkedFrom: "Week 2 slides" });
+    expect(link!.context).toContain("The deck for Thursday is here: IFS4103-Lect-2.pdf. Bring laptops.");
+  });
+
+  it("flattens the context to one trimmed line of at most 200 characters", () => {
+    const long = "word ".repeat(120);
+    const html = `<p>${long}</p><p>see <a href="/files/7">this</a></p><p>${long}</p>`;
+    const [link] = extractCanvasFileLinks([{ label: "Long post", html }]);
+    expect(link!.context).not.toMatch(/\n/);
+    expect(link!.context.length).toBeLessThanOrEqual(200);
+    expect(link!.context).toContain("see this");
+  });
+
+  it("keeps the first source that mentions a file", () => {
+    const links = extractCanvasFileLinks([
+      { label: "Syllabus", html: '<a href="/courses/1/files/9">outline</a>' },
+      { label: "Reminder", html: '<a href="/courses/1/files/9/download">outline again</a> and <a href="/courses/1/files/10">new</a>' },
+    ]);
+    expect(links.map((l) => [l.id, l.linkedFrom])).toEqual([[9, "Syllabus"], [10, "Reminder"]]);
+  });
+
+  it("skips null html and non-numeric segments", () => {
+    expect(extractCanvasFileLinks([{ label: "x", html: null }, { label: "y", html: '<a href="/files/folder/a">f</a>' }])).toEqual([]);
+  });
+});
