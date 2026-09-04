@@ -1,27 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { groupMaterials } from "./materials";
+import { categoryLabel, sortMaterials } from "./materials";
 
-const row = (displayName: string, category: string | null, hidden = false) => ({ displayName, category, hidden });
+const row = (displayName: string, category: string | null) => ({ displayName, category });
 
-describe("groupMaterials", () => {
-  it("groups files by category in a fixed reading order, dropping empty groups", () => {
-    const groups = groupMaterials([
-      row("assignment1.pdf", "assignment"),
-      row("Lect-1.pdf", "slides"),
+describe("sortMaterials", () => {
+  it("orders by category in reading order, then by name naturally", () => {
+    const sorted = sortMaterials([
       row("Seating.xlsx", "admin"),
+      row("Lect-10.pdf", "slides"),
+      row("assignment1.pdf", "assignment"),
       row("Lect-2.pdf", "slides"),
       row("Burp walkthrough.pdf", "tutorial"),
     ]);
-    expect(groups.map((g) => g.label)).toEqual(["Lecture slides", "Tutorials and labs", "Assignments", "Admin"]);
-    expect(groups[0]!.files.map((f) => f.displayName)).toEqual(["Lect-1.pdf", "Lect-2.pdf"]);
+    expect(sorted.map((r) => r.displayName)).toEqual(["Lect-2.pdf", "Lect-10.pdf", "Burp walkthrough.pdf", "assignment1.pdf", "Seating.xlsx"]);
   });
 
-  it("puts uncategorised files in their own group after the named ones, and images last", () => {
-    const groups = groupMaterials([row("banner.png", "image"), row("mystery.pdf", null), row("ch1.pdf", "reading")]);
-    expect(groups.map((g) => g.label)).toEqual(["Readings", "Uncategorised", "Images"]);
+  it("puts uncategorised files after every named category and images last", () => {
+    const sorted = sortMaterials([row("banner.png", "image"), row("mystery.pdf", null), row("ch1.pdf", "reading")]);
+    expect(sorted.map((r) => r.displayName)).toEqual(["ch1.pdf", "mystery.pdf", "banner.png"]);
   });
+});
 
-  it("returns nothing for a module with no files", () => {
-    expect(groupMaterials([])).toEqual([]);
+describe("categoryLabel", () => {
+  it("names each category for display, and null as uncategorised", () => {
+    expect(categoryLabel("slides")).toBe("Lecture slides");
+    expect(categoryLabel("practice")).toBe("Practice and past papers");
+    expect(categoryLabel(null)).toBe("Uncategorised");
   });
 });
