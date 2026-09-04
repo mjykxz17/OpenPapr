@@ -1,12 +1,10 @@
 import type { FileCategory } from "@/db/schema";
 
-// How a module's files are grouped on its page. Reading order is the order a
+// Display order and names for file categories. Reading order is the order a
 // student reaches for things: what was taught, what to do, what to read, what
-// to practise. Images come last because they are mostly announcement
-// decoration, and files nobody has categorised yet sit just before them.
-export type MaterialGroupKey = FileCategory | "uncategorised";
-
-export const MATERIAL_GROUPS: { key: MaterialGroupKey; label: string }[] = [
+// to practise. Files nobody has categorised yet sit after the named groups,
+// and images last, since they are mostly announcement decoration.
+export const CATEGORY_ORDER: { key: FileCategory | "uncategorised"; label: string }[] = [
   { key: "slides", label: "Lecture slides" },
   { key: "tutorial", label: "Tutorials and labs" },
   { key: "assignment", label: "Assignments" },
@@ -18,8 +16,14 @@ export const MATERIAL_GROUPS: { key: MaterialGroupKey; label: string }[] = [
   { key: "image", label: "Images" },
 ];
 
-export function groupMaterials<T extends { category: string | null }>(rows: T[]): { key: MaterialGroupKey; label: string; files: T[] }[] {
-  return MATERIAL_GROUPS
-    .map((g) => ({ ...g, files: rows.filter((r) => (r.category ?? "uncategorised") === g.key) }))
-    .filter((g) => g.files.length > 0);
+const rank = new Map(CATEGORY_ORDER.map((c, i) => [c.key, i]));
+
+export function categoryLabel(category: string | null): string {
+  return CATEGORY_ORDER.find((c) => c.key === (category ?? "uncategorised"))?.label ?? "Other";
+}
+
+export function sortMaterials<T extends { displayName: string; category: string | null }>(rows: T[]): T[] {
+  const r = (x: T) => rank.get((x.category ?? "uncategorised") as FileCategory | "uncategorised") ?? rank.get("other")!;
+  return [...rows].sort((a, b) =>
+    r(a) - r(b) || a.displayName.localeCompare(b.displayName, undefined, { numeric: true, sensitivity: "base" }));
 }

@@ -59,10 +59,19 @@ test("a session reaches the dashboard, modules, reminders and mail", async ({ pa
   await expect(page.getByRole("link", { name: /ST2334/ })).toHaveAttribute("href", "/modules/2");
 
   await page.goto("/modules/2");
-  await expect(page.getByText(/Components \(all sources\)/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Assessment" })).toBeVisible();
   // The manual-weightage form is folded into a disclosure now; assert the
   // control exists rather than the fields, which are collapsed by default.
   await expect(page.getByText(/^Add component$/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Materials" })).toBeVisible();
+  // Not getByRole by name: the rail's "Study guides" link matches the same words.
+  await expect(page.locator('main a[href="/modules/2/guide"]')).toContainText(/study guide/i);
+
+  // The guide has its own page; the demo module has none yet, so it offers
+  // to generate one and links back to the overview.
+  await page.goto("/modules/2/guide");
+  await expect(page.getByRole("button", { name: /generate study guide/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /overview/i })).toHaveAttribute("href", "/modules/2");
 
   await page.goto("/reminders");
   await expect(page.getByRole("heading", { name: "Reminders" })).toBeVisible();

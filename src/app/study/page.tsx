@@ -24,7 +24,7 @@ export default async function StudyIndex() {
           {guides.map((g) => (
             <li key={g.moduleId}>
               <Link
-                href={`/modules/${g.moduleId}#study`}
+                href={`/modules/${g.moduleId}/guide`}
                 className="group flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-4"
               >
                 <span className="text-sm font-medium text-ink group-hover:text-accent">
