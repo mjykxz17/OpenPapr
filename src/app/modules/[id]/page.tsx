@@ -7,6 +7,8 @@ import { getStudyGuide, listModuleFiles } from "@/db/repo";
 import { AppShell } from "@/components/AppShell";
 import { ManualComponentForm } from "@/components/ManualComponentForm";
 import { Materials } from "@/components/Materials";
+import { ModuleContext } from "@/components/ModuleContext";
+import { loadModuleContext } from "@/enrich/module-context";
 import { htmlToText } from "@/lib/html-text";
 import { withShadowFlags, SOURCE_LABEL } from "@/lib/component-display";
 import { sortMaterials } from "@/lib/materials";
@@ -56,6 +58,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
   const { title, termCode } = moduleDisplay(mod);
   const guide = getStudyGuide(db, mod.id);
   const files = sortMaterials(listModuleFiles(db, mod.id));
+  const context = loadModuleContext(db, mod.id)!;
 
   const announcement = (a: (typeof announcements)[number]) => {
     const text = htmlToText(a.body);
@@ -181,6 +184,19 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
         <section className="lg:col-span-2">
           <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Materials</h2>
           <Materials files={files} canvasBaseUrl={loadEnv().CANVAS_BASE_URL} canvasCourseId={mod.canvasCourseId} />
+        </section>
+
+        <section className="lg:col-span-2">
+          <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Module context</h2>
+          <ModuleContext
+            moduleId={mod.id}
+            context={context.context}
+            profile={context.input.profile}
+            profiledAt={context.profiledAt}
+            profileSource={context.profileSource}
+            notes={context.input.notes}
+            notesUpdatedAt={context.notesUpdatedAt}
+          />
         </section>
       </div>
     </AppShell>

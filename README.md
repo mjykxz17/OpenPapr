@@ -187,6 +187,36 @@ built; the authoring half is not yet a job.
 
 Both deck routes check that the module belongs to the requesting user before serving bytes.
 
+### Module context: what the model knows before it writes
+
+Generation used to be stateless: every call started from the text of one deck, with no idea which
+module it belonged to, how the lecturer teaches, or what the exam looks like. Each module now has a
+context document, assembled by [`src/lib/module-context.ts`](src/lib/module-context.ts) and put
+in front of the model on every outline and section call. It has three parts:
+
+- **Facts from the database**, rendered fresh each time so they never go stale: module code and
+  title, term, the assessment breakdown with its provenance, and the lecture decks in order.
+- **A profile the model writes itself.** At the start of every guide run, before any chapter is
+  written, the model reads samples of all the decks and describes the module and the lecturer:
+  what it is about, how lectures are taught, notation to keep, threads across decks, what is
+  signalled as examinable. It is stored in `module_context.profile` and rewritten on each run.
+- **Your notes**, in `module_context.notes`: the things the slides cannot show — exam format,
+  what the lecturer stresses in class, what to go deep on. Edit them on the module page under
+  "Module context", where the full assembled document is also shown under "What the model sees",
+  or keep them as Markdown files and load them with
+
+  ```bash
+  npx tsx scripts/import-module-context.ts --dir ./context --user 1
+  ```
+
+  Files are matched to modules by the code that prefixes the filename (`IFS4103.md` or
+  `IFS4103-notes.md`). The editor starts from a scaffold of headings; sections left as the
+  scaffold's hint are dropped from the prompt, so an untouched template costs nothing.
+
+The profile and the notes are separate columns, so regenerating a guide never touches what you
+wrote. A failed profile call is reported as a problem on the run and the guide is written from the
+facts and notes alone.
+
 ## Project layout
 
 ```
@@ -207,7 +237,9 @@ docs/               Design spec, implementation plan, feasibility spike notes
 Data model, in one line each: `users` holds encrypted per-person tokens; `modules` is one Canvas
 course; `components` is one graded item with a weight and a provenance `source`; `items` is the
 unified feed of announcements, assignments, emails, events and deadlines; `study_guides` holds one
-Markdown document per module; `sync_runs` records every poll for the staleness badge.
+Markdown document per module; `module_context` holds what the model is told about a module (its own
+profile of the lecturer plus the student's notes); `sync_runs` records every poll for the staleness
+badge.
 
 ## Status and limits
 

@@ -3,7 +3,7 @@ import type { Db } from "../db/client";
 import { files, modules } from "../db/schema";
 import type { CanvasClient } from "../connectors/canvas/client";
 import { extractPdfText } from "../lib/pdf-text";
-import { createGuideGenerator, figureSlides, selectGuideDecks, validateChapter, type CompatConfig } from "./study-guide-deps";
+import { createGuideGenerator, createModuleProfiler, figureSlides, loadModuleContext, selectGuideDecks, setModuleProfile, validateChapter, type CompatConfig } from "./study-guide-deps";
 
 export type GuideProgress = {
   stage: string;
@@ -33,7 +33,6 @@ export async function generateModuleGuide(opts: {
   onProgress?: (p: GuideProgress) => void;
 }): Promise<GuideResult> {
   const { db, canvas, cfg, moduleId, onProgress } = opts;
-  const gen = createGuideGenerator(cfg);
   const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get();
   if (!mod) throw new Error(`no module ${moduleId}`);
 
@@ -46,11 +45,13 @@ export async function generateModuleGuide(opts: {
   const report = () => onProgress?.({ ...progress });
   report();
 
-  const chapters: string[] = [];
   const problems: string[] = [];
-  const used: string[] = [];
 
-  for (const [i, deck] of decks.entries()) {
+  // Every deck is read before any chapter is written, because the module is
+  // profiled from all of them together and the profile is part of what each
+  // chapter is written with. Reading is the cheap half anyway.
+  const read: { name: string; text: string; pageCount: number }[] = [];
+  for (const deck of decks) {
     const name = deck.displayName.replace(/\.[^.]+$/, "");
     progress.stage = `Reading ${name}`;
     report();
@@ -74,7 +75,26 @@ export async function generateModuleGuide(opts: {
       report();
       continue;
     }
+    read.push({ name, text, pageCount });
+  }
+  if (read.length === 0) throw new Error("nothing generated");
 
+  // What the model learns about the module is kept: the profile it writes
+  // here is stored on the module and shown on its page, and it is in front
+  // of the model again on the next run, along with anything the student
+  // has added by hand.
+  progress.stage = "Profiling the module";
+  report();
+  const profile = await createModuleProfiler(cfg)(mod, read);
+  if (profile) setModuleProfile(db, moduleId, profile, `${read.length} deck${read.length === 1 ? "" : "s"}, ${cfg.model}`, Date.now());
+  else problems.push("module profile: not written this run");
+  const context = loadModuleContext(db, moduleId)?.context ?? null;
+  const gen = createGuideGenerator(cfg, { context });
+
+  const chapters: string[] = [];
+  const used: string[] = [];
+
+  for (const [i, { name, text, pageCount }] of read.entries()) {
     progress.stage = `Planning ${name}`;
     report();
     const outline = await gen.outline(name, text, pageCount);

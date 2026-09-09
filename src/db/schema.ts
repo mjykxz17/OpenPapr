@@ -111,6 +111,27 @@ export const studyGuides = sqliteTable("study_guides", {
   generatedAt: integer("generated_at").notNull(),
 }, (t) => [uniqueIndex("study_guides_module").on(t.moduleId)]);
 
+// What the model is told about a module before it writes anything for it.
+// Generation is stateless otherwise: each guide run starts from the deck
+// text alone, with no idea which module it is, how the lecturer teaches or
+// what the exam looks like. Two documents, kept apart so one never
+// overwrites the other: `notes` is the student's own markdown (exam format,
+// what the lecturer stresses in class, conventions to keep); `profile` is
+// written by the model from samples of the decks at the start of each guide
+// run and describes the module and the lecturer's style as it observed them.
+// Both are folded into every prompt, together with the facts the database
+// already holds (code, name, assessment, deck list) — see
+// src/lib/module-context.ts.
+export const moduleContext = sqliteTable("module_context", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  notes: text("notes"),
+  notesUpdatedAt: integer("notes_updated_at"),
+  profile: text("profile"),
+  profiledAt: integer("profiled_at"),
+  profileSource: text("profile_source"),   // provenance, e.g. "6 decks, model-x"
+}, (t) => [uniqueIndex("module_context_module").on(t.moduleId)]);
+
 // One study-guide generation, from the moment it is asked for. Doubles as the
 // request queue: a row with startedAt null is work the worker has not picked
 // up yet. Generation takes minutes rather than seconds — a single spinner over

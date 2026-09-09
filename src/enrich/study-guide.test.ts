@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { figureSlides, normalizeFences, preferColourDeck, slidePages, validateChapter } from "./study-guide";
 
 describe("preferColourDeck", () => {
@@ -158,5 +158,37 @@ describe("selectGuideDecks", () => {
 
   it("does not fall back once any file has a category, even if no slides were found", () => {
     expect(selectGuideDecks([row("U1-intro1.pdf", "reading")])).toEqual([]);
+  });
+});
+
+import { createGuideGenerator } from "./study-guide";
+
+describe("createGuideGenerator with module context", () => {
+  const cfg = { baseUrl: "https://agrouter.example/v1", apiKey: "sk-test", model: "agnes-2.5-flash" };
+  const chat = (content: string) =>
+    new Response(JSON.stringify({ choices: [{ message: { content } }] }), { status: 200 });
+  const deck = "-- 1 of 2 --\nIntro\n-- 2 of 2 --\nMore";
+  const systemOf = (fetchFn: ReturnType<typeof vi.fn>, call = 0) =>
+    JSON.parse(((fetchFn.mock.calls[call] as unknown as [string, RequestInit])[1].body as string)).messages[0].content as string;
+
+  it("puts the context in front of both the outline and the section prompts", async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(chat('{"title":"T","sections":[{"heading":"A","covers":"a","slides":"1"},{"heading":"B","covers":"b","slides":"2"}]}'))
+      .mockResolvedValueOnce(chat("### 1.1 A\n\nBody [slide 1](slide:Deck#1)."));
+    const gen = createGuideGenerator(cfg, { context: "# CS1010 Programming\n## Notes from the student\nExam is closed book.", fetchFn: fetchFn as never });
+    await gen.outline("Deck", deck, 2);
+    await gen.section("Deck", deck, 2, "1.1 A", "a", "1");
+    for (const call of [0, 1]) {
+      const system = systemOf(fetchFn, call);
+      expect(system).toContain("=== MODULE CONTEXT ===\n# CS1010 Programming");
+      expect(system).toContain("Exam is closed book.");
+      expect(system).toMatch(/never cite it/);
+    }
+  });
+
+  it("leaves the prompts alone when there is no context", async () => {
+    const fetchFn = vi.fn().mockResolvedValueOnce(chat('{"title":"T","sections":[{"heading":"A","covers":"a","slides":"1"},{"heading":"B","covers":"b","slides":"2"}]}'));
+    await createGuideGenerator(cfg, { fetchFn: fetchFn as never }).outline("Deck", deck, 2);
+    expect(systemOf(fetchFn)).not.toContain("MODULE CONTEXT");
   });
 });
