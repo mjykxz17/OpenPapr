@@ -11,6 +11,8 @@ import { createCanvasClient, isPdfFile, type CanvasClient } from "../connectors/
 import { extractCanvasFileLinks, type FileLinkSource } from "../lib/canvas-file-links";
 import { categorizeModuleFiles, createCompatFileCategorizer } from "../enrich/file-category";
 import { generateModuleGuide } from "../enrich/generate-guide";
+import { createModuleProfiler, selectProfileCandidate } from "../enrich/module-context";
+import { recordProfileFailure, setModuleProfile } from "../db/repo";
 import { normalizeCanvasCourse } from "../connectors/canvas/normalize";
 import { fetchInboxDelta } from "../connectors/graph/client";
 import { refreshAccessToken } from "../connectors/graph/auth";
@@ -307,6 +309,55 @@ async function runGuideJob(): Promise<void> {
   }
 }
 
+// Reading a module the way a person would before writing about it: what it is
+// about, how its lecturer teaches, what is signalled as examinable. This is
+// the half of the module context no one should have to ask for, so the worker
+// does it on its own — one module per sweep, whichever has gone longest
+// without being read — and by the time anyone opens the module or asks for a
+// guide, it is already there.
+//
+// One module per sweep because it downloads decks: a burst of them on a cold
+// start would crowd out the syncs that everything else on the page depends on.
+const PROFILE_DECK_BYTES = 60_000_000;
+
+async function runProfileJob(): Promise<void> {
+  if (!compatCfg) return;
+  const candidate = selectProfileCandidate(db, Date.now());
+  if (!candidate) return;
+
+  const user = db.select().from(users).where(eq(users.id, candidate.userId)).get();
+  if (!user?.canvasTokenEnc) return;
+
+  console.log(`reading ${candidate.code} (module ${candidate.moduleId}) to profile it`);
+  const canvas = createCanvasClient(env.CANVAS_BASE_URL, decrypt(user.canvasTokenEnc, env.SECRET_KEY));
+  const read: { name: string; text: string }[] = [];
+  let bytes = 0;
+  for (const deck of candidate.decks) {
+    if (bytes > PROFILE_DECK_BYTES) break;
+    try {
+      // Signed download urls expire, so the id is re-resolved rather than stored.
+      const fresh = await canvas.getFile(deck.canvasFileId);
+      const pdf = await canvas.downloadFile(fresh.url);
+      bytes += pdf.length;
+      const text = await extractPdfText(pdf);
+      if (text.trim()) read.push({ name: deck.displayName.replace(/\.[^.]+$/, ""), text });
+    } catch {
+      // One unreadable deck should not cost the module its profile; the rest
+      // still describe it.
+    }
+  }
+
+  const profile = read.length ? await createModuleProfiler(compatCfg)(candidate, read) : null;
+  if (!profile) {
+    recordProfileFailure(db, candidate.moduleId, Date.now());
+    console.log(`could not profile ${candidate.code} from ${read.length} deck(s)`);
+    return;
+  }
+  setModuleProfile(db, candidate.moduleId, profile,
+    `${read.length} deck${read.length === 1 ? "" : "s"}, ${compatCfg.model}`, candidate.deckKey, Date.now());
+  console.log(`profiled ${candidate.code} from ${read.length} deck(s)`);
+}
+
 async function tick(): Promise<void> {
   try {
     for (const user of selectRequestedUsers(db)) {
@@ -325,6 +376,9 @@ async function tick(): Promise<void> {
       for (const user of selectDueUsers(db, Date.now(), env.POLL_INTERVAL_MS, cap)) {
         await runFor(user.id);
       }
+      // After the syncs, so a module whose decks arrived in this sweep is read
+      // in the same sweep rather than waiting for the next one.
+      await runProfileJob();
     }
     await runGuideJob();
   } catch (err) {

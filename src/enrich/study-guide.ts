@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { chatJson, chatText, type CompatConfig } from "./openai-compat";
+import { contextPromptBlock } from "../lib/module-context";
 
 // Generates a study-guide chapter from one lecture deck.
 //
@@ -48,6 +49,15 @@ Rules:
 - Follow the deck's own order. Do not invent topics the deck does not cover.
 - Between 3 and 8 sections. Each should be a genuine unit of the lecture, not one slide.
 - Skip title slides, outline slides and administrivia unless the administrivia is assessment information a student must act on.`;
+
+// What the generator knows beyond the deck in hand. The context is the
+// module's context document (src/lib/module-context.ts): without it every
+// call starts from the deck text alone, not knowing which module this is,
+// how its lecturer teaches or what is examined.
+export interface GuideGeneratorOptions {
+  context?: string | null;
+  fetchFn?: typeof fetch;
+}
 
 const styleSystem = (deckName: string, pageCount: number, figures: number[]) => `You are writing ONE SECTION of a university study guide. The reader will learn from your text ALONE, without the slides in front of them.
 
@@ -106,11 +116,13 @@ export function normalizeFences(markdown: string): string {
   return out.join("\n");
 }
 
-export function createGuideGenerator(cfg: CompatConfig) {
+export function createGuideGenerator(cfg: CompatConfig, opts: GuideGeneratorOptions = {}) {
+  const { fetchFn = fetch } = opts;
+  const contextBlock = contextPromptBlock(opts.context);
   return {
     async outline(deckName: string, deckText: string, pageCount: number): Promise<GuideOutline | null> {
       const raw = await chatJson(
-        cfg, fetch, OUTLINE_SYSTEM,
+        cfg, fetchFn, OUTLINE_SYSTEM + contextBlock,
         `Deck: ${deckName} (${pageCount} slides)\n\n=== DECK TEXT ===\n${deckText}`,
         4000,
       );
@@ -129,7 +141,7 @@ export function createGuideGenerator(cfg: CompatConfig) {
     ): Promise<string> {
       const body = await withRetry(() => chatText(
         cfg,
-        styleSystem(deckName, pageCount, figures),
+        styleSystem(deckName, pageCount, figures) + contextBlock,
         `Write this section in full depth.
 
 Heading (use it verbatim as your first line): ### ${heading}
@@ -138,7 +150,7 @@ It draws mainly on slides ${slides}, but read the whole deck for context.
 
 === DECK TEXT (${deckName}, ${pageCount} slides) ===
 ${deckText}`,
-        { maxTokens: 8000, temperature: 0.3 },
+        { maxTokens: 8000, temperature: 0.3, fetchFn },
       ));
       return normalizeFences(body.trim());
     },

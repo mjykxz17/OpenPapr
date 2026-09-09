@@ -1,6 +1,6 @@
 import { and, asc, eq, desc, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { components, files, guideRuns, items, modules, studyGuides, users, type FileCategory, type FileCategorySource } from "./schema";
+import { components, files, guideRuns, items, moduleContext, modules, studyGuides, users, type FileCategory, type FileCategorySource } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 import type { MailItem } from "../connectors/graph/normalize";
 import { decrypt, encrypt } from "../lib/crypto";
@@ -394,4 +394,47 @@ export function listStudyGuides(db: Db, userId: number): StudyGuideSummary[] {
     .where(eq(modules.userId, userId))
     .orderBy(desc(studyGuides.generatedAt))
     .all();
+}
+
+// --- module context -----------------------------------------------------
+
+export function getModuleContext(db: Db, moduleId: number) {
+  return db.select().from(moduleContext).where(eq(moduleContext.moduleId, moduleId)).get();
+}
+
+// The student's notes, scoped to a module the user owns. Returns false, with
+// nothing written, otherwise — callers surface that as 404. An empty string
+// clears the notes; the profile column is never touched here.
+export function setModuleNotes(db: Db, userId: number, moduleId: number, notes: string, now: number): boolean {
+  const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get();
+  if (!mod || mod.userId !== userId) return false;
+  const value = notes.trim() === "" ? null : notes;
+  db.insert(moduleContext)
+    .values({ moduleId, notes: value, notesUpdatedAt: now })
+    .onConflictDoUpdate({ target: moduleContext.moduleId, set: { notes: value, notesUpdatedAt: now } })
+    .run();
+  return true;
+}
+
+// The model's own observations. Kept in its own column so a re-read can never
+// erase what the student wrote. deckKey records which deck set it was written
+// from, so the worker can tell a current profile from one that predates a new
+// lecture; a success clears the failure count.
+export function setModuleProfile(db: Db, moduleId: number, profile: string, source: string, deckKey: string, now: number): void {
+  const set = { profile, profiledAt: now, profileSource: source, profileDeckKey: deckKey, profileCheckedAt: now, profileAttempts: 0 };
+  db.insert(moduleContext).values({ moduleId, ...set })
+    .onConflictDoUpdate({ target: moduleContext.moduleId, set })
+    .run();
+}
+
+// One failed profiling attempt. profileDeckKey is deliberately left alone: a
+// failure is not a reading of these decks, and marking it as one would retire
+// the module from the queue for a deck set nobody has actually read.
+export function recordProfileFailure(db: Db, moduleId: number, now: number): void {
+  db.insert(moduleContext).values({ moduleId, profileCheckedAt: now, profileAttempts: 1 })
+    .onConflictDoUpdate({
+      target: moduleContext.moduleId,
+      set: { profileCheckedAt: now, profileAttempts: sql`${moduleContext.profileAttempts} + 1` },
+    })
+    .run();
 }

@@ -7,6 +7,7 @@
 import { existsSync, rmSync } from "node:fs";
 import { createDb } from "../src/db/client";
 import { components, items, modules, syncRuns, users } from "../src/db/schema";
+import { setModuleNotes, setModuleProfile } from "../src/db/repo";
 
 const DB_PATH = "data/demo.db";
 for (const suffix of ["", "-wal", "-shm"]) {
@@ -278,5 +279,21 @@ db.insert(syncRuns)
     { userId: user.id, source: "enrich", startedAt: now - 5 * MIN, finishedAt: now - 4 * MIN, ok: true },
   ])
   .run();
+
+// Module context for CS2103T: the profile the model would have written from
+// the decks, and a note the student added. Synthetic, like everything here.
+setModuleProfile(db, cs2103t.id, [
+  "### What the module is about",
+  "Building and maintaining a small software product in a team: requirements, design, testing and code quality, with a running project as the spine.",
+  "### How the lecturer teaches",
+  "Each lecture opens with a scenario from the team project, states the concept, then walks a code example. Definitions come after examples, not before.",
+  "### Terminology and notation to keep",
+  "UML class and sequence diagrams as drawn in the slides; 'tP' for the team project, 'iP' for the individual one.",
+  "### Threads that run across decks",
+  "Abstraction and coupling recur from week 2 onwards; every design topic is judged by how it changes testability.",
+  "### What is signalled as important or examinable",
+  "Slides marked 'exam tip' on sequence diagrams and on the difference between coupling and cohesion.",
+].join("\n"), "6 decks, demo-model", "demoDeckKey00000", now - 6 * DAY);
+setModuleNotes(db, user.id, cs2103t.id, "## Assessment and exam format\nClosed book, MCQ plus two short design questions. Past papers lean on UML.\n", now - 4 * DAY);
 
 console.log("seeded data/demo.db");

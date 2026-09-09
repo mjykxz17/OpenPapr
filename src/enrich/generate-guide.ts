@@ -3,7 +3,7 @@ import type { Db } from "../db/client";
 import { files, modules } from "../db/schema";
 import type { CanvasClient } from "../connectors/canvas/client";
 import { extractPdfText } from "../lib/pdf-text";
-import { createGuideGenerator, figureSlides, selectGuideDecks, validateChapter, type CompatConfig } from "./study-guide-deps";
+import { createGuideGenerator, createModuleProfiler, deckSetKey, figureSlides, getModuleContext, loadModuleContext, selectGuideDecks, setModuleProfile, validateChapter, type CompatConfig } from "./study-guide-deps";
 
 export type GuideProgress = {
   stage: string;
@@ -33,7 +33,6 @@ export async function generateModuleGuide(opts: {
   onProgress?: (p: GuideProgress) => void;
 }): Promise<GuideResult> {
   const { db, canvas, cfg, moduleId, onProgress } = opts;
-  const gen = createGuideGenerator(cfg);
   const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get();
   if (!mod) throw new Error(`no module ${moduleId}`);
 
@@ -46,11 +45,13 @@ export async function generateModuleGuide(opts: {
   const report = () => onProgress?.({ ...progress });
   report();
 
-  const chapters: string[] = [];
   const problems: string[] = [];
-  const used: string[] = [];
 
-  for (const [i, deck] of decks.entries()) {
+  // Every deck is read before any chapter is written, because the module is
+  // profiled from all of them together and the profile is part of what each
+  // chapter is written with. Reading is the cheap half anyway.
+  const read: { name: string; text: string; pageCount: number }[] = [];
+  for (const deck of decks) {
     const name = deck.displayName.replace(/\.[^.]+$/, "");
     progress.stage = `Reading ${name}`;
     report();
@@ -74,7 +75,31 @@ export async function generateModuleGuide(opts: {
       report();
       continue;
     }
+    read.push({ name, text, pageCount });
+  }
+  if (read.length === 0) throw new Error("nothing generated");
 
+  // The module's profile is normally already here: the worker reads the decks
+  // of any module it has not read yet, in the background, so a first
+  // generation does not wait on it. It is only written here when this run is
+  // the first to see these decks — a lecture added since the last read, or a
+  // guide asked for in the same minute the module was synced.
+  const deckKey = deckSetKey(decks);
+  const stored = getModuleContext(db, moduleId);
+  if (!stored?.profile || stored.profileDeckKey !== deckKey) {
+    progress.stage = "Reading the module as a whole";
+    report();
+    const profile = await createModuleProfiler(cfg)(mod, read);
+    if (profile) setModuleProfile(db, moduleId, profile, `${read.length} deck${read.length === 1 ? "" : "s"}, ${cfg.model}`, deckKey, Date.now());
+    else problems.push("module profile: not written this run");
+  }
+  const context = loadModuleContext(db, moduleId)?.context ?? null;
+  const gen = createGuideGenerator(cfg, { context });
+
+  const chapters: string[] = [];
+  const used: string[] = [];
+
+  for (const [i, { name, text, pageCount }] of read.entries()) {
     progress.stage = `Planning ${name}`;
     report();
     const outline = await gen.outline(name, text, pageCount);
