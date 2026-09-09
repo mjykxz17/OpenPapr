@@ -416,11 +416,25 @@ export function setModuleNotes(db: Db, userId: number, moduleId: number, notes: 
   return true;
 }
 
-// The model's own observations, rewritten on every guide run. Kept in its
-// own column so regenerating a guide can never erase what the student wrote.
-export function setModuleProfile(db: Db, moduleId: number, profile: string, source: string, now: number): void {
-  db.insert(moduleContext)
-    .values({ moduleId, profile, profiledAt: now, profileSource: source })
-    .onConflictDoUpdate({ target: moduleContext.moduleId, set: { profile, profiledAt: now, profileSource: source } })
+// The model's own observations. Kept in its own column so a re-read can never
+// erase what the student wrote. deckKey records which deck set it was written
+// from, so the worker can tell a current profile from one that predates a new
+// lecture; a success clears the failure count.
+export function setModuleProfile(db: Db, moduleId: number, profile: string, source: string, deckKey: string, now: number): void {
+  const set = { profile, profiledAt: now, profileSource: source, profileDeckKey: deckKey, profileCheckedAt: now, profileAttempts: 0 };
+  db.insert(moduleContext).values({ moduleId, ...set })
+    .onConflictDoUpdate({ target: moduleContext.moduleId, set })
+    .run();
+}
+
+// One failed profiling attempt. profileDeckKey is deliberately left alone: a
+// failure is not a reading of these decks, and marking it as one would retire
+// the module from the queue for a deck set nobody has actually read.
+export function recordProfileFailure(db: Db, moduleId: number, now: number): void {
+  db.insert(moduleContext).values({ moduleId, profileCheckedAt: now, profileAttempts: 1 })
+    .onConflictDoUpdate({
+      target: moduleContext.moduleId,
+      set: { profileCheckedAt: now, profileAttempts: sql`${moduleContext.profileAttempts} + 1` },
+    })
     .run();
 }

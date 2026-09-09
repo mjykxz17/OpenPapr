@@ -1,8 +1,10 @@
 import { ModuleContextEditor } from "@/components/ModuleContextEditor";
+import { ProfileWatcher } from "@/components/ProfileWatcher";
 import { NOTES_TEMPLATE } from "@/lib/module-context";
 
 export interface ModuleContextProps {
   moduleId: number;
+  hasDecks: boolean;
   context: string;
   profile: string | null;
   profiledAt: number | null;
@@ -42,16 +44,19 @@ function Profile({ markdown }: { markdown: string }) {
 
 // What the model is told about a module before it writes for it. Three
 // sources, shown as three things: facts from the database (assessment, deck
-// list), the model's own profile of the module from the last guide run, and
-// the student's notes. The full assembled document is one fold away, because
-// "what does it actually see" is the question this section answers.
+// list), the model's own reading of the decks, written by the worker in the
+// background, and the student's notes, which save as they are typed. Nothing
+// here is a button: the context is either already true or on its way. The
+// full assembled document is one fold away, because "what does it actually
+// see" is the question this section answers.
 export function ModuleContext(p: ModuleContextProps) {
   return (
     <div>
       <p className="max-w-prose text-sm text-ink-3">
         What the model knows about this module before it writes a guide. The assessment and deck list come from Canvas;
-        the profile is written by the model from the decks each time a guide is generated; the notes are yours, and the
-        place for what the slides cannot show — the exam format, what the lecturer stresses in class, what to go deep on.
+        the reading of the decks below is written on its own, in the background, whenever the module&apos;s slides change;
+        the notes are yours, and the place for what the slides cannot show — the exam format, what the lecturer stresses
+        in class, what to go deep on. They save as you type.
       </p>
 
       <div className="mt-5 grid grid-cols-1 gap-x-12 gap-y-8 lg:grid-cols-2 lg:items-start">
@@ -66,15 +71,20 @@ export function ModuleContext(p: ModuleContextProps) {
           </h3>
           {p.profile ? (
             <Profile markdown={p.profile} />
+          ) : p.hasDecks ? (
+            <>
+              <p className="text-sm text-ink-3">Reading this module&apos;s slides. It appears here on its own, usually within a few minutes.</p>
+              <ProfileWatcher moduleId={p.moduleId} />
+            </>
           ) : (
-            <p className="text-sm text-ink-3">Nothing yet. The model writes this at the start of each guide generation.</p>
+            <p className="text-sm text-ink-3">Nothing to read yet — no lecture slides have been synced for this module.</p>
           )}
         </div>
 
         <div>
           <h3 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">
             Your notes
-            {p.notesUpdatedAt && <span className="ml-2 normal-case tracking-normal">saved {shortDate(p.notesUpdatedAt)}</span>}
+            {p.notesUpdatedAt && <span className="ml-2 normal-case tracking-normal">last saved {shortDate(p.notesUpdatedAt)}</span>}
           </h3>
           <ModuleContextEditor moduleId={p.moduleId} initialNotes={p.notes} template={NOTES_TEMPLATE} />
         </div>

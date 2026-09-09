@@ -37,8 +37,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   });
 }
 
-// PUT replaces the student's notes. The model's profile is not writable
-// here: it is the model's own record and is rewritten by the next guide run.
+// PUT replaces the student's notes. The model's profile is not writable here:
+// it is the model's own record, rewritten whenever the worker reads the decks.
+//
+// POST is the same write under a different verb, because the editor saves as
+// you type and a tab closed mid-edit flushes the last keystrokes through
+// navigator.sendBeacon, which can only POST.
+export async function POST(request: Request, ctx: { params: Promise<{ id: string }> }) {
+  return PUT(request, ctx);
+}
+
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const userId = await currentUserId();

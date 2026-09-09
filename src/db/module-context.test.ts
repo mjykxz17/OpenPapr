@@ -42,7 +42,7 @@ describe("module context", () => {
   it("keeps the model's profile and the student's notes independent", () => {
     const db = setup();
     setModuleNotes(db, 1, 1, "mine", 100);
-    setModuleProfile(db, 1, "observed", "2 decks, model-x", 200);
+    setModuleProfile(db, 1, "observed", "2 decks, model-x", "key1", 200);
     let row = getModuleContext(db, 1)!;
     expect(row.notes).toBe("mine");
     expect(row.profile).toBe("observed");
@@ -54,7 +54,7 @@ describe("module context", () => {
     expect(row.profile).toBe("observed");
     expect(row.notes).toBe("edited");
 
-    setModuleProfile(db, 1, "re-observed", "3 decks, model-x", 400);
+    setModuleProfile(db, 1, "re-observed", "3 decks, model-x", "key2", 400);
     row = getModuleContext(db, 1)!;
     expect(row.notes).toBe("edited");
     expect(row.profile).toBe("re-observed");

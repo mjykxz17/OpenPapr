@@ -190,6 +190,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Module context</h2>
           <ModuleContext
             moduleId={mod.id}
+            hasDecks={context.input.decks.length > 0}
             context={context.context}
             profile={context.input.profile}
             profiledAt={context.profiledAt}

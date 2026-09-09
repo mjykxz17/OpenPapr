@@ -196,14 +196,18 @@ in front of the model on every outline and section call. It has three parts:
 
 - **Facts from the database**, rendered fresh each time so they never go stale: module code and
   title, term, the assessment breakdown with its provenance, and the lecture decks in order.
-- **A profile the model writes itself.** At the start of every guide run, before any chapter is
-  written, the model reads samples of all the decks and describes the module and the lecturer:
-  what it is about, how lectures are taught, notation to keep, threads across decks, what is
-  signalled as examinable. It is stored in `module_context.profile` and rewritten on each run.
+- **A profile the model writes itself, unprompted.** The worker notices any module whose decks it
+  has not read — one per sweep, so a cold start does not burst — samples them, and describes the
+  module and the lecturer: what it is about, how lectures are taught, notation to keep, threads
+  across decks, what is signalled as examinable. Nobody asks for this and there is no button; by
+  the time you open the module or ask for a guide it is normally already there, and the module
+  page shows a waiting line and fills itself in when it is not. `module_context.profile_deck_key`
+  fingerprints the deck set it was read from, so a new lecture earns a re-read and an unchanged
+  module is never read twice. Failures back off and stop after three attempts.
 - **Your notes**, in `module_context.notes`: the things the slides cannot show — exam format,
   what the lecturer stresses in class, what to go deep on. Edit them on the module page under
-  "Module context", where the full assembled document is also shown under "What the model sees",
-  or keep them as Markdown files and load them with
+  "Module context", where they save as you type (and on leaving the page) and the full assembled
+  document is shown under "What the model sees". Or keep them as Markdown files and load them with
 
   ```bash
   npx tsx scripts/import-module-context.ts --dir ./context --user 1
@@ -213,9 +217,11 @@ in front of the model on every outline and section call. It has three parts:
   `IFS4103-notes.md`). The editor starts from a scaffold of headings; sections left as the
   scaffold's hint are dropped from the prompt, so an untouched template costs nothing.
 
-The profile and the notes are separate columns, so regenerating a guide never touches what you
-wrote. A failed profile call is reported as a problem on the run and the guide is written from the
-facts and notes alone.
+The profile and the notes are separate columns, so a re-read never touches what you wrote. A guide
+run profiles the module itself only when it is the first to see these decks — a lecture added since
+the last read, or a guide asked for in the same minute the module was synced — and otherwise uses
+what is already stored. A failed profile leaves the guide to be written from the facts and notes
+alone, and is reported as a problem on the run.
 
 ## Project layout
 
@@ -238,7 +244,7 @@ Data model, in one line each: `users` holds encrypted per-person tokens; `module
 course; `components` is one graded item with a weight and a provenance `source`; `items` is the
 unified feed of announcements, assignments, emails, events and deadlines; `study_guides` holds one
 Markdown document per module; `module_context` holds what the model is told about a module (its own
-profile of the lecturer plus the student's notes); `sync_runs` records every poll for the staleness
+reading of the decks plus the student's notes); `sync_runs` records every poll for the staleness
 badge.
 
 ## Status and limits

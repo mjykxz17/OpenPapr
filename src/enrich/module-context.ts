@@ -1,6 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNotNull } from "drizzle-orm";
+import { createHash } from "node:crypto";
 import type { Db } from "../db/client";
-import { components, files, modules } from "../db/schema";
+import { components, files, moduleContext, modules, users } from "../db/schema";
 import { getModuleContext } from "../db/repo";
 import { renderModuleContext, type ModuleContextInput } from "../lib/module-context";
 import { withShadowFlags } from "../lib/component-display";
@@ -34,6 +35,89 @@ export function loadModuleContext(db: Db, moduleId: number): { input: ModuleCont
     profileSource: stored?.profileSource ?? null,
     notesUpdatedAt: stored?.notesUpdatedAt ?? null,
   };
+}
+
+// --- deciding when to read a module's decks -------------------------------
+
+// Fingerprints the deck set a profile was written from. Names and sizes both
+// count: a new lecture appears as a new name, and a re-uploaded deck keeps its
+// name but changes size. When this differs from what is stored, the module has
+// changed since it was last read and is worth reading again.
+export function deckSetKey(decks: { displayName: string; sizeBytes: number | null }[]): string {
+  const lines = decks.map((d) => `${d.displayName}:${d.sizeBytes ?? 0}`).sort().join("\n");
+  return createHash("sha1").update(lines).digest("hex").slice(0, 16);
+}
+
+// Profiling is not free — it downloads decks — so a module is read once per
+// deck set and then left alone. Failures back off and eventually stop: a
+// module whose decks cannot be read must not be retried every sweep forever.
+export const MAX_PROFILE_ATTEMPTS = 3;
+export const PROFILE_RETRY_MS = 6 * 60 * 60_000;
+
+export interface ProfileState {
+  profile: string | null;
+  profileDeckKey: string | null;
+  profileCheckedAt: number | null;
+  profileAttempts: number;
+}
+
+export function needsProfile(stored: ProfileState | undefined, deckKey: string, now: number): boolean {
+  if (!deckKey) return false;                                    // no decks, nothing to read
+  if (!stored) return true;
+  if (stored.profile && stored.profileDeckKey === deckKey) return false;  // current
+  if (stored.profileAttempts >= MAX_PROFILE_ATTEMPTS) return false;       // given up
+  if (stored.profileAttempts > 0 && stored.profileCheckedAt !== null
+      && now - stored.profileCheckedAt < PROFILE_RETRY_MS) return false;  // backing off
+  return true;
+}
+
+// A whole module's decks are more than a profile needs, and downloading them
+// all for one is wasteful. Sampling evenly keeps the shape of the module —
+// its opening, its middle, where it ends up — rather than only its first
+// weeks, which is what a plain slice would give.
+export function sampleDecksForProfile<T>(decks: T[], max = 6): T[] {
+  if (decks.length <= max) return decks;
+  const step = (decks.length - 1) / (max - 1);
+  return Array.from({ length: max }, (_, i) => decks[Math.round(i * step)]!);
+}
+
+export interface ProfileCandidate {
+  userId: number;
+  moduleId: number;
+  code: string;
+  name: string;
+  deckKey: string;
+  decks: { canvasFileId: number; displayName: string }[];
+}
+
+// The one module most worth reading right now, or null when every module is
+// current. Never-read modules come first, then the longest since an attempt,
+// so a new enrolment is profiled before an old one is re-read. Only active
+// modules of users whose Canvas token is present, since reading needs both.
+export function selectProfileCandidate(db: Db, now: number): ProfileCandidate | null {
+  const rows = db.select({ mod: modules }).from(modules)
+    .innerJoin(users, eq(users.id, modules.userId))
+    .where(and(eq(modules.active, true), isNotNull(users.canvasTokenEnc)))
+    .all();
+
+  const due: { candidate: ProfileCandidate; checkedAt: number | null }[] = [];
+  for (const { mod } of rows) {
+    const decks = selectGuideDecks(db.select().from(files).where(eq(files.moduleId, mod.id)).all());
+    if (decks.length === 0) continue;
+    const deckKey = deckSetKey(decks);
+    const stored = db.select().from(moduleContext).where(eq(moduleContext.moduleId, mod.id)).get();
+    if (!needsProfile(stored, deckKey, now)) continue;
+    due.push({
+      candidate: {
+        userId: mod.userId, moduleId: mod.id, code: mod.code, name: mod.name, deckKey,
+        decks: sampleDecksForProfile(decks).map((d) => ({ canvasFileId: d.canvasFileId, displayName: d.displayName })),
+      },
+      checkedAt: stored?.profileCheckedAt ?? null,
+    });
+  }
+
+  due.sort((a, b) => (a.checkedAt ?? -1) - (b.checkedAt ?? -1));
+  return due[0]?.candidate ?? null;
 }
 
 // --- profiling -----------------------------------------------------------

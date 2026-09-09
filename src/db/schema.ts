@@ -122,6 +122,14 @@ export const studyGuides = sqliteTable("study_guides", {
 // Both are folded into every prompt, together with the facts the database
 // already holds (code, name, assessment, deck list) — see
 // src/lib/module-context.ts.
+//
+// Profiling is background work, not something anyone asks for: the worker
+// notices a module whose decks it has not read and writes the profile on its
+// own, so the context is already there the first time a guide is generated.
+// The bookkeeping columns are what let it know that — profileDeckKey
+// fingerprints the deck set the profile was written from (a new lecture
+// changes it and earns a re-read), and the attempt counters bound the retry
+// loop the way actionsAttempts does for deadline extraction.
 export const moduleContext = sqliteTable("module_context", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   moduleId: integer("module_id").notNull().references(() => modules.id),
@@ -130,6 +138,9 @@ export const moduleContext = sqliteTable("module_context", {
   profile: text("profile"),
   profiledAt: integer("profiled_at"),
   profileSource: text("profile_source"),   // provenance, e.g. "6 decks, model-x"
+  profileDeckKey: text("profile_deck_key"),          // deck set the profile was written from
+  profileCheckedAt: integer("profile_checked_at"),   // last attempt, successful or not
+  profileAttempts: integer("profile_attempts").notNull().default(0),  // consecutive failures; 0 on success
 }, (t) => [uniqueIndex("module_context_module").on(t.moduleId)]);
 
 // One study-guide generation, from the moment it is asked for. Doubles as the

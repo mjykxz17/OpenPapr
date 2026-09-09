@@ -293,7 +293,7 @@ setModuleProfile(db, cs2103t.id, [
   "Abstraction and coupling recur from week 2 onwards; every design topic is judged by how it changes testability.",
   "### What is signalled as important or examinable",
   "Slides marked 'exam tip' on sequence diagrams and on the difference between coupling and cohesion.",
-].join("\n"), "6 decks, demo-model", now - 6 * DAY);
+].join("\n"), "6 decks, demo-model", "demoDeckKey00000", now - 6 * DAY);
 setModuleNotes(db, user.id, cs2103t.id, "## Assessment and exam format\nClosed book, MCQ plus two short design questions. Past papers lean on UML.\n", now - 4 * DAY);
 
 console.log("seeded data/demo.db");

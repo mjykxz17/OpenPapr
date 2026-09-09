@@ -3,7 +3,7 @@ import type { Db } from "../db/client";
 import { files, modules } from "../db/schema";
 import type { CanvasClient } from "../connectors/canvas/client";
 import { extractPdfText } from "../lib/pdf-text";
-import { createGuideGenerator, createModuleProfiler, figureSlides, loadModuleContext, selectGuideDecks, setModuleProfile, validateChapter, type CompatConfig } from "./study-guide-deps";
+import { createGuideGenerator, createModuleProfiler, deckSetKey, figureSlides, getModuleContext, loadModuleContext, selectGuideDecks, setModuleProfile, validateChapter, type CompatConfig } from "./study-guide-deps";
 
 export type GuideProgress = {
   stage: string;
@@ -79,15 +79,20 @@ export async function generateModuleGuide(opts: {
   }
   if (read.length === 0) throw new Error("nothing generated");
 
-  // What the model learns about the module is kept: the profile it writes
-  // here is stored on the module and shown on its page, and it is in front
-  // of the model again on the next run, along with anything the student
-  // has added by hand.
-  progress.stage = "Profiling the module";
-  report();
-  const profile = await createModuleProfiler(cfg)(mod, read);
-  if (profile) setModuleProfile(db, moduleId, profile, `${read.length} deck${read.length === 1 ? "" : "s"}, ${cfg.model}`, Date.now());
-  else problems.push("module profile: not written this run");
+  // The module's profile is normally already here: the worker reads the decks
+  // of any module it has not read yet, in the background, so a first
+  // generation does not wait on it. It is only written here when this run is
+  // the first to see these decks — a lecture added since the last read, or a
+  // guide asked for in the same minute the module was synced.
+  const deckKey = deckSetKey(decks);
+  const stored = getModuleContext(db, moduleId);
+  if (!stored?.profile || stored.profileDeckKey !== deckKey) {
+    progress.stage = "Reading the module as a whole";
+    report();
+    const profile = await createModuleProfiler(cfg)(mod, read);
+    if (profile) setModuleProfile(db, moduleId, profile, `${read.length} deck${read.length === 1 ? "" : "s"}, ${cfg.model}`, deckKey, Date.now());
+    else problems.push("module profile: not written this run");
+  }
   const context = loadModuleContext(db, moduleId)?.context ?? null;
   const gen = createGuideGenerator(cfg, { context });
 
