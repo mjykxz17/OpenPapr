@@ -4,6 +4,7 @@ import { currentUserId } from "@/server/session";
 import { getDb } from "@/server/db";
 import { latestGuideRun, requestGuide } from "@/db/repo";
 import { modules } from "@/db/schema";
+import { canGenerateGuides } from "@/server/llm-access";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,9 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   const moduleId = Number(id);
   if (!(await ownedModule(moduleId, userId))) return NextResponse.json({ error: "not found" }, { status: 404 });
 
+  if (!canGenerateGuides(getDb(), userId)) {
+    return NextResponse.json({ error: "Add an AI key in Account to generate study guides." }, { status: 409 });
+  }
   requestGuide(getDb(), userId, moduleId, Date.now());
   return NextResponse.json({ ok: true });
 }

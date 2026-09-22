@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { LlmScore } from "./llm";
 import type { ExtractedComponent, WeightageSourceText } from "./weightage";
+import { tokenParams } from "../lib/llm-provider";
 
 // OpenAI-compatible provider (Agnes agrouter). Same contracts as ./llm and
 // ./weightage, but JSON is requested in the prompt and validated with zod —
@@ -31,14 +32,14 @@ export async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system:
     headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: cfg.model,
-      max_tokens: maxTokens,
+      ...tokenParams(cfg.baseUrl, maxTokens),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
     }),
   });
-  if (!res.ok) throw new Error(`llm ${res.status}`);
+  if (!res.ok) throw new Error(`llm ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   return extractJson(data.choices?.[0]?.message?.content ?? "");
 }
@@ -59,8 +60,7 @@ export async function chatText(
     headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: cfg.model,
-      max_tokens: maxTokens,
-      temperature,
+      ...tokenParams(cfg.baseUrl, maxTokens, temperature),
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },

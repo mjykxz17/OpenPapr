@@ -10,6 +10,7 @@ import { StudyGuide } from "@/components/StudyGuide";
 import { GenerateGuideButton } from "@/components/GenerateGuideButton";
 import { moduleDisplay } from "@/lib/module-display";
 import { shortDate } from "@/lib/format-date";
+import { canGenerateGuides } from "@/server/llm-access";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +55,7 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {guide && <span className="text-[13px] text-ink-3">generated {shortDate(guide.generatedAt)}</span>}
-          <GenerateGuideButton moduleId={mod.id} hasGuide={Boolean(guide)} />
+          <GenerateGuideButton moduleId={mod.id} hasGuide={Boolean(guide)} canGenerate={canGenerateGuides(db, userId)} />
         </div>
       </header>
 

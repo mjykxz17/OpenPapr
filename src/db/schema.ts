@@ -24,6 +24,17 @@ export const users = sqliteTable("users", {
   // in the database rather than a call into the worker, because the web server
   // and the worker are separate processes with no channel between them.
   syncRequestedAt: integer("sync_requested_at"),
+  // When the stored Canvas token last proved good, and when Canvas last
+  // refused it. A refusal newer than the last success means the token has
+  // expired or been revoked, and the account page says so.
+  canvasVerifiedAt: integer("canvas_verified_at"),
+  canvasTokenFailedAt: integer("canvas_token_failed_at"),
+  // The student's own model provider — any OpenAI-compatible endpoint. The
+  // key is encrypted with SECRET_KEY like the Canvas token and never leaves
+  // the server. All three null means the deployment's shared key is used.
+  llmBaseUrl: text("llm_base_url"),
+  llmModel: text("llm_model"),
+  llmKeyEnc: text("llm_key_enc"),
 }, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId), uniqueIndex("users_username").on(t.username)]);
 
 export const modules = sqliteTable("modules", {

@@ -42,6 +42,15 @@ function StudyIcon() {
   );
 }
 
+function AccountIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21a8 8 0 0 1 16 0" />
+    </svg>
+  );
+}
+
 const NAV = [
   { href: "/", label: "Home", Icon: HomeIcon },
   { href: "/reminders", label: "Reminders", Icon: RemindersIcon },
@@ -75,6 +84,17 @@ export function Rail() {
         );
       })}
       <div className="mt-auto flex flex-col items-center gap-1">
+        <Link
+          href="/account"
+          title="Account"
+          aria-label="Account"
+          aria-current={isActive("/account") ? "page" : undefined}
+          className={`flex h-11 w-11 items-center justify-center rounded-md transition-colors ${
+            isActive("/account") ? "bg-accent-soft text-accent" : "text-ink-2 hover:bg-ink/[0.05] hover:text-ink"
+          }`}
+        >
+          <AccountIcon />
+        </Link>
         <AppearanceMenu />
         <SignOutButton />
       </div>

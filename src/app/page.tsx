@@ -7,6 +7,7 @@ import { SyncStatus } from "@/components/SyncStatus";
 import { SyncButton } from "@/components/SyncButton";
 import { ModuleGrid } from "@/components/ModuleGrid";
 import { DueThisWeek } from "@/components/DueThisWeek";
+import { getUser } from "@/db/repo";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +15,20 @@ export default async function Home() {
   const userId = await requireUserId();
   const now = Date.now();
   const overview = getOverview(getDb(), userId, now, loadEnv().POLL_INTERVAL_MS);
+  const user = getUser(getDb(), userId);
+  const canvasTokenBroken = Boolean(user?.canvasTokenFailedAt && (!user.canvasVerifiedAt || user.canvasTokenFailedAt > user.canvasVerifiedAt));
   const dateLabel = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" }).format(now);
 
   return (
     <AppShell>
+      {canvasTokenBroken && (
+        <div className="mb-6 rounded-md border border-warn-line bg-warn-soft px-4 py-3 text-sm text-warn-ink">
+          Canvas stopped accepting your access token, so syncing is paused —{" "}
+          <a href="/account" className="font-medium underline underline-offset-2">
+            paste a new one in Account
+          </a>
+        </div>
+      )}
       {overview.graphAuthBroken && (
         <div className="mb-6 rounded-md border border-warn-line bg-warn-soft px-4 py-3 text-sm text-warn-ink">
           Microsoft sign-in has expired —{" "}

@@ -4,7 +4,7 @@ import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
 import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, selectRequestedUsers, takeSyncRequest, upsertModuleFiles, type DiscoveredFile,
-  claimNextGuideRun, updateGuideRun, failStaleGuideRuns, upsertStudyGuide, setModuleActivity, shouldAttemptWeightage, upsertMailItems } from "../db/repo";
+  claimNextGuideRun, updateGuideRun, failStaleGuideRuns, upsertStudyGuide, setModuleActivity, shouldAttemptWeightage, upsertMailItems, recordCanvasTokenCheck } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient, isPdfFile, type CanvasClient } from "../connectors/canvas/client";
@@ -20,7 +20,9 @@ import { createScorer } from "../enrich/llm";
 import { createCompatScorer, createCompatWeightageExtractor } from "./../enrich/openai-compat";
 import { createCompatActionExtractor } from "../enrich/actions";
 import { createCompatDeadlineClassifier } from "../enrich/classify";
-import { createWeightageExtractor, type WeightageSourceText, type WeightageSourcePdf } from "../enrich/weightage";
+import { createWeightageExtractor, type ExtractedComponent, type WeightageSourceText, type WeightageSourcePdf } from "../enrich/weightage";
+import type { CompatConfig } from "../enrich/openai-compat";
+import { sharedLlmConfig, userLlmConfig } from "../lib/llm-provider";
 import { createGuard, runUserSync } from "./sync";
 import { extractPdfText } from "../lib/pdf-text";
 import { focusAssessmentText } from "../lib/assessment-focus";
@@ -28,25 +30,63 @@ import { focusAssessmentText } from "../lib/assessment-focus";
 const env = loadEnv();
 const db = createDb(env.DATABASE_PATH);
 
-// Provider selection: OpenAI-compatible endpoint (Agnes agrouter) wins when
-// configured; otherwise Anthropic; otherwise rules-only. The compat path has
-// no PDF document support, so PDF syllabus sources are only gathered on the
-// Anthropic path.
-const compatCfg = env.OPENAI_COMPAT_BASE_URL && env.OPENAI_COMPAT_API_KEY
-  ? { baseUrl: env.OPENAI_COMPAT_BASE_URL, apiKey: env.OPENAI_COMPAT_API_KEY, model: env.OPENAI_COMPAT_MODEL }
-  : null;
-const anthropic = !compatCfg && env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }) : null;
-const scorer = compatCfg ? createCompatScorer(compatCfg) : anthropic ? createScorer(anthropic, env.ANTHROPIC_MODEL) : null;
-const anthropicExtractor = anthropic ? createWeightageExtractor(anthropic, env.ANTHROPIC_MODEL) : null;
-const compatExtractor = compatCfg ? createCompatWeightageExtractor(compatCfg) : null;
-const extractor = compatCfg
-  ? (texts: WeightageSourceText[], _pdfs?: WeightageSourcePdf[]) => compatExtractor!(texts)
-  : anthropicExtractor;
-const supportsPdfSources = Boolean(anthropic);
-const actionExtractor = compatCfg ? createCompatActionExtractor(compatCfg) : null; // Anthropic-path parity: future work
-const deadlineClassifier = compatCfg ? createCompatDeadlineClassifier(compatCfg) : null;
-const fileCategorizer = compatCfg ? createCompatFileCategorizer(compatCfg) : null;
-if (compatCfg) console.log(`llm provider: openai-compat ${compatCfg.model} @ ${compatCfg.baseUrl} (pdf sources disabled)`);
+// Provider selection, per user. A student who has saved their own key in
+// Account gets every model call made with it; everyone else uses the
+// deployment's shared provider — the OpenAI-compatible endpoint when
+// configured, otherwise Anthropic, otherwise rules only. A student's key is
+// never swapped for the shared one when it fails: that would hide the error
+// and spend someone else's credit.
+//
+// The compat path has no PDF document support, so PDF syllabus sources are
+// only gathered on the Anthropic path.
+type LlmKit = {
+  compatCfg: CompatConfig | null;
+  scorer: ReturnType<typeof createScorer> | null;
+  extractor: ((texts: WeightageSourceText[], pdfs?: WeightageSourcePdf[]) => Promise<ExtractedComponent[] | null>) | null;
+  supportsPdfSources: boolean;
+  actionExtractor: ReturnType<typeof createCompatActionExtractor> | null; // Anthropic-path parity: future work
+  deadlineClassifier: ReturnType<typeof createCompatDeadlineClassifier> | null;
+  fileCategorizer: ReturnType<typeof createCompatFileCategorizer> | null;
+};
+
+function compatKit(cfg: CompatConfig): LlmKit {
+  const compatExtractor = createCompatWeightageExtractor(cfg);
+  return {
+    compatCfg: cfg,
+    scorer: createCompatScorer(cfg),
+    extractor: (texts) => compatExtractor(texts),
+    supportsPdfSources: false,
+    actionExtractor: createCompatActionExtractor(cfg),
+    deadlineClassifier: createCompatDeadlineClassifier(cfg),
+    fileCategorizer: createCompatFileCategorizer(cfg),
+  };
+}
+
+const sharedCfg = sharedLlmConfig(env);
+const anthropic = !sharedCfg && env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }) : null;
+const sharedKit: LlmKit = sharedCfg ? compatKit(sharedCfg) : {
+  compatCfg: null,
+  scorer: anthropic ? createScorer(anthropic, env.ANTHROPIC_MODEL) : null,
+  extractor: anthropic ? createWeightageExtractor(anthropic, env.ANTHROPIC_MODEL) : null,
+  supportsPdfSources: Boolean(anthropic),
+  actionExtractor: null, deadlineClassifier: null, fileCategorizer: null,
+};
+if (sharedCfg) console.log(`shared llm provider: openai-compat ${sharedCfg.model} @ ${sharedCfg.baseUrl} (pdf sources disabled)`);
+
+// Built once per distinct saved config and reused across cycles; a change in
+// Account shows up as a new signature and replaces the entry.
+const userKits = new Map<number, { sig: string; kit: LlmKit }>();
+function kitFor(userId: number): LlmKit {
+  const user = db.select().from(users).where(eq(users.id, userId)).get();
+  const own = user ? userLlmConfig(user, env.SECRET_KEY) : null;
+  if (!own) { userKits.delete(userId); return sharedKit; }
+  const sig = `${own.baseUrl}\n${own.model}\n${user!.llmKeyEnc}`;
+  const hit = userKits.get(userId);
+  if (hit && hit.sig === sig) return hit.kit;
+  const kit = compatKit(own);
+  userKits.set(userId, { sig, kit });
+  return kit;
+}
 
 const SYLLABUS_NAME_RE = /(syllabus|assessment|grading|outline)/i;
 
@@ -66,6 +106,7 @@ async function harvestFiles(
   courseId: number,
   moduleId: number,
   sources: FileLinkSource[],
+  fileCategorizer: LlmKit["fileCategorizer"],
 ): Promise<void> {
   const discovered = new Map<number, DiscoveredFile>();
 
@@ -121,7 +162,18 @@ async function canvasSync(userId: number): Promise<void> {
   const user = db.select().from(users).where(eq(users.id, userId)).get()!;
   if (!user.canvasTokenEnc) return;
   const canvas = createCanvasClient(env.CANVAS_BASE_URL, decrypt(user.canvasTokenEnc, env.SECRET_KEY));
-  for (const course of await canvas.listActiveCourses()) {
+  const { extractor, supportsPdfSources, fileCategorizer } = kitFor(userId);
+  let courses: Awaited<ReturnType<CanvasClient["listActiveCourses"]>>;
+  try {
+    courses = await canvas.listActiveCourses();
+  } catch (err) {
+    // 401 is Canvas saying the token itself is dead (expired or revoked), as
+    // opposed to an outage; that is what the account page warns about.
+    if (/^Error: Canvas 401 /.test(String(err))) recordCanvasTokenCheck(db, userId, false, Date.now());
+    throw err;
+  }
+  recordCanvasTokenCheck(db, userId, true, Date.now());
+  for (const course of courses) {
     const [groups, announcements, events] = await Promise.all([
       canvas.listAssignmentGroups(course.id),
       canvas.listAnnouncements(course.id),
@@ -133,7 +185,7 @@ async function canvasSync(userId: number): Promise<void> {
     await harvestFiles(canvas, course.id, moduleId, [
       ...announcements.map((a) => ({ label: a.title, html: a.message })),
       { label: "Syllabus", html: course.syllabus_body ?? null },
-    ]);
+    ], fileCategorizer);
 
     // Weightage extraction: component-less modules only, at most weekly.
     if (!extractor) continue;
@@ -192,6 +244,7 @@ async function mailSync(userId: number): Promise<void> {
 }
 
 async function enrich(userId: number): Promise<void> {
+  const { scorer, actionExtractor, deadlineClassifier } = kitFor(userId);
   const activeCodes = db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all().map((m) => m.code);
   const pending = db.select().from(items).where(and(
     eq(items.userId, userId), eq(items.type, "email"),
@@ -274,10 +327,11 @@ async function runGuideJob(): Promise<void> {
   if (!run) return;
 
   const user = db.select().from(users).where(eq(users.id, run.userId)).get();
+  const compatCfg = user ? kitFor(user.id).compatCfg : null;
   if (!user?.canvasTokenEnc || !compatCfg) {
     updateGuideRun(db, run.id, {
       finishedAt: Date.now(), ok: false, stage: "Unavailable",
-      error: !compatCfg ? "no LLM provider configured" : "no canvas token",
+      error: !compatCfg ? "no AI provider — add your own API key in Account" : "no canvas token",
     });
     return;
   }

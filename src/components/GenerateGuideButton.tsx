@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 type Status = {
   state: "idle" | "running" | "done" | "failed";
@@ -13,7 +14,7 @@ type Status = {
   error?: string | null;
 };
 
-export function GenerateGuideButton({ moduleId, hasGuide }: { moduleId: number; hasGuide: boolean }) {
+export function GenerateGuideButton({ moduleId, hasGuide, canGenerate = true }: { moduleId: number; hasGuide: boolean; canGenerate?: boolean }) {
   const router = useRouter();
   const [status, setStatus] = useState<Status>({ state: "idle" });
   const [starting, setStarting] = useState(false);
@@ -48,7 +49,13 @@ export function GenerateGuideButton({ moduleId, hasGuide }: { moduleId: number; 
   async function start() {
     setStarting(true);
     try {
-      await fetch(`/api/modules/${moduleId}/guide`, { method: "POST" });
+      const res = await fetch(`/api/modules/${moduleId}/guide`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setStatus({ state: "failed", error: body?.error ?? "Could not queue the guide." });
+        setStarting(false);
+        return;
+      }
     } catch {
       setStatus({ state: "failed", error: "Could not reach the server." });
       setStarting(false);
@@ -64,7 +71,14 @@ export function GenerateGuideButton({ moduleId, hasGuide }: { moduleId: number; 
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-      {running ? (
+      {!canGenerate && !running ? (
+        <Link
+          href="/account"
+          className="inline-flex h-8 items-center rounded-md border border-line-2 bg-panel px-3 text-[13px] font-medium text-ink transition-colors hover:border-accent hover:text-accent"
+        >
+          Add an AI key to generate →
+        </Link>
+      ) : running ? (
         <span className="inline-flex items-center gap-2 text-[13px] text-ink-2">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-spin motion-reduce:animate-none">
             <path d="M21 12a9 9 0 1 1-6.219-8.56" />

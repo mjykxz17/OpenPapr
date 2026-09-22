@@ -36,7 +36,8 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
     }
     setPending(false);
     if (res.ok) {
-      router.push("/");
+      // A new account lands on Account, where the AI key is added.
+      router.push(mode === "setup" ? "/account?welcome=1" : "/");
       router.refresh();
       return;
     }

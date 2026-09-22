@@ -19,7 +19,7 @@ export function resolveCanvasUser(
 
   const existing = db.select().from(users).where(eq(users.canvasUserId, self.id)).get();
   if (existing) {
-    db.update(users).set({ name: self.name, canvasTokenEnc: tokenEnc }).where(eq(users.id, existing.id)).run();
+    db.update(users).set({ name: self.name, canvasTokenEnc: tokenEnc, canvasVerifiedAt: now, canvasTokenFailedAt: null }).where(eq(users.id, existing.id)).run();
     return existing.id;
   }
 
@@ -33,13 +33,13 @@ export function resolveCanvasUser(
     let stored: string | null = null;
     try { stored = decrypt(row.canvasTokenEnc, secretHex); } catch { continue; }
     if (stored !== token) continue;
-    db.update(users).set({ canvasUserId: self.id, name: self.name, canvasTokenEnc: tokenEnc })
+    db.update(users).set({ canvasUserId: self.id, name: self.name, canvasTokenEnc: tokenEnc, canvasVerifiedAt: now, canvasTokenFailedAt: null })
       .where(eq(users.id, row.id)).run();
     return row.id;
   }
 
   return db.insert(users)
-    .values({ name: self.name, canvasUserId: self.id, canvasTokenEnc: tokenEnc, createdAt: now })
+    .values({ name: self.name, canvasUserId: self.id, canvasTokenEnc: tokenEnc, createdAt: now, canvasVerifiedAt: now })
     .returning().get().id;
 }
 
@@ -114,6 +114,45 @@ export function setCredentials(db: Db, userId: number, username: string, passwor
   if (taken && taken.id !== userId) return false;
   db.update(users).set({ username, passwordHash }).where(eq(users.id, userId)).run();
   return true;
+}
+
+// --- account: linked credentials -------------------------------------
+// Replaces the stored Canvas token for an account that already exists. The
+// caller has already asked Canvas who the token belongs to; a token for a
+// different Canvas user is refused rather than silently re-pointing this
+// account at someone else's courses.
+export function replaceCanvasToken(
+  db: Db, userId: number, self: { id: number; name: string }, token: string, secretHex: string, now: number,
+): "ok" | "different-account" {
+  const row = db.select().from(users).where(eq(users.id, userId)).get();
+  if (!row) return "different-account";
+  if (row.canvasUserId !== null && row.canvasUserId !== self.id) return "different-account";
+  db.update(users).set({
+    canvasUserId: self.id, name: self.name, canvasTokenEnc: encrypt(token, secretHex),
+    canvasVerifiedAt: now, canvasTokenFailedAt: null,
+  }).where(eq(users.id, userId)).run();
+  return "ok";
+}
+
+// The worker's view of whether the stored token still works.
+export function recordCanvasTokenCheck(db: Db, userId: number, ok: boolean, now: number): void {
+  db.update(users).set(ok ? { canvasVerifiedAt: now, canvasTokenFailedAt: null } : { canvasTokenFailedAt: now })
+    .where(eq(users.id, userId)).run();
+}
+
+export function setLlmProvider(
+  db: Db, userId: number, cfg: { baseUrl: string; model: string; apiKey: string }, secretHex: string,
+): void {
+  db.update(users).set({ llmBaseUrl: cfg.baseUrl, llmModel: cfg.model, llmKeyEnc: encrypt(cfg.apiKey, secretHex) })
+    .where(eq(users.id, userId)).run();
+}
+
+export function clearLlmProvider(db: Db, userId: number): void {
+  db.update(users).set({ llmBaseUrl: null, llmModel: null, llmKeyEnc: null }).where(eq(users.id, userId)).run();
+}
+
+export function getUser(db: Db, userId: number) {
+  return db.select().from(users).where(eq(users.id, userId)).get();
 }
 
 export function findByUsername(db: Db, username: string) {
