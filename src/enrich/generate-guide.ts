@@ -31,9 +31,11 @@ export async function generateModuleGuide(opts: {
   cfg: CompatConfig;
   moduleId: number;
   onProgress?: (p: GuideProgress) => void;
+  // Who the guide is for, from the student and module profiles.
+  reader?: string | null;
 }): Promise<GuideResult> {
   const { db, canvas, cfg, moduleId, onProgress } = opts;
-  const gen = createGuideGenerator(cfg);
+  const gen = createGuideGenerator(cfg, opts.reader ?? null);
   const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get();
   if (!mod) throw new Error(`no module ${moduleId}`);
 

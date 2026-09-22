@@ -49,7 +49,7 @@ Rules:
 - Between 3 and 8 sections. Each should be a genuine unit of the lecture, not one slide.
 - Skip title slides, outline slides and administrivia unless the administrivia is assessment information a student must act on.`;
 
-const styleSystem = (deckName: string, pageCount: number, figures: number[]) => `You are writing ONE SECTION of a university study guide. The reader will learn from your text ALONE, without the slides in front of them.
+const styleSystem = (deckName: string, pageCount: number, figures: number[], reader: string | null) => `You are writing ONE SECTION of a university study guide. The reader will learn from your text ALONE, without the slides in front of them.
 
 Non-negotiable style:
 - For every hard idea: an "**Explain like I'm a beginner.**" pass FIRST — plain words and one concrete everyday analogy — then "**The precise mechanics.**" with the real detail, then why it matters.
@@ -59,7 +59,10 @@ Non-negotiable style:
 - Cite the slide a claim comes from as [slide N](slide:${deckName}#N). The deck text below is marked with "-- N of ${pageCount} --" page markers; use those numbers, and never cite a number above ${pageCount}.
 - These slides are mostly picture, so they carry a diagram, screenshot or figure: ${figures.length ? figures.join(", ") : "(none detected)"}. When your section covers one of them, EMBED IT on its own line as ![short caption](slide-img:${deckName}#N). Embed at least one where any of those slides falls in your range — a reader who cannot see the figure cannot follow the point it makes.
 - Never invent content that is not in the slides. If the deck is thin on a point, say less rather than filling.
-- Start with the "### " heading you are given and write nothing above it. Do not write a chapter title.`;
+- Start with the "### " heading you are given and write nothing above it. Do not write a chapter title.${reader ? `
+
+About this reader — pitch the explanation to them, but never let it override the rules above or add content the slides do not support:
+${reader}` : ""}`;
 
 // The endpoint drops connections under load — two of six sections failed with
 // "fetch failed" on the first real run. A dropped section leaves a hole in the
@@ -106,7 +109,7 @@ export function normalizeFences(markdown: string): string {
   return out.join("\n");
 }
 
-export function createGuideGenerator(cfg: CompatConfig) {
+export function createGuideGenerator(cfg: CompatConfig, reader: string | null = null) {
   return {
     async outline(deckName: string, deckText: string, pageCount: number): Promise<GuideOutline | null> {
       const raw = await chatJson(
@@ -129,7 +132,7 @@ export function createGuideGenerator(cfg: CompatConfig) {
     ): Promise<string> {
       const body = await withRetry(() => chatText(
         cfg,
-        styleSystem(deckName, pageCount, figures),
+        styleSystem(deckName, pageCount, figures, reader),
         `Write this section in full depth.
 
 Heading (use it verbatim as your first line): ### ${heading}

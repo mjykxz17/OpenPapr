@@ -16,6 +16,9 @@ import { sortMaterials } from "@/lib/materials";
 import { getOverview } from "@/server/overview";
 import { moduleDisplay } from "@/lib/module-display";
 import { loadEnv } from "@/lib/env";
+import { moduleProfileView, weeklyPlanView } from "@/server/profiles";
+import { canGenerateGuides } from "@/server/llm-access";
+import { ModuleProfileCard } from "@/components/profile/ModuleProfileCard";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +67,9 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
   const segmentColor = new Map(weightSegments(live).map((s) => [s.name, s.color]));
   const guide = getStudyGuide(db, mod.id);
   const files = sortMaterials(listModuleFiles(db, mod.id));
+  const profileView = moduleProfileView(db, mod);
+  const plan = weeklyPlanView(db, userId, now).plan;
+  const focus = plan?.priorities.find((p) => p.module.toUpperCase() === mod.code.toUpperCase() || (profileView.code !== null && p.module.toUpperCase() === profileView.code)) ?? null;
 
   const announcement = (a: (typeof announcements)[number]) => {
     const text = htmlToText(a.body);
@@ -115,6 +121,8 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           <span className="text-[13px] text-ink-3">{guide ? `generated ${shortDate(guide.generatedAt)}` : "not generated yet"}</span>
         </div>
       </header>
+
+      <ModuleProfileCard moduleId={mod.id} {...profileView} focus={focus} hasModel={canGenerateGuides(db, userId)} />
 
       {/* Two short things share the first row; the long list gets the second
           row at full width. Nothing tall sits beside anything short. */}
@@ -191,7 +199,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
         <section className="flex flex-col gap-3.5 lg:col-span-2">
           <div className="flex items-baseline justify-between">
             <h2 className={sectionHeading}>Materials</h2>
-            {files.length > 0 && <span className="text-[13px] text-ink-3">Opens on Canvas</span>}
+            {files.length > 0 && <span className="text-[13px] text-ink-3">Opens here</span>}
           </div>
           <Materials files={files} moduleId={mod.id} />
         </section>

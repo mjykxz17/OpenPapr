@@ -57,6 +57,19 @@ export function createCanvasClient(baseUrl: string, token: string, fetchFn: type
     // absent from the course listing but fetch fine when asked for directly,
     // and the response carries a freshly signed download url.
     getFile: (fileId: number) => getOne<CanvasFile>(`/files/${fileId}`),
+    // Every course the student is or was in, for their study history.
+    listCourseHistory: async () => {
+      const [active, completed] = await Promise.all([
+        getAllPages<CanvasCourse>("/courses?enrollment_state=active&per_page=100&include[]=term"),
+        getAllPages<CanvasCourse>("/courses?enrollment_state=completed&per_page=100&include[]=term"),
+      ]);
+      return [
+        ...active.map((c) => ({ ...c, historyState: "active" as const })),
+        ...completed.map((c) => ({ ...c, historyState: "completed" as const })),
+      ];
+    },
+    listCourseTeachers: (courseId: number) =>
+      getAllPages<{ id: number; name: string; short_name?: string }>(`/courses/${courseId}/users?enrollment_type[]=teacher&per_page=50`),
     listCourseFiles: (courseId: number) =>
       getAllPages<CanvasFile>(`/courses/${courseId}/files?per_page=100&sort=created_at`),
     downloadFile: async (url: string) => {

@@ -18,6 +18,9 @@ const EnvSchema = z.object({
   OPENAI_COMPAT_BASE_URL: z.string().url().optional(),
   OPENAI_COMPAT_API_KEY: z.string().optional(),
   OPENAI_COMPAT_MODEL: z.string().default("agnes-2.5-flash"),
+  // Public API key for reading NUSMods review comments from Disqus. Optional:
+  // without it module profiles are built without student reviews.
+  DISQUS_API_KEY: z.string().optional(),
   POLL_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
 });
 

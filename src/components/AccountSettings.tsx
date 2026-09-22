@@ -4,6 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { LLM_PRESETS, presetFor } from "@/lib/llm-presets";
 import { relativeDay, shortTime } from "@/lib/format-date";
+import { AboutYou } from "./profile/AboutYou";
+import type { ComponentProps } from "react";
 
 type Props = {
   welcome: boolean;
@@ -12,6 +14,7 @@ type Props = {
   llm: { baseUrl: string; model: string; keyHint: string } | null;
   sharedModel: string | null;
   signIn: { username: string | null; hasPassword: boolean };
+  about: ComponentProps<typeof AboutYou>;
 };
 
 const field = "h-10 w-full rounded-md border border-line-2 bg-surface px-3 text-[14px] text-ink outline-none placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent-soft disabled:opacity-60";
@@ -329,6 +332,7 @@ export function AccountSettings(props: Props) {
           {!props.llm && " Add an AI key below to generate study guides with your own model."}
         </p>
       )}
+      <AboutYou {...props.about} />
       <CanvasSection canvas={props.canvas} canvasBaseUrl={props.canvasBaseUrl} />
       <LlmSection llm={props.llm} sharedModel={props.sharedModel} />
       <SignInSection signIn={props.signIn} />

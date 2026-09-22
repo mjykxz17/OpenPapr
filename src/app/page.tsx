@@ -8,6 +8,9 @@ import { SyncButton } from "@/components/SyncButton";
 import { ModuleGrid } from "@/components/ModuleGrid";
 import { DueThisWeek } from "@/components/DueThisWeek";
 import { getUser } from "@/db/repo";
+import { weeklyPlanView } from "@/server/profiles";
+import { canGenerateGuides } from "@/server/llm-access";
+import { WeekPlan } from "@/components/profile/WeekPlan";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +53,12 @@ export default async function Home() {
       </header>
 
       <div className="flex flex-col gap-9">
+        <WeekPlan
+          {...weeklyPlanView(getDb(), userId, now)}
+          today={new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "Asia/Singapore" }).format(now)}
+          moduleIdByCode={Object.fromEntries(overview.modules.map((m) => [m.code.toUpperCase(), m.id]))}
+          hasModel={canGenerateGuides(getDb(), userId)}
+        />
         <DueThisWeek todos={overview.todos} modules={overview.modules} now={now} />
         <ModuleGrid modules={overview.modules} />
       </div>

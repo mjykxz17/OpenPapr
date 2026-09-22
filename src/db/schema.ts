@@ -35,6 +35,22 @@ export const users = sqliteTable("users", {
   llmBaseUrl: text("llm_base_url"),
   llmModel: text("llm_model"),
   llmKeyEnc: text("llm_key_enc"),
+  // --- the student profile ---------------------------------------------
+  // What the student tells us (major, year) and what OpenPapr derives from
+  // their courses and notes. Derived JSON is shown to them on Account and can
+  // be rebuilt or, for writing style, switched off.
+  major: text("major"),
+  studyYear: integer("study_year"),
+  styleLearning: integer("style_learning", { mode: "boolean" }).notNull().default(true),
+  writingStyleJson: text("writing_style_json"),
+  writingStyleAt: integer("writing_style_at"),
+  writingStyleNotesChars: integer("writing_style_notes_chars"),
+  profileJson: text("profile_json"),
+  profileInputsHash: text("profile_inputs_hash"),
+  profileAt: integer("profile_at"),
+  profileRequestedAt: integer("profile_requested_at"),
+  profileError: text("profile_error"),
+  courseHistoryAt: integer("course_history_at"),
 }, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId), uniqueIndex("users_username").on(t.username)]);
 
 export const modules = sqliteTable("modules", {
@@ -166,3 +182,61 @@ export const syncRuns = sqliteTable("sync_runs", {
   ok: integer("ok", { mode: "boolean" }),
   error: text("error"),
 });
+
+// Every Canvas course the student is or was enrolled in — the record of what
+// they have already studied, which module profiles use to say what a new
+// module builds on.
+export const courseHistory = sqliteTable("course_history", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  canvasCourseId: integer("canvas_course_id").notNull(),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  term: text("term"),
+  state: text("state", { enum: ["active", "completed"] }).notNull(),
+}, (t) => [uniqueIndex("course_history_user_course").on(t.userId, t.canvasCourseId)]);
+
+// Public NUSMods data, shared by everyone taking the module: one fetch a week
+// per module code, not one per student.
+export const nusmodsModules = sqliteTable("nusmods_modules", {
+  code: text("code").primaryKey(),
+  acadYear: text("acad_year"),
+  json: text("json"),                     // trimmed module record; null = not on NUSMods
+  fetchedAt: integer("fetched_at").notNull(),
+});
+
+// Public NUSMods review comments (Disqus), text only — no author names.
+export const nusmodsReviews = sqliteTable("nusmods_reviews", {
+  code: text("code").primaryKey(),
+  postsJson: text("posts_json").notNull(),
+  count: integer("count").notNull(),
+  fetchedAt: integer("fetched_at").notNull(),
+});
+
+// One student's profile of one module: the lecturers as the course shows
+// them, and the synthesis of everything known about the module for this
+// student. inputsHash is what the synthesis was built from, so it is redone
+// only when something it read has changed.
+export const moduleProfiles = sqliteTable("module_profiles", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  lecturersJson: text("lecturers_json"),   // [{name, staffUrl?, pageText?}]
+  lecturersAt: integer("lecturers_at"),
+  profileJson: text("profile_json"),
+  inputsHash: text("inputs_hash"),
+  generatedAt: integer("generated_at"),
+  requestedAt: integer("requested_at"),
+  error: text("error"),
+}, (t) => [uniqueIndex("module_profiles_module").on(t.moduleId)]);
+
+// The student's plan for the current week across all modules.
+export const weeklyPlans = sqliteTable("weekly_plans", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  weekStart: integer("week_start").notNull(),
+  planJson: text("plan_json"),
+  inputsHash: text("inputs_hash"),
+  generatedAt: integer("generated_at"),
+  requestedAt: integer("requested_at"),
+  error: text("error"),
+}, (t) => [uniqueIndex("weekly_plans_user").on(t.userId)]);

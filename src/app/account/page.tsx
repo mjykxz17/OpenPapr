@@ -6,6 +6,8 @@ import { decrypt } from "@/lib/crypto";
 import { secretHint, sharedLlmConfig, userLlmConfig } from "@/lib/llm-provider";
 import { AppShell } from "@/components/AppShell";
 import { AccountSettings } from "@/components/AccountSettings";
+import { userProfileView } from "@/server/profiles";
+import { canGenerateGuides } from "@/server/llm-access";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
   const own = userLlmConfig(user, env.SECRET_KEY);
   const shared = sharedLlmConfig(env);
   const sharedModel = shared?.model ?? (env.ANTHROPIC_API_KEY ? env.ANTHROPIC_MODEL : null);
+  const about = { ...userProfileView(getDb(), userId), hasModel: canGenerateGuides(getDb(), userId) };
 
   return (
     <AppShell>
@@ -44,6 +47,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         llm={own ? { baseUrl: own.baseUrl, model: own.model, keyHint: secretHint(own.apiKey) } : null}
         sharedModel={sharedModel}
         signIn={{ username: user.username ?? null, hasPassword: Boolean(user.passwordHash) }}
+        about={about}
       />
     </AppShell>
   );

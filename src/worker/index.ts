@@ -24,6 +24,9 @@ import { createWeightageExtractor, type ExtractedComponent, type WeightageSource
 import type { CompatConfig } from "../enrich/openai-compat";
 import { sharedLlmConfig, userLlmConfig } from "../lib/llm-provider";
 import { createGuard, runUserSync } from "./sync";
+import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type ProfileDeps } from "./profiles";
+import { getModuleProfileRow } from "../db/profiles-repo";
+import { ModuleProfile, UserProfile, WritingStyle, readerBrief } from "../enrich/profiles";
 import { extractPdfText } from "../lib/pdf-text";
 import { focusAssessmentText } from "../lib/assessment-focus";
 
@@ -313,9 +316,44 @@ const TICK_MS = 2_000;
 const SWEEP_MS = Math.max(15_000, Math.floor(env.POLL_INTERVAL_MS / TICKS_PER_INTERVAL));
 let lastSweepAt = 0;
 
+const profileDeps: ProfileDeps = {
+  db, now: Date.now,
+  disqusKey: env.DISQUS_API_KEY ?? null,
+  cfgFor: (userId) => kitFor(userId).compatCfg,
+  canvasFor: (userId) => {
+    const u = db.select().from(users).where(eq(users.id, userId)).get();
+    if (!u?.canvasTokenEnc) return null;
+    try { return createCanvasClient(env.CANVAS_BASE_URL, decrypt(u.canvasTokenEnc, env.SECRET_KEY)); } catch { return null; }
+  },
+};
+
+// Profiles are built after the sync that feeds them, and never fail it: a
+// model that is down leaves yesterday's profile standing.
+const profileGuard = createGuard(env.POLL_INTERVAL_MS);
+const guardedProfiles = profileGuard("profiles", async (userId: number) => {
+  let r: Awaited<ReturnType<typeof refreshProfiles>>;
+  try {
+    r = await refreshProfiles(profileDeps, userId);
+  } catch (err) {
+    clearProfileRequests(db, userId, String(err instanceof Error ? err.message : err).slice(0, 300));
+    throw err;
+  }
+  clearProfileRequests(db, userId, null);
+  if (r.modules || r.user || r.plan || r.style) {
+    console.log(`profiles for user ${userId}: ${r.modules} module(s)${r.style ? ", style" : ""}${r.user ? ", profile" : ""}${r.plan ? ", plan" : ""}`);
+  }
+  if (r.errors.length) console.warn(`profile issues for user ${userId}: ${r.errors.slice(0, 4).join(" | ")}`);
+});
+
 async function runFor(userId: number): Promise<void> {
   markSyncStarted(db, userId, Date.now());
   await runUserSync(deps, userId);
+  await guardedProfiles(userId).catch(() => {});
+}
+
+function parseJson<T>(schema: { safeParse: (v: unknown) => { success: boolean; data?: unknown } }, json: string | null | undefined): T | null {
+  if (!json) return null;
+  try { const r = schema.safeParse(JSON.parse(json)); return r.success ? (r.data as T) : null; } catch { return null; }
 }
 
 // One generation at a time, on the same tick as everything else. It takes
@@ -341,6 +379,11 @@ async function runGuideJob(): Promise<void> {
     const canvas = createCanvasClient(env.CANVAS_BASE_URL, decrypt(user.canvasTokenEnc, env.SECRET_KEY));
     const result = await generateModuleGuide({
       db, canvas, cfg: compatCfg, moduleId: run.moduleId,
+      reader: readerBrief(
+        parseJson<UserProfile>(UserProfile, user.profileJson),
+        user.styleLearning ? parseJson<WritingStyle>(WritingStyle, user.writingStyleJson) : null,
+        parseJson<ModuleProfile>(ModuleProfile, getModuleProfileRow(db, run.moduleId)?.profileJson),
+      ),
       onProgress: (p) => updateGuideRun(db, run.id, {
         stage: p.stage, decksTotal: p.decksTotal, decksDone: p.decksDone,
         sectionsTotal: p.sectionsTotal, sectionsDone: p.sectionsDone,
@@ -379,6 +422,10 @@ async function tick(): Promise<void> {
       for (const user of selectDueUsers(db, Date.now(), env.POLL_INTERVAL_MS, cap)) {
         await runFor(user.id);
       }
+    }
+    for (const userId of usersWithProfileRequests(db)) {
+      profileGuard.resetUser(userId);
+      await guardedProfiles(userId).catch(() => {});
     }
     await runGuideJob();
   } catch (err) {
