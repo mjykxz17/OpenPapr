@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { categoryLabel } from "@/lib/materials";
 
 export interface MaterialFile {
@@ -35,11 +36,10 @@ export function dedupeMaterials<T extends { displayName: string; sizeBytes: numb
 // A module's files grouped by category. The groups flow into columns
 // (CSS multi-column, each group unbreakable) rather than sitting in a grid,
 // so a twelve-row group beside a four-row one leaves no hole, and short
-// groups stack under each other. Rows open the file on Canvas itself — the
-// user is signed in there, and Canvas re-signs its own download links — so
-// no bytes pass through this app. Files the Files tab does not list say
-// where they were found, since that is the only way back to them.
-export function Materials({ files: allFiles, canvasBaseUrl, canvasCourseId }: { files: MaterialFile[]; canvasBaseUrl: string; canvasCourseId: number }) {
+// groups stack under each other. Rows open the file in the app's own viewer;
+// Canvas is only a fallback link inside it. Files the Files tab does not list
+// say where they were found.
+export function Materials({ files: allFiles, moduleId }: { files: MaterialFile[]; moduleId: number }) {
   const files = dedupeMaterials(allFiles);
   if (files.length === 0) return <p className="text-sm text-ink-3">No files recorded yet.</p>;
 
@@ -63,15 +63,13 @@ export function Materials({ files: allFiles, canvasBaseUrl, canvasCourseId }: { 
             const where = f.hidden ? (f.linkedFrom ? `linked from ${f.linkedFrom}` : "linked from course content") : null;
             return (
               <li key={f.id} className="flex items-baseline justify-between gap-4 border-t border-line py-2">
-                <a
-                  href={`${canvasBaseUrl}/courses/${canvasCourseId}/files/${f.canvasFileId}`}
-                  target="_blank"
-                  rel="noreferrer"
+                <Link
+                  href={`/modules/${moduleId}/files/${f.id}`}
                   className="min-w-0 truncate text-sm text-ink hover:text-accent hover:underline"
                   title={f.displayName}
                 >
                   {f.displayName}
-                </a>
+                </Link>
                 <span className="shrink-0 text-[13px] tabular-nums text-ink-3" title={where ?? undefined}>
                   {meta}
                   {where && <> · {where}</>}

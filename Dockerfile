@@ -13,6 +13,12 @@ RUN npm run build
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# LibreOffice turns PowerPoint and Word files into PDFs for the in-app viewer
+# (and for study-guide citations). Only the three office components are
+# installed; the fonts cover Latin, symbols and Chinese/Japanese/Korean.
+RUN apk add --no-cache libreoffice-impress libreoffice-writer libreoffice-calc \
+    font-liberation font-dejavu font-noto font-noto-cjk
+ENV SOFFICE_BIN=/usr/bin/soffice
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public

@@ -193,7 +193,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
             <h2 className={sectionHeading}>Materials</h2>
             {files.length > 0 && <span className="text-[13px] text-ink-3">Opens on Canvas</span>}
           </div>
-          <Materials files={files} canvasBaseUrl={loadEnv().CANVAS_BASE_URL} canvasCourseId={mod.canvasCourseId} />
+          <Materials files={files} moduleId={mod.id} />
         </section>
       </div>
     </AppShell>

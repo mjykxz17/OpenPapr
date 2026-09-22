@@ -5,7 +5,9 @@
   "description": "Turn your own course material into study guides, and share them with your cohort.",
   "license": "AGPL-3.0-or-later",
   "scripts": {
+    "predev": "node scripts/copy-pdfjs-assets.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-pdfjs-assets.mjs",
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
@@ -21,6 +23,7 @@
     "mermaid": "^11.17.0",
     "next": "16.3.0",
     "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "5.4.296",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "^9.1.0",
