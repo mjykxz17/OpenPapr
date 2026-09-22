@@ -8,6 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { StudyGuide } from "@/components/StudyGuide";
 import { GenerateGuideButton } from "@/components/GenerateGuideButton";
 import { moduleDisplay } from "@/lib/module-display";
+import { shortDate } from "@/lib/format-date";
 
 export const dynamic = "force-dynamic";
 
@@ -33,37 +34,34 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
     );
   }
 
-  const { title, termCode } = moduleDisplay(mod);
+  const { title } = moduleDisplay(mod);
   const guide = getStudyGuide(db, mod.id);
 
   return (
     <AppShell wide>
-      <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <Link href={`/modules/${mod.id}`} className="text-sm text-ink-3 hover:text-accent">
-            ← Overview
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-line pb-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <Link href={`/modules/${mod.id}`} className="text-[13px] text-ink-2 hover:text-accent">
+            ← {mod.code} overview
           </Link>
-          <h1 className="text-lg font-medium text-ink">{mod.code}</h1>
-          <p className="text-lg font-normal text-ink-2">{title}</p>
-          {termCode && (
-            <span className="rounded border border-line px-1.5 py-0.5 text-[11px] tabular-nums text-ink-3">{termCode}</span>
-          )}
-          {guide && (
-            <span className="text-xs text-ink-3">
-              generated {new Date(guide.generatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
-            </span>
-          )}
+          <span aria-hidden className="hidden h-4 w-px bg-line sm:block" />
+          <h1 className="text-base font-semibold text-ink">
+            {title} <span className="font-normal text-ink-2">· Study guide</span>
+          </h1>
         </div>
-        <GenerateGuideButton moduleId={mod.id} hasGuide={Boolean(guide)} />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {guide && <span className="text-[13px] text-ink-3">generated {shortDate(guide.generatedAt)}</span>}
+          <GenerateGuideButton moduleId={mod.id} hasGuide={Boolean(guide)} />
+        </div>
       </header>
 
       {guide ? (
-        <section id="study" className="mt-10">
+        <section id="study" className="mt-7">
           <StudyGuide markdown={guide.markdown} moduleId={mod.id} />
         </section>
       ) : (
         <section className="mt-10">
-          <p className="max-w-prose text-sm text-ink-3">
+          <p className="max-w-prose text-sm text-ink-2">
             No guide yet. One can be written from this module&apos;s own lecture slides — it takes a few minutes per deck.
           </p>
         </section>

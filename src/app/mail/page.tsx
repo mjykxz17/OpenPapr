@@ -30,7 +30,7 @@ export default async function MailPage({ searchParams }: PageProps<"/mail">) {
 
   return (
     <AppShell>
-      <h1 className="mb-6 text-lg font-medium text-ink">Mail</h1>
+      <h1 className="mb-6 text-2xl font-semibold tracking-[-0.01em] text-ink">Mail</h1>
 
       <div className="mb-8 max-w-3xl">
         <OutlookConnect connected={Boolean(me?.msRefreshTokenEnc)} configured={Boolean(loadEnv().MS_CLIENT_ID)} />
@@ -47,7 +47,7 @@ export default async function MailPage({ searchParams }: PageProps<"/mail">) {
         </section>
       ) : (
         garbage.length > 0 && (
-          <p className="mt-8 text-xs text-ink-3">
+          <p className="mt-8 text-[13px] text-ink-3">
             <Link href="/mail?filtered=1" className="underline decoration-line hover:text-accent">
               {garbage.length} filtered — show
             </Link>

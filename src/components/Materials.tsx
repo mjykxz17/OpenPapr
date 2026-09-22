@@ -13,53 +13,57 @@ export interface MaterialFile {
 const size = (bytes: number | null) =>
   bytes == null ? "" : bytes >= 1_000_000 ? `${Math.round(bytes / 1_000_000)} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`;
 
-// A module's files as one table, already sorted by category. Rows open the
-// file on Canvas itself — the user is signed in there, and Canvas re-signs
-// its own download links — so no bytes pass through this app. Files the
-// Files tab does not list say where they were found, since that is the only
-// way back to them.
+const ext = (name: string) => {
+  const m = name.match(/\.([a-z0-9]{1,5})$/i);
+  return m ? m[1].toUpperCase() : null;
+};
+
+// A module's files grouped by category, in two columns. Rows open the file on
+// Canvas itself — the user is signed in there, and Canvas re-signs its own
+// download links — so no bytes pass through this app. Files the Files tab
+// does not list say where they were found, since that is the only way back
+// to them.
 export function Materials({ files, canvasBaseUrl, canvasCourseId }: { files: MaterialFile[]; canvasBaseUrl: string; canvasCourseId: number }) {
   if (files.length === 0) return <p className="text-sm text-ink-3">No files recorded yet.</p>;
+
+  const groups: { label: string; rows: MaterialFile[] }[] = [];
+  for (const f of files) {
+    const label = categoryLabel(f.category);
+    const g = groups[groups.length - 1];
+    if (g && g.label === label) g.rows.push(f);
+    else groups.push({ label, rows: [f] });
+  }
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
-            <th className="py-1.5 pr-4 font-medium">File</th>
-            <th className="py-1.5 pr-4 font-medium">Category</th>
-            <th className="py-1.5 pr-4 text-right font-medium">Size</th>
-            <th className="py-1.5 font-medium">Where</th>
-          </tr>
-        </thead>
-        <tbody>
-          {files.map((f) => (
-            <tr key={f.id} className="border-b border-line">
-              <td className="max-w-[520px] py-1.5 pr-4">
+    <div className="grid grid-cols-1 gap-x-12 gap-y-6 lg:grid-cols-2">
+      {groups.map((g) => (
+        <ul key={g.label} className="flex flex-col self-start">
+          <li className="pb-2 text-[13px] font-semibold text-ink-2">
+            {g.label} <span className="font-normal tabular-nums text-ink-3">· {g.rows.length}</span>
+          </li>
+          {g.rows.map((f) => {
+            const meta = [ext(f.displayName), size(f.sizeBytes) || null].filter(Boolean).join(" · ");
+            const where = f.hidden ? (f.linkedFrom ? `linked from ${f.linkedFrom}` : "linked from course content") : null;
+            return (
+              <li key={f.id} className="flex items-baseline justify-between gap-4 border-t border-line py-2">
                 <a
                   href={`${canvasBaseUrl}/courses/${canvasCourseId}/files/${f.canvasFileId}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="block truncate text-ink hover:underline"
+                  className="min-w-0 truncate text-sm text-ink hover:text-accent hover:underline"
                   title={f.displayName}
                 >
                   {f.displayName}
                 </a>
-              </td>
-              <td className="whitespace-nowrap py-1.5 pr-4 text-ink-2">{categoryLabel(f.category)}</td>
-              <td className="whitespace-nowrap py-1.5 pr-4 text-right text-xs tabular-nums text-ink-3">{size(f.sizeBytes)}</td>
-              <td className="max-w-[280px] py-1.5 text-xs text-ink-3">
-                {f.hidden ? (
-                  <span className="block truncate" title={f.linkedFrom ? `Not in the Files tab. Linked from: ${f.linkedFrom}` : "Not in the Files tab; linked from course content."}>
-                    {f.linkedFrom ? `via ${f.linkedFrom}` : "linked from content"}
-                  </span>
-                ) : (
-                  "Files tab"
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                <span className="shrink-0 text-[13px] tabular-nums text-ink-3" title={where ?? undefined}>
+                  {meta}
+                  {where && <> · {where}</>}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      ))}
     </div>
   );
 }

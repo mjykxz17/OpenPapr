@@ -44,7 +44,7 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
     setError(parsed?.error ?? "Sign in failed. Try again.");
   }
 
-  const field = "border border-line bg-surface px-3 py-2 text-ink outline-none focus:border-accent";
+  const field = "h-10 rounded-md border border-line-2 bg-surface px-3 text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft";
   const label = "flex flex-col gap-1.5 text-sm text-ink-2";
 
   return (
@@ -57,7 +57,7 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
             onClick={() => { setMode(m); setError(null); }}
             aria-selected={mode === m}
             className={`-mb-px border-b-2 px-2 py-1.5 transition-colors ${
-              mode === m ? "border-accent text-ink" : "border-transparent text-ink-3 hover:text-ink-2"
+              mode === m ? "border-accent text-ink" : "border-transparent text-ink-2 hover:text-ink"
             }`}
           >
             {m === "signin" ? "Sign in" : "First time"}
@@ -77,7 +77,7 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
             <input type="password" autoComplete="off" required spellCheck={false} value={canvasToken}
               onChange={(e) => setCanvasToken(e.target.value)} className={field} />
           </label>
-          <p className="-mt-1 text-xs leading-relaxed text-ink-3">
+          <p className="-mt-1 text-[13px] leading-relaxed text-ink-2">
             Create one in Canvas under{" "}
             <a href={`${canvasBaseUrl}/profile/settings`} target="_blank" rel="noreferrer"
                className="text-accent underline underline-offset-2">
@@ -115,7 +115,7 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
       </label>
 
       {mode === "setup" && (
-        <p className="-mt-1 text-xs leading-relaxed text-ink-3">
+        <p className="-mt-1 text-[13px] leading-relaxed text-ink-2">
           Pick a username and password now — after this you sign in with those alone,
           and never need the token again.
         </p>
@@ -124,7 +124,7 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
 
       <button type="submit" disabled={pending}
-        className="border border-line bg-ink px-3 py-2 text-sm font-medium text-surface disabled:opacity-50">
+        className="h-10 rounded-md bg-accent px-3 text-sm font-medium text-white transition-colors hover:bg-[#0c5f59] disabled:opacity-50">
         {pending ? "Signing in…" : mode === "signin" ? "Sign in" : "Create account"}
       </button>
     </form>

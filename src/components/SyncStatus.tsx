@@ -1,4 +1,5 @@
 import type { Overview } from "@/server/overview";
+import { syncedLabel } from "@/lib/format-date";
 
 const SOURCE_LABEL: Record<string, string> = {
   canvas: "Canvas",
@@ -6,21 +7,30 @@ const SOURCE_LABEL: Record<string, string> = {
   enrich: "Enrich",
 };
 
-export function SyncStatus({ syncStatus }: { syncStatus: Overview["syncStatus"] }) {
+// One line: a dot for the overall state, the freshest healthy source, and
+// any stale source named. The full per-source list is in each item's title.
+export function SyncStatus({ syncStatus, now }: { syncStatus: Overview["syncStatus"]; now: number }) {
+  const stale = syncStatus.filter((s) => s.stale);
+  const fresh = syncStatus.filter((s) => !s.stale && s.lastOkAt !== null);
+  const latest = fresh.reduce<(typeof fresh)[number] | null>((a, s) => (a === null || (s.lastOkAt ?? 0) > (a.lastOkAt ?? 0) ? s : a), null);
+  const detail = syncStatus
+    .map((s) => `${SOURCE_LABEL[s.source] ?? s.source}: ${s.lastOkAt ? syncedLabel(s.lastOkAt, now) : "never"}${s.stale ? " (stale)" : ""}`)
+    .join(" · ");
   return (
-    <ul className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
-      {syncStatus.map((s) => (
-        <li key={s.source} className={s.stale ? "text-warn" : "text-ink-3"}>
-          <span className="font-medium">{SOURCE_LABEL[s.source] ?? s.source}</span>{" "}
-          {s.stale ? (
-            <span className="tabular-nums">
-              ⚠ stale{s.lastOkAt ? ` — last synced ${new Date(s.lastOkAt).toLocaleString()}` : " — never synced"}
-            </span>
-          ) : (
-            <span className="tabular-nums">synced {s.lastOkAt ? new Date(s.lastOkAt).toLocaleTimeString() : "—"}</span>
-          )}
-        </li>
+    <div className="flex items-center gap-2 text-[13px] tabular-nums text-ink-2" title={detail}>
+      <span aria-hidden className={`h-2 w-2 rounded-full ${stale.length > 0 ? "bg-warn" : "bg-accent"}`} />
+      {latest ? (
+        <span>
+          {SOURCE_LABEL[latest.source] ?? latest.source} synced {syncedLabel(latest.lastOkAt!, now)}
+        </span>
+      ) : (
+        <span>Not synced yet</span>
+      )}
+      {stale.map((s) => (
+        <span key={s.source} className="text-warn">
+          · {SOURCE_LABEL[s.source] ?? s.source} stale{s.lastOkAt ? ` since ${syncedLabel(s.lastOkAt, now)}` : ""}
+        </span>
       ))}
-    </ul>
+    </div>
   );
 }

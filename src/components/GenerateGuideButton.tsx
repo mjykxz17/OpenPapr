@@ -65,7 +65,7 @@ export function GenerateGuideButton({ moduleId, hasGuide }: { moduleId: number; 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       {running ? (
-        <span className="inline-flex items-center gap-2 text-xs text-ink-3">
+        <span className="inline-flex items-center gap-2 text-[13px] text-ink-2">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" className="animate-spin motion-reduce:animate-none">
             <path d="M21 12a9 9 0 1 1-6.219-8.56" />
           </svg>
@@ -76,18 +76,18 @@ export function GenerateGuideButton({ moduleId, hasGuide }: { moduleId: number; 
           type="button"
           onClick={start}
           disabled={starting}
-          className="rounded-md border border-line px-2.5 py-1 text-xs text-ink-2 transition-colors hover:border-accent hover:text-accent disabled:opacity-60"
+          className="h-8 rounded-md border border-line-2 bg-panel px-3 text-[13px] font-medium text-ink transition-colors hover:border-accent hover:text-accent disabled:opacity-60"
         >
           {starting ? "Queueing…" : hasGuide ? "Regenerate guide" : "Generate study guide"}
         </button>
       )}
 
       {status.state === "failed" && status.error && (
-        <span className="text-xs text-danger">{status.error}</span>
+        <span className="text-[13px] text-danger">{status.error}</span>
       )}
       {status.state === "done" && status.error && (
         // Generation succeeded but the validator had notes worth showing.
-        <span className="text-xs text-warn">{status.error}</span>
+        <span className="text-[13px] text-warn-ink">{status.error}</span>
       )}
     </div>
   );

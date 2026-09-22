@@ -13,30 +13,44 @@ import {
 import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Overview } from "@/server/overview";
+import { WeightBar, weightSegments } from "@/components/WeightBar";
 
 type Module = Overview["modules"][number];
 
-// A compact one-line weightage summary for the tile face.
-function summary(m: Module): string {
-  const withPct = m.components.filter((c) => c.weightPct != null);
-  if (withPct.length === 0) return "weightage unknown";
-  return withPct
-    .slice(0, 4)
-    .map((c) => `${c.name} ${c.weightPct}`)
-    .join(" · ");
-}
+const GRID = "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3";
+const CARD = "flex flex-col gap-3.5 rounded-[10px] border border-line bg-panel px-[18px] py-4 no-underline select-none";
 
-const GRID = "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4";
-const CARD = "flex flex-col justify-between rounded-xl border border-line bg-surface p-4 no-underline select-none";
-
+// The tile face: code and name, then the weighting as a bar with a legend
+// beneath it — every component named, none truncated. A module with no
+// known weighting says so and points at the fix.
 function TileFace({ m }: { m: Module }) {
+  const segments = weightSegments(m.components);
   return (
     <>
-      <div>
-        <div className="text-sm font-medium text-ink">{m.code}</div>
-        <div className="mt-0.5 line-clamp-2 text-xs text-ink-2">{m.name}</div>
+      <div className="flex flex-col gap-0.5">
+        <div className="text-[15px] font-semibold text-ink">{m.code}</div>
+        <div className="line-clamp-2 text-[13px] text-ink-2">{m.name}</div>
       </div>
-      <div className="mt-3 truncate text-xs tabular-nums text-ink-3">{summary(m)}</div>
+      <div className="flex flex-col gap-2">
+        <WeightBar components={m.components} />
+        {segments.length === 0 ? (
+          <div className="flex gap-3 text-[13px] text-ink-3">
+            <span>Weighting not found yet</span>
+            <span className="font-medium text-accent">Add it</span>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[13px] tabular-nums text-ink-2">
+            {segments.map((s) => (
+              <span key={s.name}>
+                {s.name} {s.pct}
+              </span>
+            ))}
+            {m.unaccountedPct != null && m.unaccountedPct > 0 && (
+              <span className="text-warn-ink">Unaccounted {m.unaccountedPct}</span>
+            )}
+          </div>
+        )}
+      </div>
     </>
   );
 }
@@ -44,7 +58,7 @@ function TileFace({ m }: { m: Module }) {
 // Normal mode: the tile is a plain link that opens the module.
 function StaticTile({ m }: { m: Module }) {
   return (
-    <Link href={`/modules/${m.id}`} className={`${CARD} transition-shadow hover:border-ink-3`}>
+    <Link href={`/modules/${m.id}`} className={`${CARD} transition-colors hover:border-line-2`}>
       <TileFace m={m} />
     </Link>
   );
@@ -73,7 +87,7 @@ function SortableTile({ m, onHide }: { m: Module; onHide: (id: number) => void }
         title="Hide from home"
         onPointerDown={(e) => e.stopPropagation()}
         onClick={() => onHide(m.id)}
-        className="absolute -left-2 -top-2 z-20 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-surface text-xs leading-none text-ink-2 shadow-sm hover:border-danger hover:text-danger"
+        className="absolute -left-2.5 -top-2.5 z-20 flex h-6 w-6 items-center justify-center rounded-full border border-line bg-panel text-sm leading-none text-ink-2 shadow-sm hover:border-danger hover:text-danger"
       >
         ×
       </button>
@@ -115,23 +129,27 @@ export function ModuleGrid({ modules }: { modules: Module[] }) {
     }).catch(() => {});
   }
 
-  if (items.length === 0) return <p className="text-sm text-ink-3">No modules yet.</p>;
-
   return (
-    <div>
-      <div className="mb-3 flex items-center justify-between">
-        <span className="text-xs text-ink-3">{editing ? "Drag to reorder · × to hide" : ""}</span>
-        <button
-          type="button"
-          onClick={() => setEditing((e) => !e)}
-          aria-pressed={editing}
-          className={`rounded border px-2.5 py-1 text-xs transition-colors ${
-            editing ? "border-accent text-accent" : "border-line text-ink-2 hover:border-ink-3 hover:text-ink"
-          }`}
-        >
-          {editing ? "Done" : "Edit"}
-        </button>
+    <section className="flex flex-col gap-3">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-2">
+          Modules{editing && <span className="ml-3 font-normal normal-case tracking-normal text-ink-3">Drag to reorder · × to hide</span>}
+        </h2>
+        {items.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setEditing((e) => !e)}
+            aria-pressed={editing}
+            className={`h-8 rounded-md border px-3 text-[13px] font-medium transition-colors ${
+              editing ? "border-accent bg-accent-soft text-accent" : "border-line-2 bg-panel text-ink hover:border-ink-3"
+            }`}
+          >
+            {editing ? "Done" : "Edit layout"}
+          </button>
+        )}
       </div>
+
+      {items.length === 0 && <p className="text-sm text-ink-3">No modules yet — run a sync to pull them from Canvas.</p>}
 
       {editing ? (
         <>
@@ -146,15 +164,15 @@ export function ModuleGrid({ modules }: { modules: Module[] }) {
           </DndContext>
 
           {hidden.length > 0 && (
-            <div className="mt-8">
-              <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-3">Hidden</h2>
+            <div className="mt-5">
+              <h3 className="mb-2 text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-2">Hidden</h3>
               <ul className="flex flex-wrap gap-2">
                 {hidden.map((m) => (
                   <li key={m.id}>
                     <button
                       type="button"
                       onClick={() => setHidden(m.id, false)}
-                      className="flex items-center gap-1.5 rounded-full border border-line px-3 py-1 text-xs text-ink-2 hover:border-accent hover:text-accent"
+                      className="flex h-8 items-center gap-1.5 rounded-md border border-line-2 bg-panel px-3 text-[13px] text-ink-2 hover:border-accent hover:text-accent"
                     >
                       <span>{m.code}</span>
                       <span className="text-ink-3">+ show</span>
@@ -172,6 +190,6 @@ export function ModuleGrid({ modules }: { modules: Module[] }) {
           ))}
         </div>
       )}
-    </div>
+    </section>
   );
 }

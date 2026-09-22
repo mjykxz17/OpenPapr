@@ -1,23 +1,37 @@
 @import "tailwindcss";
 
 :root {
+  /* Text greys are set for AA on the surface: ink-2 ≈ 7:1, ink-3 ≈ 4.8:1.
+     ink-3 is the caption floor — nothing readable goes lighter. */
   --surface: #fcfcfc;
-  --line: #ececee;
+  --panel: #ffffff;
+  --line: #e4e4e7;
+  --line-2: #d4d4d8;
   --ink: #18181b;
-  --ink-2: #71717a;
-  --ink-3: #a1a1aa;
+  --ink-2: #52525b;
+  --ink-3: #6f6f78;
   --accent: #0f766e;
+  --accent-soft: rgba(15, 118, 110, 0.1);
   --danger: #dc2626;
   --warn: #b45309;
+  --warn-soft: #fdf6ee;
+  --warn-line: #f0d9c4;
+  --warn-ink: #9a4a0a;
 }
 
 @theme inline {
   --color-surface: var(--surface);
+  --color-panel: var(--panel);
   --color-line: var(--line);
+  --color-line-2: var(--line-2);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
   --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-line: var(--warn-line);
+  --color-warn-ink: var(--warn-ink);
   --color-danger: var(--danger);
   --color-warn: var(--warn);
   --font-sans: var(--font-geist-sans);
@@ -46,15 +60,16 @@ body {
 /* Study-guide reading column.
 
    The guide sits in a three-column documentation layout — chapters left,
-   sections right — so the reading column is already bounded by its grid track
-   and needs no measure cap of its own. What this grid still does is let
-   figures, diagrams, code and tables break out of the prose column, because a
-   slide image reads better wide while prose does not. */
+   sections right. The prose track is capped at 680px (≈ 70 characters at
+   16px) and centred in its grid cell; figures, diagrams, code and tables
+   may break out to the cell's full width, because a slide image reads
+   better wide while prose does not. */
 .guide {
   display: grid;
   grid-template-columns:
-    [full-start text-start] min(100%, 62rem) [text-end]
-    minmax(0, auto) [full-end];
+    [full-start] minmax(0, 1fr)
+    [text-start] min(100%, 680px) [text-end]
+    minmax(0, 1fr) [full-end];
 }
 .guide > * {
   grid-column: text;

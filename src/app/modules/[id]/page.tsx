@@ -8,8 +8,12 @@ import { AppShell } from "@/components/AppShell";
 import { ManualComponentForm } from "@/components/ManualComponentForm";
 import { Materials } from "@/components/Materials";
 import { htmlToText } from "@/lib/html-text";
-import { withShadowFlags, SOURCE_LABEL } from "@/lib/component-display";
+import { withShadowFlags } from "@/lib/component-display";
+import { SourceChip } from "@/components/SourceChip";
+import { WeightBar, weightSegments } from "@/components/WeightBar";
+import { relativeDay, shortDate } from "@/lib/format-date";
 import { sortMaterials } from "@/lib/materials";
+import { getOverview } from "@/server/overview";
 import { moduleDisplay } from "@/lib/module-display";
 import { loadEnv } from "@/lib/env";
 
@@ -17,7 +21,6 @@ export const dynamic = "force-dynamic";
 
 const RECENT_ANNOUNCEMENTS = 6;
 
-const shortDate = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 // The module overview: what it is graded on, what was announced, what files
 // it has. The study guide lives on its own page — it wants the whole viewport
@@ -52,8 +55,16 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     .sort((a, b) => (b.sourceCreatedAt ?? b.firstSeenAt) - (a.sourceCreatedAt ?? a.firstSeenAt));
   const recent = announcements.slice(0, RECENT_ANNOUNCEMENTS);
   const older = announcements.slice(RECENT_ANNOUNCEMENTS);
-  const evidenceRows = rows.filter((c) => c.source === "llm_syllabus" && c.evidence);
   const { title, termCode } = moduleDisplay(mod);
+  const now = Date.now();
+  const overview = getOverview(db, userId, now, loadEnv().POLL_INTERVAL_MS);
+  const dueSoon = overview.todos.filter(
+    (t) => t.moduleId === mod.id && t.category !== "routine" && t.dueAt !== null && t.dueAt < now + 30 * 86_400_000,
+  ).length;
+  const unaccountedPct = overview.modules.find((m) => m.id === mod.id)?.unaccountedPct ?? null;
+  // The bar and its legend use the visible (unshadowed) rows only.
+  const live = rows.filter((c) => !c.shadowed);
+  const segmentColor = new Map(weightSegments(live).map((s) => [s.name, s.color]));
   const guide = getStudyGuide(db, mod.id);
   const files = sortMaterials(listModuleFiles(db, mod.id));
 
@@ -63,112 +74,119 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     return (
       <li key={a.id} className="py-3">
         <details className="group">
-          {/* Date leads in a fixed column so titles align down the list. The
-              first lines of the body show while closed; opening shows all. */}
+          {/* The first lines of the body show while closed; opening shows all. */}
           <summary className="cursor-pointer select-none list-none">
-            <div className="flex items-baseline gap-3">
-              <span className="w-[52px] shrink-0 text-xs tabular-nums text-ink-3">{shortDate(posted)}</span>
-              <span className="text-sm text-ink group-open:font-medium">{a.title}</span>
+            <div className="flex items-baseline justify-between gap-4">
+              <span className="text-[15px] font-medium text-ink">{a.title}</span>
+              <span className="shrink-0 text-[13px] tabular-nums text-ink-3">{relativeDay(posted, now)}</span>
             </div>
-            {text && <p className="mt-1 line-clamp-2 pl-[64px] text-sm leading-[1.6] text-ink-3 group-open:hidden">{text}</p>}
+            {text && <p className="mt-1 line-clamp-2 text-sm leading-[1.55] text-ink-2 group-open:hidden">{text}</p>}
           </summary>
-          {text && <p className="mt-2 whitespace-pre-line pl-[64px] text-sm leading-[1.7] text-ink-2">{text}</p>}
+          {text && <p className="mt-2 whitespace-pre-line text-sm leading-[1.65] text-ink-2">{text}</p>}
         </details>
       </li>
     );
   };
 
+  const sectionHeading = "text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-2";
+
   return (
     <AppShell>
-      <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h1 className="text-lg font-medium text-ink">{mod.code}</h1>
-          <p className="text-lg font-normal text-ink-2">{title}</p>
-          {termCode && (
-            <span className="rounded border border-line px-1.5 py-0.5 text-[11px] tabular-nums text-ink-3">{termCode}</span>
-          )}
+      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+        <div className="flex flex-col gap-1.5">
+          <Link href="/" className="text-[13px] text-ink-2 hover:text-accent">
+            ← Home
+          </Link>
+          <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">{title}</h1>
+          <p className="text-sm tabular-nums text-ink-2">
+            {mod.code}
+            {termCode && <> · Term {termCode}</>}
+            {dueSoon > 0 && <> · {dueSoon} due this month</>}
+          </p>
         </div>
-        <Link href={`/modules/${mod.id}/guide`} className="group text-sm text-ink hover:text-accent">
-          Study guide{" "}
-          <span className="ml-2 text-xs text-ink-3">{guide ? `generated ${shortDate(guide.generatedAt)}` : "not generated yet"}</span>{" "}
-          <span className="ml-1 text-ink-3 transition-transform group-hover:translate-x-0.5">→</span>
-        </Link>
+        <div className="flex flex-col items-end gap-1.5">
+          <Link
+            href={`/modules/${mod.id}/guide`}
+            className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white no-underline transition-colors hover:bg-[#0c5f59]"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+            {guide ? "Open study guide" : "Study guide"}
+          </Link>
+          <span className="text-[13px] text-ink-3">{guide ? `generated ${shortDate(guide.generatedAt)}` : "not generated yet"}</span>
+        </div>
       </header>
 
       {/* Two short things share the first row; the long list gets the second
           row at full width. Nothing tall sits beside anything short. */}
-      <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-10 lg:grid-cols-[minmax(300px,2fr)_3fr] lg:items-start">
-        <section>
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Assessment</h2>
+      <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-8 lg:grid-cols-[minmax(300px,2fr)_3fr] lg:items-start">
+        <section className="flex flex-col gap-3.5">
+          <div className="flex items-baseline justify-between">
+            <h2 className={sectionHeading}>Assessment</h2>
+          </div>
           {rows.length === 0 ? (
-            <p className="text-sm text-ink-3">weightage unknown — add manually</p>
+            <p className="text-sm text-ink-3">Weighting not found in Canvas or the syllabus yet — add it below.</p>
           ) : (
-            <table className="w-full border-collapse text-sm tabular-nums">
-              <thead>
-                <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-3">
-                  <th className="py-1.5 pr-2 font-medium">Component</th>
-                  <th className="py-1.5 pr-2 text-right font-medium">Weight</th>
-                  <th className="py-1.5 text-right font-medium">Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((c) => (
-                  <tr key={c.id} className={`border-b border-line ${c.shadowed ? "opacity-40" : ""}`}>
-                    <td className="py-1.5 pr-2 text-ink">
-                      {c.name}
-                      {c.shadowed && <span className="ml-1 text-xs normal-case text-ink-3">(shadowed)</span>}
-                    </td>
-                    <td className="py-1.5 pr-2 text-right">{c.weightPct != null ? `${c.weightPct}%` : "—"}</td>
-                    <td
-                      className={`py-1.5 text-right text-xs ${c.source === "llm_syllabus" ? "text-warn" : "text-ink-3"}`}
-                      title={c.source === "llm_syllabus" ? (c.evidence ?? undefined) : undefined}
-                    >
-                      {SOURCE_LABEL[c.source]}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <>
+              <WeightBar components={live} height="h-2.5" />
+              <table className="w-full border-collapse text-sm tabular-nums">
+                <tbody>
+                  {rows.map((c) => (
+                    <tr key={c.id} className={`border-b border-line ${c.shadowed ? "text-ink-3" : ""}`}>
+                      <td className="py-2 pr-2 align-top">
+                        <span className="inline-flex items-center gap-2">
+                          <span aria-hidden className={`h-2.5 w-2.5 rounded-[2px] ${c.shadowed ? "bg-transparent" : (segmentColor.get(c.name) ?? "bg-ink/[0.06]")}`} />
+                          {c.name}
+                          {c.shadowed && <span className="text-xs">(replaced)</span>}
+                        </span>
+                      </td>
+                      <td className={`py-2 pr-3 text-right align-top ${c.shadowed ? "" : "font-medium"}`}>{c.weightPct != null ? `${c.weightPct}%` : "—"}</td>
+                      <td className="py-2 text-right align-top">
+                        <SourceChip source={c.source} evidence={c.evidence} name={c.name} />
+                      </td>
+                    </tr>
+                  ))}
+                  {unaccountedPct != null && unaccountedPct > 0 && (
+                    <tr className="border-b border-line text-ink-2">
+                      <td className="py-2 pr-2">
+                        <span className="inline-flex items-center gap-2">
+                          <span aria-hidden className="h-2.5 w-2.5 rounded-[2px] bg-ink/[0.06]" />
+                          Unaccounted
+                        </span>
+                      </td>
+                      <td className="py-2 pr-3 text-right">{unaccountedPct}%</td>
+                      <td className="py-2 text-right text-[13px] text-warn-ink">Add below</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </>
           )}
 
-          <div className="mt-4 space-y-3">
-            {evidenceRows.length > 0 && (
-              <details>
-                <summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wide text-ink-3 hover:text-ink-2">
-                  Evidence ({evidenceRows.length})
-                </summary>
-                <ul className="mt-3 space-y-3">
-                  {evidenceRows.map((c) => (
-                    <li key={c.id} className="border border-line p-3 text-sm">
-                      <div className="mb-1 font-medium text-ink">{c.name}</div>
-                      <blockquote className="text-ink-2">&ldquo;{c.evidence}&rdquo;</blockquote>
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            )}
-            {/* Folded away: entering a weightage by hand is a once-a-semester act. */}
-            <details>
-              <summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wide text-ink-3 hover:text-ink-2">
-                Add component
-              </summary>
-              <div className="mt-3">
-                <ManualComponentForm moduleId={mod.id} />
-              </div>
-            </details>
-          </div>
+          {/* Folded away: entering a weightage by hand is a once-a-semester act. */}
+          <details className="mt-1">
+            <summary className="cursor-pointer select-none text-[13px] font-medium text-accent hover:underline">Add component</summary>
+            <div className="mt-3">
+              <ManualComponentForm moduleId={mod.id} />
+            </div>
+          </details>
         </section>
 
-        <section>
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Announcements</h2>
+        <section className="flex flex-col gap-3.5">
+          <div className="flex items-baseline justify-between">
+            <h2 className={sectionHeading}>Announcements</h2>
+            {announcements.length > 0 && <span className="text-[13px] tabular-nums text-ink-3">{announcements.length} total</span>}
+          </div>
           {announcements.length === 0 ? (
             <p className="text-sm text-ink-3">No announcements yet.</p>
           ) : (
             <>
               <ul className="divide-y divide-line">{recent.map(announcement)}</ul>
               {older.length > 0 && (
-                <details className="mt-2">
-                  <summary className="cursor-pointer select-none text-xs font-medium uppercase tracking-wide text-ink-3 hover:text-ink-2">
+                <details className="mt-1">
+                  <summary className="cursor-pointer select-none text-[13px] font-medium text-ink-2 hover:text-accent">
                     Older announcements ({older.length})
                   </summary>
                   <ul className="mt-1 divide-y divide-line">{older.map(announcement)}</ul>
@@ -178,8 +196,11 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           )}
         </section>
 
-        <section className="lg:col-span-2">
-          <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-ink-3">Materials</h2>
+        <section className="flex flex-col gap-3.5 lg:col-span-2">
+          <div className="flex items-baseline justify-between">
+            <h2 className={sectionHeading}>Materials</h2>
+            {files.length > 0 && <span className="text-[13px] text-ink-3">Opens on Canvas</span>}
+          </div>
           <Materials files={files} canvasBaseUrl={loadEnv().CANVAS_BASE_URL} canvasCourseId={mod.canvasCourseId} />
         </section>
       </div>

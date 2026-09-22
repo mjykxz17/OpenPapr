@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { SyncStatus } from "@/components/SyncStatus";
 import { SyncButton } from "@/components/SyncButton";
 import { ModuleGrid } from "@/components/ModuleGrid";
+import { DueThisWeek } from "@/components/DueThisWeek";
 
 export const dynamic = "force-dynamic";
 
@@ -18,23 +19,29 @@ export default async function Home() {
   return (
     <AppShell>
       {overview.graphAuthBroken && (
-        <div className="mb-6 border border-warn bg-warn/10 px-4 py-3 text-sm text-warn">
-          Reconnect Microsoft — <a href="/mail" className="underline underline-offset-2">reconnect on the Mail tab</a>
+        <div className="mb-6 rounded-md border border-warn-line bg-warn-soft px-4 py-3 text-sm text-warn-ink">
+          Microsoft sign-in has expired —{" "}
+          <a href="/mail" className="font-medium underline underline-offset-2">
+            reconnect on the Mail tab
+          </a>
         </div>
       )}
 
-      <header className="mb-8 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-line pb-4">
-        <div>
-          <div className="text-lg font-medium tabular-nums text-ink">{dateLabel}</div>
-          <div className="text-xs uppercase tracking-wide text-ink-3">AY26/27</div>
+      <header className="mb-9 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-[-0.01em] tabular-nums text-ink">{dateLabel}</h1>
+          <p className="text-sm text-ink-2">AY26/27</p>
         </div>
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-          <SyncStatus syncStatus={overview.syncStatus} />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <SyncStatus syncStatus={overview.syncStatus} now={now} />
           <SyncButton />
         </div>
       </header>
 
-      <ModuleGrid modules={overview.modules} />
+      <div className="flex flex-col gap-9">
+        <DueThisWeek todos={overview.todos} modules={overview.modules} now={now} />
+        <ModuleGrid modules={overview.modules} />
+      </div>
     </AppShell>
   );
 }

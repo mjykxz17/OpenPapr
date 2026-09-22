@@ -13,8 +13,8 @@ export default async function StudyIndex() {
   return (
     <AppShell>
       <header className="mb-8 border-b border-line pb-4">
-        <h1 className="text-lg font-medium text-ink">Study guides</h1>
-        <p className="mt-1 text-xs text-ink-3">Pre-study notes generated from each module&rsquo;s Canvas slides.</p>
+        <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">Study guides</h1>
+        <p className="mt-1 text-sm text-ink-2">Pre-study notes generated from each module&rsquo;s Canvas slides.</p>
       </header>
 
       {guides.length === 0 ? (
@@ -27,10 +27,10 @@ export default async function StudyIndex() {
                 href={`/modules/${g.moduleId}/guide`}
                 className="group flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-4"
               >
-                <span className="text-sm font-medium text-ink group-hover:text-accent">
+                <span className="text-[15px] font-medium text-ink group-hover:text-accent">
                   {g.code} <span className="font-normal text-ink-2">{g.name}</span>
                 </span>
-                <span className="text-xs text-ink-3">{g.sourceNote ?? ""}</span>
+                <span className="text-[13px] text-ink-3">{g.sourceNote ?? ""}</span>
               </Link>
             </li>
           ))}

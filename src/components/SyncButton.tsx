@@ -81,12 +81,12 @@ export function SyncButton() {
 
   return (
     <div className="flex items-center gap-2">
-      {error && <span className="text-xs text-danger">{error}</span>}
+      {error && <span className="text-[13px] text-danger">{error}</span>}
       <button
         type="button"
         onClick={syncNow}
         disabled={busy}
-        className="inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-xs text-ink-2 transition-colors hover:border-accent hover:text-accent disabled:opacity-60"
+        className="inline-flex h-9 items-center gap-2 rounded-md border border-line-2 bg-panel px-3 text-[13px] font-medium text-ink transition-colors hover:border-accent hover:text-accent disabled:opacity-60"
       >
         {busy ? <SpinnerIcon /> : <RefreshIcon />}
         {busy ? "Syncing…" : "Sync now"}

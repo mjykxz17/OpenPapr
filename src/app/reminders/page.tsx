@@ -16,8 +16,8 @@ export default async function RemindersPage() {
   return (
     <AppShell>
       <header className="mb-8 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line pb-4">
-        <h1 className="text-lg font-medium text-ink">Reminders</h1>
-        <span className="text-xs tabular-nums text-ink-3">
+        <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">Reminders</h1>
+        <span className="text-[13px] tabular-nums text-ink-2">
           {overview.todos.length} open
           {overdue > 0 && <span className="text-danger"> · {overdue} overdue</span>}
         </span>

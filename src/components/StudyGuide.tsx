@@ -25,36 +25,41 @@ function nodeText(node: ReactNode): string {
 // scroll-mt keeps anchored headings clear of the sticky tab bar.
 function componentsFor(moduleId: number): Components {
   return {
-  h1: ({ children }) => <h1 className="mt-8 mb-4 text-2xl font-semibold text-ink first:mt-0">{children}</h1>,
+  h1: ({ children }) => <h1 className="mt-8 mb-4 text-[34px] font-semibold leading-tight tracking-[-0.01em] text-ink first:mt-0">{children}</h1>,
   h2: ({ children }) => (
-    <h2 id={slugifyHeading(nodeText(children))} className="mt-2 mb-5 scroll-mt-24 text-[26px] font-semibold leading-tight text-ink">{children}</h2>
+    <h2 id={slugifyHeading(nodeText(children))} className="mt-2 mb-5 scroll-mt-24 text-[30px] font-semibold leading-[1.15] tracking-[-0.01em] text-ink">{children}</h2>
   ),
   h3: ({ children }) => (
-    <h3 id={slugifyHeading(nodeText(children))} className="mt-10 mb-3 scroll-mt-24 text-[18px] font-semibold leading-snug text-ink">{children}</h3>
+    <h3 id={slugifyHeading(nodeText(children))} className="mt-8 mb-2 scroll-mt-24 text-[20px] font-semibold leading-[1.3] text-ink">{children}</h3>
   ),
-  p: ({ children }) => <p className="my-4 text-[16px] leading-[1.65] text-ink">{children}</p>,
-  ul: ({ children }) => <ul className="my-4 list-disc space-y-1.5 pl-5 text-[16px] leading-[1.65] text-ink">{children}</ul>,
-  ol: ({ children }) => <ol className="my-4 list-decimal space-y-1.5 pl-5 text-[16px] leading-[1.65] text-ink">{children}</ol>,
+  p: ({ children }) => <p className="my-3 text-[16px] leading-[1.65] text-ink">{children}</p>,
+  ul: ({ children }) => <ul className="my-3 list-disc space-y-1.5 pl-5 text-[16px] leading-[1.65] text-ink">{children}</ul>,
+  ol: ({ children }) => <ol className="my-3 list-decimal space-y-1.5 pl-5 text-[16px] leading-[1.65] text-ink">{children}</ol>,
   li: ({ children }) => <li className="marker:text-ink-3">{children}</li>,
   strong: ({ children }) => <strong className="font-medium text-ink">{children}</strong>,
   em: ({ children }) => <em className="italic text-ink-2">{children}</em>,
   a: ({ href, children }) => {
     const cite = href ? parseSlideCitation(href) : null;
     if (cite) {
+      // The chip names the deck and the slide, on an accent tint, at a size
+      // that reads: citations are the point of the guide, not a footnote.
       return (
         <a
           href={deckProxyUrl(moduleId, cite.deck, cite.page)}
           target="_blank"
           rel="noreferrer"
           title={`${cite.deck} · slide ${cite.page}`}
-          className="mx-0.5 inline-flex items-baseline rounded border border-line px-1.5 py-px align-baseline text-[0.7rem] tabular-nums text-ink-3 no-underline hover:border-accent hover:text-accent"
+          className="ml-0.5 inline-flex items-center gap-1 rounded bg-accent-soft px-1.5 py-px align-baseline text-[12px] font-medium tabular-nums text-accent no-underline transition-colors hover:bg-accent hover:text-white"
         >
+          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="3" y="5" width="18" height="14" rx="2" />
+          </svg>
           {children}
         </a>
       );
     }
     return (
-      <a href={href} target="_blank" rel="noreferrer" className="underline decoration-line hover:text-accent">
+      <a href={href} target="_blank" rel="noreferrer" className="underline decoration-line-2 underline-offset-2 hover:text-accent">
         {children}
       </a>
     );
@@ -63,27 +68,41 @@ function componentsFor(moduleId: number): Components {
     const fig = typeof src === "string" ? parseSlideImage(src) : null;
     const url = fig ? slideImageUrl(moduleId, fig.deck, fig.page) : typeof src === "string" ? src : "";
     return (
-      <figure className="my-5">
+      <figure className="my-5 flex flex-col gap-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt={alt ?? (fig ? `${fig.deck} slide ${fig.page}` : "")} loading="lazy" className="block w-full rounded border border-line" />
-        {alt && <figcaption className="mt-1.5 text-xs text-ink-3">{alt}</figcaption>}
+        <img src={url} alt={alt ?? (fig ? `${fig.deck} slide ${fig.page}` : "")} loading="lazy" className="block w-full rounded-md border border-line" />
+        {(alt || fig) && (
+          <figcaption className="flex items-baseline justify-between gap-4 text-[13px] text-ink-2">
+            <span>{alt}</span>
+            {fig && (
+              <a
+                href={deckProxyUrl(moduleId, fig.deck, fig.page)}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 font-medium text-accent no-underline hover:underline"
+              >
+                Open {fig.deck}, slide {fig.page} →
+              </a>
+            )}
+          </figcaption>
+        )}
       </figure>
     );
   },
   code: ({ className, children }) => {
     if (className?.includes("language-mermaid")) return <MermaidDiagram chart={String(children).trim()} />;
-    return <code className="rounded bg-ink/5 px-1 py-0.5 font-mono text-[0.85em] text-ink">{children}</code>;
+    return <code className="rounded bg-ink/[0.06] px-1 py-0.5 font-mono text-[0.85em] text-ink">{children}</code>;
   },
   pre: ({ children }) => {
     const child = Array.isArray(children) ? children[0] : children;
     const cls = (child as { props?: { className?: string } })?.props?.className ?? "";
     if (cls.includes("language-mermaid")) return <>{children}</>;
     return (
-      <pre className="my-3 overflow-x-auto rounded border border-line bg-ink/[0.03] p-3 text-sm leading-relaxed">{children}</pre>
+      <pre className="my-3 overflow-x-auto rounded-md border border-line bg-ink/[0.03] p-3 text-sm leading-relaxed">{children}</pre>
     );
   },
   blockquote: ({ children }) => (
-    <blockquote className="my-5 rounded-lg border border-line bg-ink/[0.02] px-4 py-3 text-[15px] leading-[1.6] text-ink-2">{children}</blockquote>
+    <blockquote className="my-5 rounded-md border border-line bg-ink/[0.02] px-4 py-3 text-[15px] leading-[1.6] text-ink-2">{children}</blockquote>
   ),
   hr: () => <hr className="my-6 border-line" />,
   table: ({ children }) => (
@@ -92,7 +111,7 @@ function componentsFor(moduleId: number): Components {
     </div>
   ),
   th: ({ children }) => (
-    <th className="border-b border-line py-2 pr-3 text-left text-xs font-medium uppercase tracking-wide text-ink-3">{children}</th>
+    <th className="border-b border-line py-2 pr-3 text-left text-xs font-semibold uppercase tracking-[0.06em] text-ink-2">{children}</th>
   ),
   td: ({ children }) => <td className="border-b border-line py-2 pr-3 align-top text-ink">{children}</td>,
   };
@@ -251,25 +270,24 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
 
   const chapterNav = (
     <nav aria-label="Chapters" className="sticky top-6 hidden self-start lg:block">
-      <p className="mb-2 px-2 text-[11px] font-medium uppercase tracking-wide text-ink-3">Chapters</p>
-      <ul className="space-y-0.5">
+      <p className="mb-2.5 px-2.5 text-xs font-semibold uppercase tracking-[0.06em] text-ink-2">Chapters</p>
+      <ol className="space-y-0.5">
         {chapters.map((c, i) => (
           <li key={c.label}>
             <button
               type="button"
               aria-current={i === active ? "true" : undefined}
               onClick={() => selectChapter(i)}
-              className={`block w-full rounded-md px-2 py-1.5 text-left text-[14px] leading-snug transition-colors ${
-                i === active
-                  ? "bg-ink/[0.07] font-medium text-ink"
-                  : "text-ink-3 hover:bg-ink/[0.04] hover:text-ink-2"
+              className={`flex w-full gap-2.5 rounded-md px-2.5 py-2 text-left text-[14px] leading-[1.4] transition-colors ${
+                i === active ? "bg-accent-soft font-medium text-ink" : "text-ink-2 hover:bg-ink/[0.04] hover:text-ink"
               }`}
             >
-              {c.label}
+              <span className={`shrink-0 tabular-nums ${i === active ? "text-accent" : "text-ink-3"}`}>{i + 1}</span>
+              <span>{c.label}</span>
             </button>
           </li>
         ))}
-      </ul>
+      </ol>
     </nav>
   );
 
@@ -277,7 +295,7 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
     <nav aria-label="On this page" className="sticky top-6 hidden max-h-[calc(100dvh-3rem)] self-start overflow-y-auto lg:block">
       {subs.length > 0 && (
         <>
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-ink-3">On this page</p>
+          <p className="mb-2.5 text-xs font-semibold uppercase tracking-[0.06em] text-ink-2">On this page</p>
           <ul className="border-l border-line">
             {subs.map((h) => {
               const current = activeSlug === h.slug;
@@ -286,8 +304,8 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
                   <a
                     href={`#${h.slug}`}
                     onClick={(e) => { e.preventDefault(); setActiveSlug(h.slug); scrollToHeading(h.slug); }}
-                    className={`-ml-px block border-l-2 py-1 pl-3 text-[13px] leading-snug transition-colors ${
-                      current ? "border-ink font-medium text-ink" : "border-transparent text-ink-3 hover:text-ink-2"
+                    className={`-ml-px block border-l-2 py-1.5 pl-3 text-[13px] leading-[1.4] transition-colors ${
+                      current ? "border-accent font-medium text-ink" : "border-transparent text-ink-2 hover:text-ink"
                     }`}
                   >
                     {h.label}
@@ -302,7 +320,7 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
   );
 
   return (
-    <div className="w-full lg:grid lg:grid-cols-[13.5rem_minmax(0,1fr)_12rem] lg:items-start lg:gap-10">
+    <div className="w-full lg:grid lg:grid-cols-[15rem_minmax(0,1fr)_13.75rem] lg:items-start lg:gap-12">
       {chapterNav}
 
       <div className="min-w-0">
@@ -312,6 +330,9 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
             <Body markdown={preamble} moduleId={moduleId} />
           </div>
         )}
+        <p className="guide mb-2">
+          <span className="text-[13px] font-semibold uppercase tracking-[0.06em] text-accent">Chapter {active + 1} of {chapters.length}</span>
+        </p>
         <Body markdown={chapters[active].markdown} moduleId={moduleId} />
       </div>
 

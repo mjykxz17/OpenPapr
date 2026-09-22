@@ -8,8 +8,8 @@ export function AppShell({ children, wide = false }: { children: ReactNode; wide
   return (
     <div className="min-h-svh bg-surface text-ink">
       <Rail />
-      <main className="pl-[52px]">
-        <div className={`mx-auto px-6 py-10 ${wide ? "max-w-[1800px]" : "max-w-[1280px]"}`}>{children}</div>
+      <main className="pl-14">
+        <div className={`mx-auto px-10 py-9 ${wide ? "max-w-[1800px]" : "max-w-[1280px]"}`}>{children}</div>
       </main>
     </div>
   );
