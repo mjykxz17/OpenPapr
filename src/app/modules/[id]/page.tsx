@@ -72,17 +72,17 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     const text = htmlToText(a.body);
     const posted = a.sourceCreatedAt ?? a.firstSeenAt;
     return (
-      <li key={a.id} className="py-3">
+      <li key={a.id} className="min-w-0 py-3">
         <details className="group">
           {/* The first lines of the body show while closed; opening shows all. */}
           <summary className="cursor-pointer select-none list-none">
             <div className="flex items-baseline justify-between gap-4">
-              <span className="text-[15px] font-medium text-ink">{a.title}</span>
+              <span className="min-w-0 text-[15px] font-medium text-ink [overflow-wrap:anywhere]">{a.title}</span>
               <span className="shrink-0 text-[13px] tabular-nums text-ink-3">{relativeDay(posted, now)}</span>
             </div>
-            {text && <p className="mt-1 line-clamp-2 text-sm leading-[1.55] text-ink-2 group-open:hidden">{text}</p>}
+            {text && <p className="mt-1 line-clamp-2 text-sm leading-[1.55] text-ink-2 [overflow-wrap:anywhere] group-open:hidden">{text}</p>}
           </summary>
-          {text && <p className="mt-2 whitespace-pre-line text-sm leading-[1.65] text-ink-2">{text}</p>}
+          {text && <p className="mt-2 whitespace-pre-line text-sm leading-[1.65] text-ink-2 [overflow-wrap:anywhere]">{text}</p>}
         </details>
       </li>
     );
@@ -121,7 +121,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
 
       {/* Two short things share the first row; the long list gets the second
           row at full width. Nothing tall sits beside anything short. */}
-      <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-8 lg:grid-cols-[minmax(300px,2fr)_3fr] lg:items-start">
+      <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-8 lg:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)] lg:items-start">
         <section className="flex flex-col gap-3.5">
           <div className="flex items-baseline justify-between">
             <h2 className={sectionHeading}>Assessment</h2>
@@ -174,7 +174,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           </details>
         </section>
 
-        <section className="flex flex-col gap-3.5">
+        <section className="flex min-w-0 flex-col gap-3.5">
           <div className="flex items-baseline justify-between">
             <h2 className={sectionHeading}>Announcements</h2>
             {announcements.length > 0 && <span className="text-[13px] tabular-nums text-ink-3">{announcements.length} total</span>}
