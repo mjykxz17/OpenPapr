@@ -19,7 +19,6 @@ import { loadEnv } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
-const RECENT_ANNOUNCEMENTS = 6;
 
 
 // The module overview: what it is graded on, what was announced, what files
@@ -53,8 +52,6 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     .all()
     .filter((i) => i.type === "announcement")
     .sort((a, b) => (b.sourceCreatedAt ?? b.firstSeenAt) - (a.sourceCreatedAt ?? a.firstSeenAt));
-  const recent = announcements.slice(0, RECENT_ANNOUNCEMENTS);
-  const older = announcements.slice(RECENT_ANNOUNCEMENTS);
   const { title, termCode } = moduleDisplay(mod);
   const now = Date.now();
   const overview = getOverview(db, userId, now, loadEnv().POLL_INTERVAL_MS);
@@ -72,7 +69,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     const text = htmlToText(a.body);
     const posted = a.sourceCreatedAt ?? a.firstSeenAt;
     return (
-      <li key={a.id} className="min-w-0 py-3">
+      <li key={a.id} className="min-w-0 py-3 first:pt-3.5 last:pb-3.5">
         <details className="group">
           {/* The first lines of the body show while closed; opening shows all. */}
           <summary className="cursor-pointer select-none list-none">
@@ -182,17 +179,12 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           {announcements.length === 0 ? (
             <p className="text-sm text-ink-3">No announcements yet.</p>
           ) : (
-            <>
-              <ul className="divide-y divide-line">{recent.map(announcement)}</ul>
-              {older.length > 0 && (
-                <details className="mt-1">
-                  <summary className="cursor-pointer select-none text-[13px] font-medium text-ink-2 hover:text-accent">
-                    Older announcements ({older.length})
-                  </summary>
-                  <ul className="mt-1 divide-y divide-line">{older.map(announcement)}</ul>
-                </details>
-              )}
-            </>
+            /* A bounded box that scrolls inside itself: the page keeps its
+               shape however many announcements a module has accumulated, and
+               the ones that matter — the newest — are the ones in view. */
+            <div className="max-h-[32rem] overflow-y-auto overscroll-contain rounded-[10px] border border-line bg-panel px-4 [scrollbar-gutter:stable]">
+              <ul className="divide-y divide-line">{announcements.map(announcement)}</ul>
+            </div>
           )}
         </section>
 
