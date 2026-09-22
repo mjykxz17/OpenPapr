@@ -104,7 +104,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
         <div className="flex flex-col items-end gap-1.5">
           <Link
             href={`/modules/${mod.id}/guide`}
-            className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-white no-underline transition-colors hover:bg-[#0c5f59]"
+            className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-on-accent no-underline transition-colors hover:bg-accent-strong"
           >
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />

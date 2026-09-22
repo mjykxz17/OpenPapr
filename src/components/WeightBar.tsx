@@ -4,7 +4,7 @@ import type { ComponentRow } from "@/server/overview";
 // order given, in a stepped accent ramp so the biggest reads darkest.
 // Whatever the components leave unaccounted is a light neutral tail; no
 // weights at all draws a dashed empty bar, so the tile still lines up.
-export const SEGMENT_COLORS = ["bg-accent", "bg-[#5eaaa1]", "bg-[#a7d3cd]", "bg-[#d4d4d8]", "bg-[#e4e4e7]"] as const;
+export const SEGMENT_COLORS = ["bg-accent", "bg-seg-2", "bg-seg-3", "bg-seg-4", "bg-seg-5"] as const;
 
 export function weightSegments(components: Pick<ComponentRow, "name" | "weightPct">[]) {
   return components

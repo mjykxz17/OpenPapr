@@ -124,7 +124,7 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}
 
       <button type="submit" disabled={pending}
-        className="h-10 rounded-md bg-accent px-3 text-sm font-medium text-white transition-colors hover:bg-[#0c5f59] disabled:opacity-50">
+        className="h-10 rounded-md bg-accent px-3 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong disabled:opacity-50">
         {pending ? "Signing in…" : mode === "signin" ? "Sign in" : "Create account"}
       </button>
     </form>

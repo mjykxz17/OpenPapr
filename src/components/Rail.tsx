@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SignOutButton } from "./SignOutButton";
+import { AppearanceMenu } from "./AppearanceMenu";
 
 function HomeIcon() {
   return (
@@ -73,7 +74,8 @@ export function Rail() {
           </Link>
         );
       })}
-      <div className="mt-auto">
+      <div className="mt-auto flex flex-col items-center gap-1">
+        <AppearanceMenu />
         <SignOutButton />
       </div>
     </nav>

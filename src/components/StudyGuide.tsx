@@ -122,7 +122,7 @@ function SlideChip({ moduleId, cite, children }: { moduleId: number; cite: Slide
         panel.show(cite);
       }}
       className={`ml-0.5 inline-flex items-center gap-1 rounded px-1.5 py-px align-baseline text-[12px] font-medium tabular-nums no-underline transition-colors ${
-        current ? "bg-accent text-white" : "bg-accent-soft text-accent hover:bg-accent hover:text-white"
+        current ? "bg-accent text-on-accent" : "bg-accent-soft text-accent hover:bg-accent hover:text-on-accent"
       }`}
     >
       <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

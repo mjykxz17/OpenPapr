@@ -10,13 +10,24 @@ let seq = 0;
 export function MermaidDiagram({ chart }: { chart: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
+  // Diagrams are drawn as SVG with baked-in colours, so a theme switch has
+  // to redraw them.
+  const [theme, setTheme] = useState<string>("light");
+  useEffect(() => {
+    const el = document.documentElement;
+    const read = () => setTheme(el.dataset.theme ?? "light");
+    read();
+    const mo = new MutationObserver(read);
+    mo.observe(el, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => mo.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const mermaid = (await import("mermaid")).default;
-        mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "strict", fontFamily: "inherit" });
+        mermaid.initialize({ startOnLoad: false, theme: theme === "dark" ? "dark" : "neutral", securityLevel: "strict", fontFamily: "inherit" });
         const { svg } = await mermaid.render(`mmd-${seq++}`, chart);
         if (!cancelled && ref.current) ref.current.innerHTML = svg;
       } catch {
@@ -26,7 +37,7 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     return () => {
       cancelled = true;
     };
-  }, [chart]);
+  }, [chart, theme]);
 
   if (failed) {
     return (

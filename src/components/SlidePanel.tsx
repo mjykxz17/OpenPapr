@@ -131,7 +131,7 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, th
       tabIndex={-1}
       onKeyDown={onKey}
       aria-label="Slide viewer"
-      className={`flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-line bg-[#f4f4f5] outline-none focus-visible:ring-2 focus-visible:ring-accent-soft ${mode === "slide" ? "" : "flex-1"}`}
+      className={`flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-line bg-sunken outline-none focus-visible:ring-2 focus-visible:ring-accent-soft ${mode === "slide" ? "" : "flex-1"}`}
     >
       {/* Controls. Two fixed rows: what you do to the view (page, mode,
           close) and which file you are on. Nothing here wraps, moves or
@@ -153,7 +153,7 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, th
           </label>
           <button type="button" aria-label="Next page" onClick={() => setPage(tab.page + 1)} disabled={total !== null && tab.page >= total} className="h-[30px] w-[30px] rounded-md border border-line-2 bg-panel text-ink-2 disabled:opacity-40">›</button>
         </div>
-        <div className="ml-auto flex shrink-0 gap-0.5 rounded-md bg-[#f4f4f5] p-0.5">
+        <div className="ml-auto flex shrink-0 gap-0.5 rounded-md bg-sunken p-0.5">
           {([
             ["slide", "Slide", "Slide only"],
             ["split", "Both", "Slide and notes"],

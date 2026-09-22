@@ -5,18 +5,69 @@
      ink-3 is the caption floor — nothing readable goes lighter. */
   --surface: #fcfcfc;
   --panel: #ffffff;
+  --sunken: #f4f4f5;
   --line: #e4e4e7;
   --line-2: #d4d4d8;
   --ink: #18181b;
   --ink-2: #52525b;
   --ink-3: #6f6f78;
-  --accent: #0f766e;
-  --accent-soft: rgba(15, 118, 110, 0.1);
   --danger: #dc2626;
   --warn: #b45309;
   --warn-soft: #fdf6ee;
   --warn-line: #f0d9c4;
   --warn-ink: #9a4a0a;
+  --new-soft: #f4f9f8;
+  --new-line: #d6e5e2;
+  /* Text on a solid accent fill. */
+  --on-accent: #ffffff;
+  --accent: #0f766e;
+}
+
+/* Dark theme. Surfaces step up in lightness toward the viewer (surface →
+   panel → sunken) instead of relying on shadows; greys keep the same AA
+   floor as the light theme (ink-3 ≥ 5:1 on every dark surface). */
+[data-theme="dark"] {
+  --surface: #0f0f11;
+  --panel: #18181b;
+  --sunken: #1f1f23;
+  --line: #2a2a2f;
+  --line-2: #3f3f46;
+  --ink: #ececee;
+  --ink-2: #b4b4bb;
+  --ink-3: #8e8e97;
+  --danger: #f87171;
+  --warn: #fbbf24;
+  --warn-soft: #2a2010;
+  --warn-line: #5a4118;
+  --warn-ink: #fcd34d;
+  --new-soft: #10201d;
+  --new-line: #1f3a35;
+  --on-accent: #0b0b0d;
+}
+
+/* Accents. Each sets one colour per theme; the soft tint, the hover
+   shade and the weight-bar ramp are derived from it, so a new accent is
+   two lines. Values are checked for AA in lib/theme.ts. */
+[data-accent="teal"] { --accent: #0f766e; }
+[data-accent="blue"] { --accent: #1d4ed8; }
+[data-accent="indigo"] { --accent: #4338ca; }
+[data-accent="violet"] { --accent: #7c3aed; }
+[data-accent="rose"] { --accent: #be123c; }
+[data-accent="graphite"] { --accent: #3f3f46; }
+[data-theme="dark"][data-accent="teal"], [data-theme="dark"]:not([data-accent]) { --accent: #2dd4bf; }
+[data-theme="dark"][data-accent="blue"] { --accent: #93c5fd; }
+[data-theme="dark"][data-accent="indigo"] { --accent: #a5b4fc; }
+[data-theme="dark"][data-accent="violet"] { --accent: #c4b5fd; }
+[data-theme="dark"][data-accent="rose"] { --accent: #fda4af; }
+[data-theme="dark"][data-accent="graphite"] { --accent: #d4d4d8; }
+
+:root, [data-theme] {
+  --accent-soft: color-mix(in oklab, var(--accent) 11%, transparent);
+  --accent-strong: color-mix(in oklab, var(--accent) 82%, var(--ink));
+  --seg-2: color-mix(in oklab, var(--accent) 62%, var(--surface));
+  --seg-3: color-mix(in oklab, var(--accent) 34%, var(--surface));
+  --seg-4: var(--line-2);
+  --seg-5: var(--line);
 }
 
 @theme inline {
@@ -29,6 +80,15 @@
   --color-ink-3: var(--ink-3);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
+  --color-accent-strong: var(--accent-strong);
+  --color-on-accent: var(--on-accent);
+  --color-sunken: var(--sunken);
+  --color-new-soft: var(--new-soft);
+  --color-new-line: var(--new-line);
+  --color-seg-2: var(--seg-2);
+  --color-seg-3: var(--seg-3);
+  --color-seg-4: var(--seg-4);
+  --color-seg-5: var(--seg-5);
   --color-warn-soft: var(--warn-soft);
   --color-warn-line: var(--warn-line);
   --color-warn-ink: var(--warn-ink);
@@ -37,6 +97,9 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
+
+/* Let Tailwind's dark: variant follow our attribute, not the OS. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 body {
   background: var(--surface);
