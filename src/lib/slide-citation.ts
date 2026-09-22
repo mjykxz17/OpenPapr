@@ -22,6 +22,17 @@ export function parseSlideImage(src: string): { deck: string; page: number } | n
   return { deck: m[1], page: Number(m[2]) };
 }
 
-export function slideImageUrl(moduleId: number, deck: string, page: number): string {
-  return `/api/modules/${moduleId}/slide?name=${encodeURIComponent(deck)}&page=${page}`;
+export function slideImageUrl(moduleId: number, deck: string, page: number, size: "full" | "thumb" = "full"): string {
+  return `/api/modules/${moduleId}/slide?name=${encodeURIComponent(deck)}&page=${page}${size === "thumb" ? "&size=thumb" : ""}`;
+}
+
+// Every page each deck is cited on, across a whole guide — the slide panel
+// marks these in its filmstrip. Matches the same `slide:deck#N` links the
+// renderer turns into chips.
+export function citedPagesByDeck(markdown: string): Record<string, number[]> {
+  const out: Record<string, Set<number>> = {};
+  for (const m of markdown.matchAll(/\]\(slide:([^)#\s]+)#(\d+)\)/g)) {
+    (out[m[1]] ??= new Set()).add(Number(m[2]));
+  }
+  return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...v].sort((a, b) => a - b)]));
 }

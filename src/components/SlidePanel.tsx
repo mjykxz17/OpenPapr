@@ -1,14 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { deckProxyUrl, slideImageUrl } from "@/lib/slide-citation";
 import type { SlideRef } from "@/components/slide-panel-context";
 
 export type OpenDeck = { deck: string; page: number };
 export type PanelMode = "slide" | "split";
 
+export type NoteSummary = { deck: string; page: number; markdown: string; updatedAt: number };
+type NoteScope = "slide" | "deck" | "module";
+
 type Props = {
   moduleId: number;
+  /** Pages each deck is cited on in this guide — marked in the filmstrip. */
+  cited?: Record<string, number[]>;
   /** Deck stems the module has as PDFs — the "+ Open" list. */
   decks: string[];
   tabs: OpenDeck[];
@@ -25,12 +30,24 @@ const pageCounts = new Map<string, number>();
 // PDF, and — in split mode — a note anchored to that slide. All state that
 // should survive a reload (tabs, active tab, page, mode) lives in the parent;
 // this component only owns transient fetch state.
-export function SlidePanel({ moduleId, decks, tabs, active, mode, onTabs, onMode, onClose }: Props) {
+export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, onTabs, onMode, onClose }: Props) {
   const tab = tabs.find((t) => t.deck === active) ?? tabs[0];
   const [total, setTotal] = useState<number | null>(tab ? (pageCounts.get(tab.deck) ?? null) : null);
   const [picking, setPicking] = useState(false);
   const [imgState, setImgState] = useState<"loading" | "ok" | "error">("loading");
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const [scope, setScope] = useState<NoteScope>("slide");
+  const [notes, setNotes] = useState<NoteSummary[]>([]);
+
+  // Every note in the module, for the filmstrip dots and the deck/module
+  // lists. Refreshed whenever the editor saves.
+  const loadNotes = useCallback(() => {
+    fetch(`/api/modules/${moduleId}/notes`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (Array.isArray(j?.notes)) setNotes(j.notes); })
+      .catch(() => {});
+  }, [moduleId]);
+  useEffect(() => { loadNotes(); }, [loadNotes]);
 
   // Page count per deck, once.
   useEffect(() => {
@@ -85,12 +102,25 @@ export function SlidePanel({ moduleId, decks, tabs, active, mode, onTabs, onMode
   // Arrow keys page when the panel (not its textarea) has focus.
   function onKey(e: KeyboardEvent<HTMLDivElement>) {
     if ((e.target as HTMLElement).tagName === "TEXTAREA" || (e.target as HTMLElement).tagName === "INPUT") return;
+    if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
     if (e.key === "ArrowLeft") { e.preventDefault(); setPage((tab?.page ?? 1) - 1); }
     if (e.key === "ArrowRight") { e.preventDefault(); setPage((tab?.page ?? 1) + 1); }
   }
 
+  const notedPages = useMemo(() => new Set(notes.filter((n) => n.deck === tab?.deck).map((n) => n.page)), [notes, tab?.deck]);
+  const citedPages = useMemo(() => new Set(tab ? cited[tab.deck] ?? [] : []), [cited, tab?.deck]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Jump to any deck/page — used by the note lists. Opens the deck as a tab
+  // if it is not open yet.
+  function goTo(deck: string, page: number) {
+    const has = tabs.some((t) => t.deck === deck);
+    onTabs(has ? tabs.map((t) => (t.deck === deck ? { ...t, page } : t)) : [...tabs, { deck, page }], deck);
+    setScope("slide");
+  }
+
   if (!tab) return null;
   const unopened = decks.filter((d) => !tabs.some((t) => t.deck === d));
+  const deckNotes = notes.filter((n) => n.deck === tab.deck);
 
   return (
     <div
@@ -101,7 +131,8 @@ export function SlidePanel({ moduleId, decks, tabs, active, mode, onTabs, onMode
       className="flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-line bg-[#f4f4f5] outline-none focus-visible:ring-2 focus-visible:ring-accent-soft"
     >
       {/* Tabs */}
-      <div role="tablist" aria-label="Open files" className="flex h-12 items-center gap-1.5 overflow-x-auto border-b border-line bg-panel px-3 [scrollbar-width:none]">
+      <div className="flex min-h-12 flex-wrap items-center gap-x-1.5 gap-y-2 border-b border-line bg-panel px-3 py-2">
+        <div role="tablist" aria-label="Open files" className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none]">
         {tabs.map((t) => {
           const on = t.deck === active;
           return (
@@ -114,10 +145,11 @@ export function SlidePanel({ moduleId, decks, tabs, active, mode, onTabs, onMode
             </div>
           );
         })}
+        </div>
         <div className="relative shrink-0">
           <button type="button" aria-haspopup="listbox" aria-expanded={picking} onClick={() => setPicking((p) => !p)} className="flex h-[30px] w-[30px] items-center justify-center rounded-full border border-dashed border-line-2 text-base text-ink-2 hover:border-accent hover:text-accent" aria-label="Open another deck">+</button>
           {picking && (
-            <ul role="listbox" className="absolute left-0 top-9 z-20 max-h-72 w-64 overflow-y-auto rounded-md border border-line bg-panel py-1 shadow-lg">
+            <ul role="listbox" className="absolute left-0 top-9 z-40 max-h-72 w-[min(16rem,calc(100vw-2rem))] overflow-y-auto rounded-md border border-line bg-panel py-1 shadow-lg">
               {unopened.length === 0 && <li className="px-3 py-2 text-[13px] text-ink-3">Every deck is open</li>}
               {unopened.map((d) => (
                 <li key={d}>
@@ -173,7 +205,34 @@ export function SlidePanel({ moduleId, decks, tabs, active, mode, onTabs, onMode
             className={`block h-full w-full object-contain ${mode === "split" ? "max-h-[38vh]" : ""} ${imgState === "ok" ? "" : "opacity-0"}`}
           />
         </div>
-        {mode === "split" && <SlideNote moduleId={moduleId} slide={tab} />}
+        {mode === "slide" && (
+          <Filmstrip moduleId={moduleId} deck={tab.deck} page={tab.page} total={total} noted={notedPages} cited={citedPages} onPick={setPage} />
+        )}
+        {mode === "split" && (
+          <div className="flex min-h-0 flex-grow flex-col gap-2">
+            <div role="tablist" aria-label="Notes" className="flex shrink-0 gap-1">
+              {([
+                ["slide", "This slide"],
+                ["deck", `This deck · ${deckNotes.length}`],
+                ["module", `Module · ${notes.length}`],
+              ] as const).map(([k, label]) => (
+                <button
+                  key={k}
+                  type="button"
+                  role="tab"
+                  aria-selected={scope === k}
+                  onClick={() => setScope(k)}
+                  className={`h-7 rounded-md px-2.5 text-xs font-medium ${scope === k ? "bg-panel text-ink shadow-sm" : "text-ink-2 hover:text-ink"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {scope === "slide" && <SlideNote moduleId={moduleId} slide={tab} onSaved={loadNotes} />}
+            {scope === "deck" && <NoteList notes={deckNotes} showDeck={false} current={tab} onPick={goTo} empty={`No notes on ${tab.deck} yet.`} />}
+            {scope === "module" && <NoteList notes={notes} showDeck current={tab} onPick={goTo} empty="No notes in this module yet." />}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -182,7 +241,7 @@ export function SlidePanel({ moduleId, decks, tabs, active, mode, onTabs, onMode
 // One note per slide. Loads on slide change, saves 700ms after the last
 // keystroke and on blur. A swap to another slide flushes first, so nothing
 // typed is lost to the debounce.
-function SlideNote({ moduleId, slide }: { moduleId: number; slide: SlideRef }) {
+function SlideNote({ moduleId, slide, onSaved }: { moduleId: number; slide: SlideRef; onSaved?: () => void }) {
   const key = `${slide.deck}#${slide.page}`;
   const [text, setText] = useState("");
   const [state, setState] = useState<"loading" | "saved" | "dirty" | "saving" | "error">("loading");
@@ -200,6 +259,7 @@ function SlideNote({ moduleId, slide }: { moduleId: number; slide: SlideRef }) {
         body: JSON.stringify({ deck, page, markdown }),
       });
       if (!r.ok) throw new Error();
+      onSaved?.();
       if (latest.current.key === forKey) {
         latest.current.dirty = false;
         setState("saved");
@@ -207,7 +267,7 @@ function SlideNote({ moduleId, slide }: { moduleId: number; slide: SlideRef }) {
     } catch {
       if (latest.current.key === forKey) setState("error");
     }
-  }, [moduleId]);
+  }, [moduleId, onSaved]);
 
   // Load — after flushing whatever the previous slide still had pending.
   useEffect(() => {
@@ -279,6 +339,90 @@ function SlideNote({ moduleId, slide }: { moduleId: number; slide: SlideRef }) {
         </button>
         <span className="text-xs text-ink-3">Autosaves</span>
       </div>
+    </div>
+  );
+}
+
+// A strip of page thumbnails centred on the current page. A dot marks pages
+// with a note of yours; "cited" marks pages the guide cites. Thumbnails are
+// small renders cached on the server, so the strip is cheap after first view.
+const STRIP = 7;
+function Filmstrip({ moduleId, deck, page, total, noted, cited, onPick }: {
+  moduleId: number; deck: string; page: number; total: number | null;
+  noted: Set<number>; cited: Set<number>; onPick: (page: number) => void;
+}) {
+  const last = total ?? page + 3;
+  const start = Math.max(1, Math.min(page - Math.floor(STRIP / 2), last - STRIP + 1));
+  const pages: number[] = [];
+  for (let n = start; n < start + STRIP && n <= last; n++) pages.push(n);
+  return (
+    <ol aria-label="Pages" className="grid shrink-0 grid-cols-7 gap-1.5">
+      {pages.map((n) => {
+        const cur = n === page;
+        return (
+          <li key={n}>
+            <button
+              type="button"
+              onClick={() => onPick(n)}
+              aria-current={cur ? "page" : undefined}
+              aria-label={`Page ${n}${noted.has(n) ? ", has a note" : ""}${cited.has(n) ? ", cited in the guide" : ""}`}
+              className={`relative block aspect-[16/10] w-full overflow-hidden rounded-[3px] bg-panel ${cur ? "ring-2 ring-accent" : "border border-line hover:border-ink-3"}`}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={slideImageUrl(moduleId, deck, n, "thumb")} alt="" loading="lazy" className="h-full w-full object-contain" />
+              <span className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-panel/90 px-1 text-[10px] leading-4 tabular-nums">
+                <span className="flex items-center gap-1">
+                  {noted.has(n) && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />}
+                  {cited.has(n) && <><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-accent sm:hidden" /><span className="hidden font-medium text-accent sm:inline">cited</span></>}
+                </span>
+                <span className={cur ? "font-semibold text-accent" : "text-ink-3"}>{n}</span>
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+const firstLine = (md: string) => md.replace(/!\[[^\]]*\]\([^)]*\)/g, "[image]").replace(/\s+/g, " ").trim();
+
+// Notes as a list — this deck's, or the whole module's grouped by deck.
+// Picking one jumps the panel to that slide and back to the editor.
+function NoteList({ notes, showDeck, current, onPick, empty }: {
+  notes: NoteSummary[]; showDeck: boolean; current: SlideRef;
+  onPick: (deck: string, page: number) => void; empty: string;
+}) {
+  if (notes.length === 0) return <p className="rounded-md border border-dashed border-line-2 px-3 py-6 text-center text-[13px] text-ink-3">{empty}</p>;
+  const groups: { deck: string; rows: NoteSummary[] }[] = [];
+  for (const n of notes) {
+    const g = groups[groups.length - 1];
+    if (g && g.deck === n.deck) g.rows.push(n);
+    else groups.push({ deck: n.deck, rows: [n] });
+  }
+  return (
+    <div className="min-h-0 flex-grow overflow-y-auto overscroll-contain rounded-md border border-line bg-panel">
+      {groups.map((g) => (
+        <section key={g.deck}>
+          {showDeck && <h3 className="sticky top-0 border-b border-line bg-panel/95 px-3 py-1.5 text-xs font-semibold text-ink-2">{g.deck} <span className="font-normal text-ink-3">· {g.rows.length}</span></h3>}
+          <ul className="divide-y divide-line">
+            {g.rows.map((n) => {
+              const cur = n.deck === current.deck && n.page === current.page;
+              return (
+                <li key={`${n.deck}#${n.page}`}>
+                  <button type="button" onClick={() => onPick(n.deck, n.page)} className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-accent-soft ${cur ? "bg-accent-soft" : ""}`}>
+                    <span className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-accent tabular-nums">slide {n.page}</span>
+                      <span className="text-ink-3">{new Date(n.updatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span>
+                    </span>
+                    <span className="line-clamp-2 text-[13px] leading-[1.5] text-ink-2">{firstLine(n.markdown)}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ))}
     </div>
   );
 }

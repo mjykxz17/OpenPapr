@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import remarkUnwrapImages from "remark-unwrap-images";
 import type { Components } from "react-markdown";
 import { splitGuideIntoChapters, extractSubheadings, slugifyHeading } from "@/lib/study-chapters";
-import { parseSlideCitation, deckProxyUrl, parseSlideImage, slideImageUrl } from "@/lib/slide-citation";
+import { parseSlideCitation, deckProxyUrl, parseSlideImage, slideImageUrl, citedPagesByDeck } from "@/lib/slide-citation";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
 import { SlidePanel, type OpenDeck, type PanelMode } from "@/components/SlidePanel";
 import { SlidePanelContext, useSlidePanel, type SlideRef } from "@/components/slide-panel-context";
@@ -254,6 +254,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
     [showSlide, activeTab],
   );
   const panelOpen = panel.open && panel.tabs.length > 0;
+  const cited = useMemo(() => citedPagesByDeck(markdown), [markdown]);
   const allDecks = useMemo(() => {
     const set = new Set(decks);
     for (const t of panel.tabs) set.add(t.deck);
@@ -318,10 +319,17 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   // right. Navigation on both flanks is what lets the prose stay a comfortable
   // width without leaving the page half empty — the problem a single centred
   // column had.
+  // Docked beside the prose from xl (1280px) up; below that there is no
+  // room for both, so the same panel slides over the right edge as a
+  // drawer, and closing it gives the page back.
   const slidePanel = panelOpen ? (
-    <aside className="sticky top-6 hidden h-[calc(100dvh-3rem)] min-h-0 lg:flex lg:flex-col">
+    <aside
+      aria-label="Slides"
+      className="fixed inset-y-0 right-0 z-30 flex w-[min(40rem,100vw)] min-h-0 flex-col bg-surface p-3 shadow-2xl xl:sticky xl:inset-auto xl:top-6 xl:z-auto xl:h-[calc(100dvh-3rem)] xl:w-auto xl:bg-transparent xl:p-0 xl:shadow-none"
+    >
       <SlidePanel
         moduleId={moduleId}
+        cited={cited}
         decks={allDecks}
         tabs={panel.tabs}
         active={panel.active}
@@ -336,7 +344,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   if (chapters.length === 0) {
     return (
       <SlidePanelContext.Provider value={panelApi}>
-        <div className={`w-full ${panelOpen ? "lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,40rem)] lg:items-start lg:gap-10" : ""}`}>
+        <div className={`w-full ${panelOpen ? "xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,40rem)] xl:items-start xl:gap-10" : ""}`}>
           <Body markdown={markdown} moduleId={moduleId} />
           {slidePanel}
         </div>
@@ -395,22 +403,23 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
     </nav>
   );
 
-  // With the panel open the flanking navigation gives way: the section
-  // outline goes, and the chapter list only stays on very wide screens — a
-  // select above the prose takes its place elsewhere.
+  // With the panel docked (xl+) the flanking navigation gives way: the
+  // section outline goes, and the chapter list only stays on 2xl screens —
+  // a select above the prose takes its place. Below xl the panel is a
+  // drawer over the page, so the normal three-column layout stays.
   const grid = panelOpen
-    ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,40rem)] lg:gap-10 2xl:grid-cols-[15rem_minmax(0,1fr)_minmax(0,40rem)]"
+    ? "lg:grid-cols-[15rem_minmax(0,1fr)_13.75rem] lg:gap-12 xl:grid-cols-[minmax(0,1fr)_minmax(0,40rem)] xl:gap-10 2xl:grid-cols-[15rem_minmax(0,1fr)_minmax(0,40rem)]"
     : "lg:grid-cols-[15rem_minmax(0,1fr)_13.75rem] lg:gap-12";
 
   return (
     <SlidePanelContext.Provider value={panelApi}>
     <div className={`w-full lg:grid lg:items-start ${grid}`}>
-      <div className={panelOpen ? "hidden 2xl:block" : "contents"}>{chapterNav}</div>
+      <div className={panelOpen ? "contents xl:hidden 2xl:contents" : "contents"}>{chapterNav}</div>
 
       <div className="min-w-0">
         <div ref={tabsAnchor} aria-hidden className="h-0" />
         {panelOpen && (
-          <label className="mb-4 flex items-center gap-2 text-[13px] text-ink-2 2xl:hidden">
+          <label className="mb-4 hidden items-center gap-2 text-[13px] text-ink-2 xl:flex 2xl:hidden">
             <span>Chapter</span>
             <select value={active} onChange={(e) => selectChapter(Number(e.target.value))} className="h-8 rounded-md border border-line-2 bg-panel px-2 text-[13px] text-ink">
               {chapters.map((c, i) => (
@@ -430,7 +439,8 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
         <Body markdown={chapters[active].markdown} moduleId={moduleId} />
       </div>
 
-      {panelOpen ? slidePanel : sectionNav}
+      <div className={panelOpen ? "contents xl:hidden" : "contents"}>{sectionNav}</div>
+      {slidePanel}
     </div>
     </SlidePanelContext.Provider>
   );

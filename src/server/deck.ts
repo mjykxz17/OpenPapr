@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { renderPdfPage } from "@/lib/pdf-render";
 import { dirname, join } from "node:path";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
@@ -77,4 +78,32 @@ export async function loadDeckPdf(db: Db, userId: number, moduleId: number, name
   } catch {
     return { error: "canvas unavailable", status: 502 };
   }
+}
+
+// A rendered page, cached as PNG beside the deck on the volume. Rendering
+// means parsing the whole PDF (IFS4103's decks are 22MB), and the slide
+// panel asks for the current page plus a strip of thumbnails on every page
+// turn, so without this each turn re-parsed the deck half a dozen times.
+export const slidePngPath = (courseId: number, name: string, page: number, scale: number, dbPath?: string) =>
+  deckCachePath(courseId, name, dbPath).replace(/\.pdf$/, `-pages/${page}@${scale}.png`);
+
+export type SlideResult = { png: Uint8Array } | { error: string; status: number };
+
+export async function renderCachedSlide(db: Db, userId: number, moduleId: number, name: string, page: number, scale: number): Promise<SlideResult> {
+  const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get();
+  if (!mod || mod.userId !== userId) return { error: "not found", status: 404 };
+  const path = slidePngPath(mod.canvasCourseId, name, page, scale);
+  if (existsSync(path)) return { png: new Uint8Array(readFileSync(path)) };
+
+  const deck = await loadDeckPdf(db, userId, moduleId, name);
+  if ("error" in deck) return deck;
+  const png = await renderPdfPage(deck.bytes, page, scale);
+  if (!png) return { error: "render failed", status: 502 };
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, png);
+  } catch {
+    // Serving the page matters more than caching it.
+  }
+  return { png };
 }

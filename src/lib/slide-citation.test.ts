@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseSlideCitation, deckProxyUrl, parseSlideImage, slideImageUrl } from "./slide-citation";
+import { citedPagesByDeck } from "./slide-citation";
 
 describe("parseSlideCitation", () => {
   it("parses a slide: href into deck stem and page", () => {
@@ -38,5 +39,12 @@ describe("parseSlideImage", () => {
 describe("slideImageUrl", () => {
   it("builds the rendered-page image url", () => {
     expect(slideImageUrl(2, "U2-background", 15)).toBe("/api/modules/2/slide?name=U2-background&page=15");
+  });
+});
+
+describe("citedPagesByDeck", () => {
+  it("collects each deck's cited pages, deduped and sorted, and ignores slide images", () => {
+    const md = "a [slide 9](slide:U3-memdef#9) b [slide 2](slide:U3-memdef#2) [again](slide:U3-memdef#9) ![fig](slide-img:U3-memdef#40) [x](slide:lab4-handout#2)";
+    expect(citedPagesByDeck(md)).toEqual({ "U3-memdef": [2, 9], "lab4-handout": [2] });
   });
 });

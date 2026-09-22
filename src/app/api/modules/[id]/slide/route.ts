@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { currentUserId } from "@/server/session";
 import { getDb } from "@/server/db";
-import { loadDeckPdf } from "@/server/deck";
-import { renderPdfPage } from "@/lib/pdf-render";
+import { renderCachedSlide } from "@/server/deck";
 
 // Renders a single slide (page) of a module's deck to PNG, so a study guide
-// can embed the slide's actual figure inline. Uses a locally-converted PDF if
-// present (e.g. from a PowerPoint deck), else the Canvas PDF. PDF-only.
+// can embed the slide's actual figure inline and the slide panel can show it.
+// `size=thumb` renders small for the panel's filmstrip. Rendered pages are
+// cached on the volume beside the deck. PDF-only.
+const SCALES = { full: 2, thumb: 0.35 } as const;
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const userId = await currentUserId();
@@ -15,16 +17,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const url = new URL(request.url);
   const name = url.searchParams.get("name");
   const page = Number(url.searchParams.get("page"));
+  const scale = url.searchParams.get("size") === "thumb" ? SCALES.thumb : SCALES.full;
   if (!Number.isFinite(moduleId) || !name || !Number.isInteger(page) || page < 1) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
 
-  const res = await loadDeckPdf(getDb(), userId, moduleId, name);
+  const res = await renderCachedSlide(getDb(), userId, moduleId, name, page, scale);
   if ("error" in res) return NextResponse.json({ error: res.error }, { status: res.status });
-
-  const png = await renderPdfPage(res.bytes, page);
-  if (!png) return NextResponse.json({ error: "render failed" }, { status: 502 });
-  return new NextResponse(Buffer.from(png), {
+  return new NextResponse(Buffer.from(res.png), {
     headers: { "Content-Type": "image/png", "Cache-Control": "private, max-age=86400" },
   });
 }
