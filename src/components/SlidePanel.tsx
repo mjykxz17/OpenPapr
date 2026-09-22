@@ -133,8 +133,39 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, th
       aria-label="Slide viewer"
       className={`flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-line bg-[#f4f4f5] outline-none focus-visible:ring-2 focus-visible:ring-accent-soft ${mode === "slide" ? "" : "flex-1"}`}
     >
-      {/* Tabs */}
-      <div className="flex min-h-12 flex-wrap items-center gap-x-1.5 gap-y-2 border-b border-line bg-panel px-3 py-2">
+      {/* Controls. Two fixed rows: what you do to the view (page, mode,
+          close) and which file you are on. Nothing here wraps, moves or
+          disappears with the number of open tabs or the mode. */}
+      <div className="flex h-11 items-center gap-2 border-b border-line bg-panel px-3">
+        <div className="flex items-center gap-1">
+          <button type="button" aria-label="Previous page" onClick={() => setPage(tab.page - 1)} disabled={tab.page <= 1} className="h-[30px] w-[30px] rounded-md border border-line-2 bg-panel text-ink-2 disabled:opacity-40">‹</button>
+          <label className="flex items-center gap-1 px-1 text-[13px] tabular-nums text-ink-2">
+            <span className="sr-only">Page</span>
+            <input
+              type="number"
+              min={1}
+              max={total ?? undefined}
+              value={tab.page}
+              onChange={(e) => { const n = Number(e.target.value); if (Number.isInteger(n)) setPage(n); }}
+              className="h-7 w-11 rounded-md border border-line-2 bg-panel text-center text-[13px] tabular-nums text-ink [appearance:textfield] focus:border-accent focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            />
+            <span className="min-w-[2.75rem]">/ {total ?? "…"}</span>
+          </label>
+          <button type="button" aria-label="Next page" onClick={() => setPage(tab.page + 1)} disabled={total !== null && tab.page >= total} className="h-[30px] w-[30px] rounded-md border border-line-2 bg-panel text-ink-2 disabled:opacity-40">›</button>
+        </div>
+        <div className="ml-auto flex shrink-0 gap-0.5 rounded-md bg-[#f4f4f5] p-0.5">
+          {([
+            ["slide", "Slide", "Slide only"],
+            ["split", "Both", "Slide and notes"],
+            ["notes", "Notes", "Notes only — the slide collapses"],
+          ] as const).map(([m, label, title]) => (
+            <button key={m} type="button" title={title} aria-pressed={mode === m} onClick={() => onMode(m)} className={`h-[26px] rounded px-2.5 text-xs font-medium ${mode === m ? "bg-panel text-ink shadow-sm" : "text-ink-2 hover:text-ink"}`}>{label}</button>
+          ))}
+        </div>
+        <button type="button" aria-label="Close viewer" title="Close the slide panel (Esc)" onClick={onClose} className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md text-lg text-ink-2 hover:bg-ink/[0.06] hover:text-ink">×</button>
+      </div>
+
+      <div className="flex h-11 items-center gap-1.5 border-b border-line bg-panel px-3">
         <div role="tablist" aria-label="Open files" className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto [scrollbar-width:none]">
         {tabs.map((t) => {
           const on = t.deck === active;
@@ -162,51 +193,28 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, th
             </ul>
           )}
         </div>
-        <div className="ml-auto flex shrink-0 gap-0.5 rounded-md bg-[#f4f4f5] p-0.5">
-          {([
-            ["slide", "Slide", "Slide only"],
-            ["split", "Both", "Slide and notes"],
-            ["notes", "Notes", "Notes only — the slide collapses"],
-          ] as const).map(([m, label, title]) => (
-            <button key={m} type="button" title={title} aria-pressed={mode === m} onClick={() => onMode(m)} className={`h-[26px] rounded px-2.5 text-xs font-medium ${mode === m ? "bg-panel text-ink shadow-sm" : "text-ink-2 hover:text-ink"}`}>{label}</button>
-          ))}
-        </div>
-        <button type="button" aria-label="Close viewer" onClick={onClose} className="ml-1 flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md text-lg text-ink-2 hover:bg-ink/[0.06] hover:text-ink">×</button>
-      </div>
-
-      {/* Page controls */}
-      <div className="flex h-10 items-center justify-between gap-2 border-b border-line bg-panel px-3">
-        <div className="flex items-center gap-1">
-          <button type="button" aria-label="Previous page" onClick={() => setPage(tab.page - 1)} disabled={tab.page <= 1} className="h-[30px] w-[30px] rounded-md border border-line-2 bg-panel text-ink-2 disabled:opacity-40">‹</button>
-          <label className="flex items-center gap-1 px-1 text-[13px] tabular-nums text-ink-2">
-            <span className="sr-only">Page</span>
-            <input
-              type="number"
-              min={1}
-              max={total ?? undefined}
-              value={tab.page}
-              onChange={(e) => { const n = Number(e.target.value); if (Number.isInteger(n)) setPage(n); }}
-              className="h-7 w-12 rounded-md border border-line-2 bg-panel text-center text-[13px] tabular-nums text-ink [appearance:textfield] focus:border-accent focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            />
-            <span>/ {total ?? "…"}</span>
-          </label>
-          <button type="button" aria-label="Next page" onClick={() => setPage(tab.page + 1)} disabled={total !== null && tab.page >= total} className="h-[30px] w-[30px] rounded-md border border-line-2 bg-panel text-ink-2 disabled:opacity-40">›</button>
-        </div>
-        <div className="flex items-center gap-3">
-          {mode === "slide" && (
-            <button
-              type="button"
-              aria-pressed={thumbs}
-              onClick={() => onThumbs(!thumbs)}
-              title={thumbs ? "Hide page thumbnails" : "Show page thumbnails"}
-              className={`flex h-[30px] items-center gap-1.5 rounded-md px-2 text-[13px] ${thumbs ? "text-ink" : "text-ink-2"} hover:bg-ink/[0.05]`}
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="14" width="5" height="6" rx="1" /><rect x="9.5" y="14" width="5" height="6" rx="1" /><rect x="16" y="14" width="5" height="6" rx="1" /><rect x="3" y="4" width="18" height="7" rx="1.5" /></svg>
-              Pages
-            </button>
-          )}
-          <a href={deckProxyUrl(moduleId, tab.deck, tab.page)} target="_blank" rel="noreferrer" className="text-[13px] text-ink-2 hover:text-accent">Full PDF ↗</a>
-        </div>
+        <span aria-hidden className="mx-0.5 h-5 w-px shrink-0 bg-line" />
+        <button
+          type="button"
+          aria-pressed={mode === "slide" && thumbs}
+          onClick={() => onThumbs(!thumbs)}
+          disabled={mode !== "slide"}
+          aria-label="Page thumbnails"
+          title={mode !== "slide" ? "Thumbnails show in the Slide view" : thumbs ? "Hide page thumbnails" : "Show page thumbnails"}
+          className={`flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md hover:bg-ink/[0.05] disabled:cursor-not-allowed disabled:text-ink-3 disabled:hover:bg-transparent ${mode === "slide" && thumbs ? "bg-accent-soft text-accent" : "text-ink-2"}`}
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="14" width="5" height="6" rx="1" /><rect x="9.5" y="14" width="5" height="6" rx="1" /><rect x="16" y="14" width="5" height="6" rx="1" /><rect x="3" y="4" width="18" height="7" rx="1.5" /></svg>
+        </button>
+        <a
+          href={deckProxyUrl(moduleId, tab.deck, tab.page)}
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Open the full PDF in a new tab"
+          title="Open the full PDF in a new tab"
+          className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md text-ink-2 hover:bg-ink/[0.05] hover:text-accent"
+        >
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M14 4h6v6" /><path d="M20 4 11 13" /><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" /></svg>
+        </a>
       </div>
 
       {/* Slide + notes */}
