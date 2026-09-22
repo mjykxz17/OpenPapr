@@ -5,7 +5,7 @@ import { deckProxyUrl, slideImageUrl } from "@/lib/slide-citation";
 import type { SlideRef } from "@/components/slide-panel-context";
 
 export type OpenDeck = { deck: string; page: number };
-export type PanelMode = "slide" | "split";
+export type PanelMode = "slide" | "split" | "notes";
 
 export type NoteSummary = { deck: string; page: number; markdown: string; updatedAt: number };
 type NoteScope = "slide" | "deck" | "module";
@@ -19,8 +19,11 @@ type Props = {
   tabs: OpenDeck[];
   active: string; // deck stem of the active tab
   mode: PanelMode;
+  /** Whether the thumbnail strip shows under the slide. */
+  thumbs: boolean;
   onTabs: (tabs: OpenDeck[], active: string) => void;
   onMode: (mode: PanelMode) => void;
+  onThumbs: (on: boolean) => void;
   onClose: () => void;
 };
 
@@ -30,7 +33,7 @@ const pageCounts = new Map<string, number>();
 // PDF, and — in split mode — a note anchored to that slide. All state that
 // should survive a reload (tabs, active tab, page, mode) lives in the parent;
 // this component only owns transient fetch state.
-export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, onTabs, onMode, onClose }: Props) {
+export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, thumbs, onTabs, onMode, onThumbs, onClose }: Props) {
   const tab = tabs.find((t) => t.deck === active) ?? tabs[0];
   const [total, setTotal] = useState<number | null>(tab ? (pageCounts.get(tab.deck) ?? null) : null);
   const [picking, setPicking] = useState(false);
@@ -128,7 +131,7 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, on
       tabIndex={-1}
       onKeyDown={onKey}
       aria-label="Slide viewer"
-      className="flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-line bg-[#f4f4f5] outline-none focus-visible:ring-2 focus-visible:ring-accent-soft"
+      className={`flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-line bg-[#f4f4f5] outline-none focus-visible:ring-2 focus-visible:ring-accent-soft ${mode === "slide" ? "" : "flex-1"}`}
     >
       {/* Tabs */}
       <div className="flex min-h-12 flex-wrap items-center gap-x-1.5 gap-y-2 border-b border-line bg-panel px-3 py-2">
@@ -160,8 +163,13 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, on
           )}
         </div>
         <div className="ml-auto flex shrink-0 gap-0.5 rounded-md bg-[#f4f4f5] p-0.5">
-          <button type="button" aria-pressed={mode === "slide"} onClick={() => onMode("slide")} className={`h-[26px] rounded px-2.5 text-xs font-medium ${mode === "slide" ? "bg-panel text-ink shadow-sm" : "text-ink-2"}`}>Slide</button>
-          <button type="button" aria-pressed={mode === "split"} onClick={() => onMode("split")} className={`h-[26px] rounded px-2.5 text-xs font-medium ${mode === "split" ? "bg-panel text-ink shadow-sm" : "text-ink-2"}`}>Slide + notes</button>
+          {([
+            ["slide", "Slide", "Slide only"],
+            ["split", "Both", "Slide and notes"],
+            ["notes", "Notes", "Notes only — the slide collapses"],
+          ] as const).map(([m, label, title]) => (
+            <button key={m} type="button" title={title} aria-pressed={mode === m} onClick={() => onMode(m)} className={`h-[26px] rounded px-2.5 text-xs font-medium ${mode === m ? "bg-panel text-ink shadow-sm" : "text-ink-2 hover:text-ink"}`}>{label}</button>
+          ))}
         </div>
         <button type="button" aria-label="Close viewer" onClick={onClose} className="ml-1 flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md text-lg text-ink-2 hover:bg-ink/[0.06] hover:text-ink">×</button>
       </div>
@@ -184,12 +192,26 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, on
           </label>
           <button type="button" aria-label="Next page" onClick={() => setPage(tab.page + 1)} disabled={total !== null && tab.page >= total} className="h-[30px] w-[30px] rounded-md border border-line-2 bg-panel text-ink-2 disabled:opacity-40">›</button>
         </div>
-        <a href={deckProxyUrl(moduleId, tab.deck, tab.page)} target="_blank" rel="noreferrer" className="text-[13px] text-ink-2 hover:text-accent">Full PDF ↗</a>
+        <div className="flex items-center gap-3">
+          {mode === "slide" && (
+            <button
+              type="button"
+              aria-pressed={thumbs}
+              onClick={() => onThumbs(!thumbs)}
+              title={thumbs ? "Hide page thumbnails" : "Show page thumbnails"}
+              className={`flex h-[30px] items-center gap-1.5 rounded-md px-2 text-[13px] ${thumbs ? "text-ink" : "text-ink-2"} hover:bg-ink/[0.05]`}
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="14" width="5" height="6" rx="1" /><rect x="9.5" y="14" width="5" height="6" rx="1" /><rect x="16" y="14" width="5" height="6" rx="1" /><rect x="3" y="4" width="18" height="7" rx="1.5" /></svg>
+              Pages
+            </button>
+          )}
+          <a href={deckProxyUrl(moduleId, tab.deck, tab.page)} target="_blank" rel="noreferrer" className="text-[13px] text-ink-2 hover:text-accent">Full PDF ↗</a>
+        </div>
       </div>
 
       {/* Slide + notes */}
       <div className="flex min-h-0 flex-grow flex-col gap-3 overflow-hidden p-3">
-        <div className={`relative w-full overflow-hidden rounded-md border border-line bg-panel shadow-sm ${mode === "split" ? "shrink-0" : "min-h-0 flex-grow"}`} style={mode === "split" ? { maxHeight: "42%" } : undefined}>
+        <div hidden={mode === "notes"} className={`relative w-full overflow-hidden rounded-md border border-line bg-panel shadow-sm ${mode === "split" ? "shrink-0" : "min-h-0 flex-grow"}`} style={mode === "split" ? { maxHeight: "42%" } : undefined}>
           {imgState !== "ok" && (
             <div className="absolute inset-0 flex items-center justify-center text-[13px] text-ink-3">
               {imgState === "loading" ? "Rendering slide…" : "This page could not be rendered."}
@@ -205,10 +227,10 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, on
             className={`block h-full w-full object-contain ${mode === "split" ? "max-h-[38vh]" : ""} ${imgState === "ok" ? "" : "opacity-0"}`}
           />
         </div>
-        {mode === "slide" && (
+        {mode === "slide" && thumbs && (
           <Filmstrip moduleId={moduleId} deck={tab.deck} page={tab.page} total={total} noted={notedPages} cited={citedPages} onPick={setPage} />
         )}
-        {mode === "split" && (
+        {mode !== "slide" && (
           <div className="flex min-h-0 flex-grow flex-col gap-2">
             <div role="tablist" aria-label="Notes" className="flex shrink-0 gap-1">
               {([

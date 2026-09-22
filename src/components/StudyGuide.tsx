@@ -151,6 +151,32 @@ const barWidth = (label: string, min = 14, max = 30) =>
 const posKey = (moduleId: number) => `sg-pos:${moduleId}`;
 
 type PanelState = { open: boolean; tabs: OpenDeck[]; active: string; mode: PanelMode };
+type Layout = { chapters: boolean; outline: boolean; thumbs: boolean; panelW: number };
+const LAYOUT_KEY = "sg-layout";
+const PANEL_MIN = 360;
+const PANEL_MAX = 960;
+const DEFAULT_LAYOUT: Layout = { chapters: true, outline: true, thumbs: true, panelW: 640 };
+
+// A small on/off button for the reading toolbar.
+function ToggleButton({ on, onClick, label, title, disabled, className = "", children }: {
+  on: boolean; onClick: () => void; label: string; title: string; disabled?: boolean; className?: string; children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`h-8 items-center gap-1.5 rounded-md border px-2.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
+        on ? "border-accent bg-accent-soft text-accent" : "border-line-2 bg-panel text-ink-2 hover:border-ink-3 hover:text-ink"
+      } ${className || "flex"}`}
+    >
+      {children}
+      <span>{label}</span>
+    </button>
+  );
+}
 const panelKey = (moduleId: number) => `sg-panel:${moduleId}`;
 const EMPTY_PANEL: PanelState = { open: false, tabs: [], active: "", mode: "slide" };
 
@@ -231,7 +257,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
       const raw = localStorage.getItem(panelKey(moduleId));
       if (raw) {
         const p = JSON.parse(raw) as Partial<PanelState>;
-        if (Array.isArray(p.tabs)) setPanel({ open: !!p.open && p.tabs.length > 0, tabs: p.tabs, active: p.active ?? p.tabs[0]?.deck ?? "", mode: p.mode === "split" ? "split" : "slide" });
+        if (Array.isArray(p.tabs)) setPanel({ open: !!p.open && p.tabs.length > 0, tabs: p.tabs, active: p.active ?? p.tabs[0]?.deck ?? "", mode: p.mode === "split" || p.mode === "notes" ? p.mode : "slide" });
       }
     } catch {}
     panelLoaded.current = true;
@@ -255,6 +281,100 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   );
   const panelOpen = panel.open && panel.tabs.length > 0;
   const cited = useMemo(() => citedPagesByDeck(markdown), [markdown]);
+
+  // Layout preferences, global rather than per module: which side columns
+  // show, how wide the docked panel is, and whether it shows thumbnails.
+  const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
+  const layoutLoaded = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LAYOUT_KEY);
+      if (raw) setLayout({ ...DEFAULT_LAYOUT, ...JSON.parse(raw) });
+    } catch {}
+    layoutLoaded.current = true;
+  }, []);
+  useEffect(() => {
+    if (!layoutLoaded.current) return;
+    try { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); } catch {}
+  }, [layout]);
+  const setPref = <K extends keyof Layout>(k: K, v: Layout[K]) => setLayout((l) => ({ ...l, [k]: v }));
+
+  // The Slides toggle: reopen what was open; with nothing remembered, open
+  // the first deck the guide cites, at its first cited page.
+  const firstSlide = useMemo<SlideRef | null>(() => {
+    const [deck, pages] = Object.entries(cited)[0] ?? [];
+    if (deck && pages?.length) return { deck, page: pages[0] };
+    return decks[0] ? { deck: decks[0], page: 1 } : null;
+  }, [cited, decks]);
+  const canOpenPanel = panel.tabs.length > 0 || firstSlide !== null;
+  const toggleSlides = useCallback(() => {
+    setPanel((p) => {
+      if (p.open && p.tabs.length > 0) return { ...p, open: false };
+      if (p.tabs.length > 0) return { ...p, open: true };
+      if (!firstSlide) return p;
+      return { ...p, open: true, tabs: [{ ...firstSlide }], active: firstSlide.deck };
+    });
+  }, [firstSlide]);
+
+  // Drag the panel's left edge to resize it. The prose keeps at least
+  // 360px; the panel stays between 360px and 960px.
+  const asideRef = useRef<HTMLElement | null>(null);
+  const clampWidth = (w: number) => {
+    const max = Math.max(PANEL_MIN, Math.min(PANEL_MAX, window.innerWidth - 56 - 80 - 40 - 360));
+    return Math.round(Math.max(PANEL_MIN, Math.min(max, w)));
+  };
+  function startResize(e: React.PointerEvent) {
+    if (e.button !== 0 || !asideRef.current) return;
+    e.preventDefault();
+    const right = asideRef.current.getBoundingClientRect().right;
+    const move = (ev: PointerEvent) => setPref("panelW", clampWidth(right - ev.clientX));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  function resizeByKey(e: React.KeyboardEvent) {
+    const step = e.shiftKey ? 80 : 24;
+    if (e.key === "ArrowLeft") { e.preventDefault(); setPref("panelW", clampWidth(layout.panelW + step)); }
+    if (e.key === "ArrowRight") { e.preventDefault(); setPref("panelW", clampWidth(layout.panelW - step)); }
+  }
+
+  const slidesIcon = (
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M14 4v16" />
+    </svg>
+  );
+  const slidesToggle = (
+    <ToggleButton
+      on={panelOpen}
+      onClick={toggleSlides}
+      disabled={!canOpenPanel}
+      label="Slides"
+      title={canOpenPanel ? (panelOpen ? "Hide the slide panel" : "Show the slide panel") : "This module has no PDF slides"}
+    >
+      {slidesIcon}
+    </ToggleButton>
+  );
+  // With the panel closed, a button stays in reach wherever you have
+  // scrolled, so bringing it back never means scrolling to the top.
+  const floatingSlides = !panelOpen && canOpenPanel ? (
+    <button
+      type="button"
+      onClick={toggleSlides}
+      className="fixed bottom-5 right-5 z-20 flex h-11 items-center gap-2 rounded-full border border-line-2 bg-panel px-4 text-[13px] font-medium text-ink shadow-lg transition-colors hover:border-accent hover:text-accent"
+    >
+      {slidesIcon}
+      Slides
+      {panel.tabs.length > 0 && <span className="text-xs tabular-nums text-ink-3">{panel.tabs.length}</span>}
+    </button>
+  ) : null;
+  const panelStyle = { "--panel-w": `${layout.panelW}px` } as React.CSSProperties;
   const allDecks = useMemo(() => {
     const set = new Set(decks);
     for (const t of panel.tabs) set.add(t.deck);
@@ -324,9 +444,26 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   // drawer, and closing it gives the page back.
   const slidePanel = panelOpen ? (
     <aside
+      ref={asideRef}
       aria-label="Slides"
-      className="fixed inset-y-0 right-0 z-30 flex w-[min(40rem,100vw)] min-h-0 flex-col bg-surface p-3 shadow-2xl xl:sticky xl:inset-auto xl:top-6 xl:z-auto xl:h-[calc(100dvh-3rem)] xl:w-auto xl:bg-transparent xl:p-0 xl:shadow-none"
+      className="fixed inset-y-0 right-0 z-30 flex w-[min(var(--panel-w),100vw)] min-h-0 flex-col bg-surface p-3 shadow-2xl xl:sticky xl:inset-auto xl:top-6 xl:z-auto xl:h-[calc(100dvh-3rem)] xl:w-auto xl:bg-transparent xl:p-0 xl:shadow-none"
     >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize slide panel"
+        aria-valuenow={layout.panelW}
+        aria-valuemin={PANEL_MIN}
+        aria-valuemax={PANEL_MAX}
+        tabIndex={0}
+        title="Drag to resize · double-click to reset"
+        onPointerDown={startResize}
+        onKeyDown={resizeByKey}
+        onDoubleClick={() => setPref("panelW", DEFAULT_LAYOUT.panelW)}
+        className="group absolute -left-[22px] top-0 hidden h-full w-4 cursor-col-resize items-center justify-center outline-none xl:flex"
+      >
+        <span className="h-10 w-1 rounded-full bg-line-2 transition-colors group-hover:bg-accent group-focus-visible:bg-accent" />
+      </div>
       <SlidePanel
         moduleId={moduleId}
         cited={cited}
@@ -334,6 +471,8 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
         tabs={panel.tabs}
         active={panel.active}
         mode={panel.mode}
+        thumbs={layout.thumbs}
+        onThumbs={(on) => setPref("thumbs", on)}
         onTabs={(tabs, active) => setPanel((p) => ({ ...p, tabs, active, open: tabs.length > 0 }))}
         onMode={(mode) => setPanel((p) => ({ ...p, mode }))}
         onClose={() => setPanel((p) => ({ ...p, open: false }))}
@@ -344,10 +483,14 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   if (chapters.length === 0) {
     return (
       <SlidePanelContext.Provider value={panelApi}>
-        <div className={`w-full ${panelOpen ? "xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,40rem)] xl:items-start xl:gap-10" : ""}`}>
-          <Body markdown={markdown} moduleId={moduleId} />
+        <div style={panelStyle} className={`w-full ${panelOpen ? "xl:grid xl:grid-cols-[minmax(0,1fr)_var(--panel-w)] xl:items-start xl:gap-10" : ""}`}>
+          <div className="min-w-0">
+            <div className="mb-4 flex justify-end">{slidesToggle}</div>
+            <Body markdown={markdown} moduleId={moduleId} />
+          </div>
           {slidePanel}
         </div>
+        {floatingSlides}
       </SlidePanelContext.Provider>
     );
   }
@@ -403,31 +546,50 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
     </nav>
   );
 
-  // With the panel docked (xl+) the flanking navigation gives way: the
-  // section outline goes, and the chapter list only stays on 2xl screens —
-  // a select above the prose takes its place. Below xl the panel is a
-  // drawer over the page, so the normal three-column layout stays.
+  // Columns: the chapter list and the outline can each be switched off.
+  // With the panel docked (xl+) the outline gives way to it and the chapter
+  // list only fits on 2xl; below xl the panel is a drawer over the page, so
+  // the closed layout stays. Class strings are spelled out in full so
+  // Tailwind can see them.
+  const { chapters: showChapters, outline: showOutline } = layout;
+  const closedGrid = showChapters
+    ? showOutline ? "lg:grid lg:grid-cols-[15rem_minmax(0,1fr)_13.75rem] lg:gap-12" : "lg:grid lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-12"
+    : showOutline ? "lg:grid lg:grid-cols-[minmax(0,1fr)_13.75rem] lg:gap-12" : "";
   const grid = panelOpen
-    ? "lg:grid-cols-[15rem_minmax(0,1fr)_13.75rem] lg:gap-12 xl:grid-cols-[minmax(0,1fr)_minmax(0,40rem)] xl:gap-10 2xl:grid-cols-[15rem_minmax(0,1fr)_minmax(0,40rem)]"
-    : "lg:grid-cols-[15rem_minmax(0,1fr)_13.75rem] lg:gap-12";
+    ? `${closedGrid} xl:grid xl:grid-cols-[minmax(0,1fr)_var(--panel-w)] xl:gap-10 ${showChapters ? "2xl:grid-cols-[15rem_minmax(0,1fr)_var(--panel-w)]" : ""}`
+    : closedGrid;
+  const chapterWrap = !showChapters ? "hidden" : panelOpen ? "contents xl:hidden 2xl:contents" : "contents";
+  const outlineWrap = !showOutline ? "hidden" : panelOpen ? "contents xl:hidden" : "contents";
+  // The chapter select stands in wherever the list is not showing —
+  // including on phones, where the list never fits.
+  const selectShow = !showChapters ? "flex" : panelOpen ? "flex lg:hidden xl:flex 2xl:hidden" : "flex lg:hidden";
 
   return (
     <SlidePanelContext.Provider value={panelApi}>
-    <div className={`w-full lg:grid lg:items-start ${grid}`}>
-      <div className={panelOpen ? "contents xl:hidden 2xl:contents" : "contents"}>{chapterNav}</div>
+    <div style={panelStyle} className={`w-full lg:items-start ${grid}`}>
+      <div className={chapterWrap}>{chapterNav}</div>
 
       <div className="min-w-0">
         <div ref={tabsAnchor} aria-hidden className="h-0" />
-        {panelOpen && (
-          <label className="mb-4 hidden items-center gap-2 text-[13px] text-ink-2 xl:flex 2xl:hidden">
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <label className={`${selectShow} min-w-0 items-center gap-2 text-[13px] text-ink-2`}>
             <span>Chapter</span>
-            <select value={active} onChange={(e) => selectChapter(Number(e.target.value))} className="h-8 rounded-md border border-line-2 bg-panel px-2 text-[13px] text-ink">
+            <select value={active} onChange={(e) => selectChapter(Number(e.target.value))} className="h-8 min-w-0 max-w-[16rem] rounded-md border border-line-2 bg-panel px-2 text-[13px] text-ink">
               {chapters.map((c, i) => (
                 <option key={c.label} value={i}>{i + 1}. {c.label}</option>
               ))}
             </select>
           </label>
-        )}
+          <div role="toolbar" aria-label="Layout" className="ml-auto flex items-center gap-1.5">
+            <ToggleButton on={showChapters} onClick={() => setPref("chapters", !showChapters)} label="Chapters" title={showChapters ? "Hide the chapter list" : "Show the chapter list"} className="hidden lg:flex">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></svg>
+            </ToggleButton>
+            <ToggleButton on={showOutline} onClick={() => setPref("outline", !showOutline)} label="Outline" title={showOutline ? "Hide the section outline" : "Show the section outline"} className={panelOpen ? "hidden lg:flex xl:hidden" : "hidden lg:flex"}>
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
+            </ToggleButton>
+            {slidesToggle}
+          </div>
+        </div>
         {preamble && (
           <div className="mb-10">
             <Body markdown={preamble} moduleId={moduleId} />
@@ -439,9 +601,10 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
         <Body markdown={chapters[active].markdown} moduleId={moduleId} />
       </div>
 
-      <div className={panelOpen ? "contents xl:hidden" : "contents"}>{sectionNav}</div>
+      <div className={outlineWrap}>{sectionNav}</div>
       {slidePanel}
     </div>
+    {floatingSlides}
     </SlidePanelContext.Provider>
   );
 }
