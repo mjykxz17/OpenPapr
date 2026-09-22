@@ -3,7 +3,8 @@ import { requireUserId } from "@/server/session";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { modules } from "@/db/schema";
-import { getStudyGuide } from "@/db/repo";
+import { getStudyGuide, listModuleFiles } from "@/db/repo";
+import { deckStem } from "@/server/deck";
 import { AppShell } from "@/components/AppShell";
 import { StudyGuide } from "@/components/StudyGuide";
 import { GenerateGuideButton } from "@/components/GenerateGuideButton";
@@ -36,6 +37,8 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
 
   const { title } = moduleDisplay(mod);
   const guide = getStudyGuide(db, mod.id);
+  // Every PDF the module has, as deck stems: the panel's "open another" list.
+  const decks = [...new Set(listModuleFiles(db, mod.id).filter((f) => /\.pdf$/i.test(f.displayName)).map((f) => deckStem(f.displayName)))].sort();
 
   return (
     <AppShell wide>
@@ -57,7 +60,7 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
 
       {guide ? (
         <section id="study" className="mt-7">
-          <StudyGuide markdown={guide.markdown} moduleId={mod.id} />
+          <StudyGuide markdown={guide.markdown} moduleId={mod.id} decks={decks} />
         </section>
       ) : (
         <section className="mt-10">

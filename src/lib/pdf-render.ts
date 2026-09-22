@@ -16,3 +16,17 @@ export async function renderPdfPage(bytes: Uint8Array, page: number, scale = 2):
     await parser?.destroy().catch(() => {});
   }
 }
+
+// Page count, for a viewer that needs to know where a deck ends.
+export async function pdfPageCount(bytes: Uint8Array): Promise<number | null> {
+  let parser: PDFParse | null = null;
+  try {
+    parser = new PDFParse({ data: bytes });
+    const info = await parser.getInfo();
+    return typeof info.total === "number" && info.total > 0 ? info.total : null;
+  } catch {
+    return null;
+  } finally {
+    await parser?.destroy().catch(() => {});
+  }
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, isValidElement, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, isValidElement, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkUnwrapImages from "remark-unwrap-images";
@@ -8,6 +8,8 @@ import type { Components } from "react-markdown";
 import { splitGuideIntoChapters, extractSubheadings, slugifyHeading } from "@/lib/study-chapters";
 import { parseSlideCitation, deckProxyUrl, parseSlideImage, slideImageUrl } from "@/lib/slide-citation";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
+import { SlidePanel, type OpenDeck, type PanelMode } from "@/components/SlidePanel";
+import { SlidePanelContext, useSlidePanel, type SlideRef } from "@/components/slide-panel-context";
 
 // Flattens heading children to plain text so headings can be given stable ids
 // that the outline sidebar links to.
@@ -40,24 +42,7 @@ function componentsFor(moduleId: number): Components {
   em: ({ children }) => <em className="italic text-ink-2">{children}</em>,
   a: ({ href, children }) => {
     const cite = href ? parseSlideCitation(href) : null;
-    if (cite) {
-      // The chip names the deck and the slide, on an accent tint, at a size
-      // that reads: citations are the point of the guide, not a footnote.
-      return (
-        <a
-          href={deckProxyUrl(moduleId, cite.deck, cite.page)}
-          target="_blank"
-          rel="noreferrer"
-          title={`${cite.deck} · slide ${cite.page}`}
-          className="ml-0.5 inline-flex items-center gap-1 rounded bg-accent-soft px-1.5 py-px align-baseline text-[12px] font-medium tabular-nums text-accent no-underline transition-colors hover:bg-accent hover:text-white"
-        >
-          <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <rect x="3" y="5" width="18" height="14" rx="2" />
-          </svg>
-          {children}
-        </a>
-      );
-    }
+    if (cite) return <SlideChip moduleId={moduleId} cite={cite}>{children}</SlideChip>;
     return (
       <a href={href} target="_blank" rel="noreferrer" className="underline decoration-line-2 underline-offset-2 hover:text-accent">
         {children}
@@ -117,6 +102,37 @@ function componentsFor(moduleId: number): Components {
   };
 }
 
+// A slide citation. With the side panel available it shows the slide there —
+// a plain click never leaves the page — and a modifier-click or middle-click
+// still opens the PDF in a new tab, because the href is real. The chip that
+// matches what the panel is showing goes solid.
+function SlideChip({ moduleId, cite, children }: { moduleId: number; cite: SlideRef; children: ReactNode }) {
+  const panel = useSlidePanel();
+  const current = panel?.current && panel.current.deck === cite.deck && panel.current.page === cite.page;
+  return (
+    <a
+      href={deckProxyUrl(moduleId, cite.deck, cite.page)}
+      target="_blank"
+      rel="noreferrer"
+      title={`${cite.deck} · slide ${cite.page}`}
+      aria-current={current ? "true" : undefined}
+      onClick={(e) => {
+        if (!panel || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+        e.preventDefault();
+        panel.show(cite);
+      }}
+      className={`ml-0.5 inline-flex items-center gap-1 rounded px-1.5 py-px align-baseline text-[12px] font-medium tabular-nums no-underline transition-colors ${
+        current ? "bg-accent text-white" : "bg-accent-soft text-accent hover:bg-accent hover:text-white"
+      }`}
+    >
+      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+      </svg>
+      {children}
+    </a>
+  );
+}
+
 function Body({ markdown, moduleId }: { markdown: string; moduleId: number }) {
   return (
     <div className="guide">
@@ -134,7 +150,11 @@ const barWidth = (label: string, min = 14, max = 30) =>
   `${Math.round(min + Math.min(1, label.length / 46) * (max - min))}px`;
 const posKey = (moduleId: number) => `sg-pos:${moduleId}`;
 
-export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId: number }) {
+type PanelState = { open: boolean; tabs: OpenDeck[]; active: string; mode: PanelMode };
+const panelKey = (moduleId: number) => `sg-panel:${moduleId}`;
+const EMPTY_PANEL: PanelState = { open: false, tabs: [], active: "", mode: "slide" };
+
+export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: string; moduleId: number; decks?: string[] }) {
   const { preamble: rawPreamble, chapters } = splitGuideIntoChapters(markdown);
   // Drop the guide's own H1. The page already names the module in its header
   // and again in the "Study guide" label, so rendering "<Module> — Study
@@ -202,6 +222,44 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
     } catch {}
   }, [moduleId, active, activeSlug]);
 
+  // The slide panel: which decks are open, at which page, and whether the
+  // note editor shows. Remembered per module like the reading position.
+  const [panel, setPanel] = useState<PanelState>(EMPTY_PANEL);
+  const panelLoaded = useRef(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(panelKey(moduleId));
+      if (raw) {
+        const p = JSON.parse(raw) as Partial<PanelState>;
+        if (Array.isArray(p.tabs)) setPanel({ open: !!p.open && p.tabs.length > 0, tabs: p.tabs, active: p.active ?? p.tabs[0]?.deck ?? "", mode: p.mode === "split" ? "split" : "slide" });
+      }
+    } catch {}
+    panelLoaded.current = true;
+  }, [moduleId]);
+  useEffect(() => {
+    if (!panelLoaded.current) return;
+    try { localStorage.setItem(panelKey(moduleId), JSON.stringify(panel)); } catch {}
+  }, [moduleId, panel]);
+
+  const showSlide = useCallback((ref: SlideRef) => {
+    setPanel((p) => {
+      const has = p.tabs.some((t) => t.deck === ref.deck);
+      const tabs = has ? p.tabs.map((t) => (t.deck === ref.deck ? { ...t, page: ref.page } : t)) : [...p.tabs, { deck: ref.deck, page: ref.page }];
+      return { ...p, open: true, tabs, active: ref.deck };
+    });
+  }, []);
+  const activeTab = panel.open ? panel.tabs.find((t) => t.deck === panel.active) ?? null : null;
+  const panelApi = useMemo(
+    () => ({ show: showSlide, current: activeTab ? { deck: activeTab.deck, page: activeTab.page } : null }),
+    [showSlide, activeTab],
+  );
+  const panelOpen = panel.open && panel.tabs.length > 0;
+  const allDecks = useMemo(() => {
+    const set = new Set(decks);
+    for (const t of panel.tabs) set.add(t.deck);
+    return [...set];
+  }, [decks, panel.tabs]);
+
   // The chapter bar is the top of the reading area. Once it is stuck, nothing
   // should scroll above it — the guide's title and its long preamble are read
   // once, and jumping back to them on every tab or outline click loses the
@@ -260,11 +318,29 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
   // right. Navigation on both flanks is what lets the prose stay a comfortable
   // width without leaving the page half empty — the problem a single centred
   // column had.
+  const slidePanel = panelOpen ? (
+    <aside className="sticky top-6 hidden h-[calc(100dvh-3rem)] min-h-0 lg:flex lg:flex-col">
+      <SlidePanel
+        moduleId={moduleId}
+        decks={allDecks}
+        tabs={panel.tabs}
+        active={panel.active}
+        mode={panel.mode}
+        onTabs={(tabs, active) => setPanel((p) => ({ ...p, tabs, active, open: tabs.length > 0 }))}
+        onMode={(mode) => setPanel((p) => ({ ...p, mode }))}
+        onClose={() => setPanel((p) => ({ ...p, open: false }))}
+      />
+    </aside>
+  ) : null;
+
   if (chapters.length === 0) {
     return (
-      <div className="w-full">
-        <Body markdown={markdown} moduleId={moduleId} />
-      </div>
+      <SlidePanelContext.Provider value={panelApi}>
+        <div className={`w-full ${panelOpen ? "lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,40rem)] lg:items-start lg:gap-10" : ""}`}>
+          <Body markdown={markdown} moduleId={moduleId} />
+          {slidePanel}
+        </div>
+      </SlidePanelContext.Provider>
     );
   }
 
@@ -319,12 +395,30 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
     </nav>
   );
 
+  // With the panel open the flanking navigation gives way: the section
+  // outline goes, and the chapter list only stays on very wide screens — a
+  // select above the prose takes its place elsewhere.
+  const grid = panelOpen
+    ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,40rem)] lg:gap-10 2xl:grid-cols-[15rem_minmax(0,1fr)_minmax(0,40rem)]"
+    : "lg:grid-cols-[15rem_minmax(0,1fr)_13.75rem] lg:gap-12";
+
   return (
-    <div className="w-full lg:grid lg:grid-cols-[15rem_minmax(0,1fr)_13.75rem] lg:items-start lg:gap-12">
-      {chapterNav}
+    <SlidePanelContext.Provider value={panelApi}>
+    <div className={`w-full lg:grid lg:items-start ${grid}`}>
+      <div className={panelOpen ? "hidden 2xl:block" : "contents"}>{chapterNav}</div>
 
       <div className="min-w-0">
         <div ref={tabsAnchor} aria-hidden className="h-0" />
+        {panelOpen && (
+          <label className="mb-4 flex items-center gap-2 text-[13px] text-ink-2 2xl:hidden">
+            <span>Chapter</span>
+            <select value={active} onChange={(e) => selectChapter(Number(e.target.value))} className="h-8 rounded-md border border-line-2 bg-panel px-2 text-[13px] text-ink">
+              {chapters.map((c, i) => (
+                <option key={c.label} value={i}>{i + 1}. {c.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
         {preamble && (
           <div className="mb-10">
             <Body markdown={preamble} moduleId={moduleId} />
@@ -336,7 +430,8 @@ export function StudyGuide({ markdown, moduleId }: { markdown: string; moduleId:
         <Body markdown={chapters[active].markdown} moduleId={moduleId} />
       </div>
 
-      {sectionNav}
+      {panelOpen ? slidePanel : sectionNav}
     </div>
+    </SlidePanelContext.Provider>
   );
 }

@@ -1,6 +1,6 @@
 import { and, asc, eq, desc, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { components, files, guideRuns, items, modules, studyGuides, users, type FileCategory, type FileCategorySource } from "./schema";
+import { components, files, guideRuns, items, modules, slideNotes, studyGuides, users, type FileCategory, type FileCategorySource } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 import type { MailItem } from "../connectors/graph/normalize";
 import { decrypt, encrypt } from "../lib/crypto";
@@ -394,4 +394,42 @@ export function listStudyGuides(db: Db, userId: number): StudyGuideSummary[] {
     .where(eq(modules.userId, userId))
     .orderBy(desc(studyGuides.generatedAt))
     .all();
+}
+
+// --- Slide notes -----------------------------------------------------------
+
+export function getSlideNote(db: Db, userId: number, moduleId: number, deck: string, page: number) {
+  return db
+    .select()
+    .from(slideNotes)
+    .where(and(eq(slideNotes.userId, userId), eq(slideNotes.moduleId, moduleId), eq(slideNotes.deck, deck), eq(slideNotes.page, page)))
+    .get();
+}
+
+/** Every note this user has in a module, as a map key "deck#page" → markdown. Cheap: notes are short and few. */
+export function listSlideNotes(db: Db, userId: number, moduleId: number) {
+  return db
+    .select({ deck: slideNotes.deck, page: slideNotes.page, markdown: slideNotes.markdown, updatedAt: slideNotes.updatedAt })
+    .from(slideNotes)
+    .where(and(eq(slideNotes.userId, userId), eq(slideNotes.moduleId, moduleId)))
+    .orderBy(asc(slideNotes.deck), asc(slideNotes.page))
+    .all();
+}
+
+// Saving whitespace deletes the row: a note that says nothing should not
+// mark the slide as annotated.
+export function upsertSlideNote(db: Db, userId: number, moduleId: number, deck: string, page: number, markdown: string, now: number): void {
+  if (markdown.trim() === "") {
+    db.delete(slideNotes)
+      .where(and(eq(slideNotes.userId, userId), eq(slideNotes.moduleId, moduleId), eq(slideNotes.deck, deck), eq(slideNotes.page, page)))
+      .run();
+    return;
+  }
+  db.insert(slideNotes)
+    .values({ userId, moduleId, deck, page, markdown, updatedAt: now })
+    .onConflictDoUpdate({
+      target: [slideNotes.userId, slideNotes.moduleId, slideNotes.deck, slideNotes.page],
+      set: { markdown, updatedAt: now },
+    })
+    .run();
 }

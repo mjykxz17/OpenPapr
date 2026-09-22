@@ -132,6 +132,20 @@ export const guideRuns = sqliteTable("guide_runs", {
   sectionsDone: integer("sections_done").notNull().default(0),
 });
 
+// A student's own note on one page of one deck. Keyed by the deck's filename
+// stem (what slide citations use) rather than the files row, so a note
+// survives the deck being re-uploaded to Canvas under a new file id. An empty
+// note is deleted, never stored.
+export const slideNotes = sqliteTable("slide_notes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  deck: text("deck").notNull(),
+  page: integer("page").notNull(),
+  markdown: text("markdown").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (t) => [uniqueIndex("slide_notes_slide").on(t.userId, t.moduleId, t.deck, t.page)]);
+
 export const syncRuns = sqliteTable("sync_runs", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull(),
