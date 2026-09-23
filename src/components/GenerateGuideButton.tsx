@@ -12,7 +12,23 @@ type Status = {
   sectionsTotal?: number;
   sectionsDone?: number;
   error?: string | null;
+  finishedAt?: number | null;
 };
+
+// How long the outcome of a finished run stays on screen. The route reports
+// the module's latest run however old it is, so without a limit a failure
+// from weeks ago (made under an older setup, with wording since retired)
+// sat beside the button for good.
+const OUTCOME_SHOWN_MS = 15 * 60_000;
+
+// Whether to show a finished run's message. A failure only matters while it
+// is news: it happened just now, or here after pressing the button. A
+// "no provider" failure is moot once a provider exists.
+export function showOutcome(s: Status, now: number, startedHere: boolean, canGenerate: boolean): boolean {
+  if (!s.error || (s.state !== "failed" && s.state !== "done")) return false;
+  if (s.state === "failed" && canGenerate && /(llm|ai) provider/i.test(s.error)) return false;
+  return startedHere || (s.finishedAt != null && now - s.finishedAt < OUTCOME_SHOWN_MS);
+}
 
 export type GuideCandidate = {
   id: number;
@@ -58,10 +74,14 @@ export function GenerateGuideButton({ moduleId, hasGuide, canGenerate = true, ca
   }, [poll]);
 
   const [open, setOpen] = useState(false);
+  const [startedHere, setStartedHere] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
 
   async function start(choice?: { fileIds: number[]; mode: "replace" | "merge" }) {
     setStarting(true);
     setOpen(false);
+    setStartedHere(true);
+    setDismissed(false);
     try {
       const res = await fetch(`/api/modules/${moduleId}/guide`, choice
         ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(choice) }
@@ -122,12 +142,12 @@ export function GenerateGuideButton({ moduleId, hasGuide, canGenerate = true, ca
         />
       )}
 
-      {status.state === "failed" && status.error && (
-        <span className="text-[13px] text-danger">{status.error}</span>
-      )}
-      {status.state === "done" && status.error && (
-        // Generation succeeded but the validator had notes worth showing.
-        <span className="text-[13px] text-warn-ink">{status.error}</span>
+      {!dismissed && showOutcome(status, Date.now(), startedHere, canGenerate) && (
+        <span className={`inline-flex items-baseline gap-1.5 text-[13px] ${status.state === "failed" ? "text-danger" : "text-warn-ink"}`}>
+          {/* A finished run can still carry the validator's notes. */}
+          {status.state === "failed" ? `Last run failed: ${status.error}` : status.error}
+          <button type="button" onClick={() => setDismissed(true)} aria-label="Dismiss" className="text-ink-3 hover:text-ink">×</button>
+        </span>
       )}
     </div>
   );
