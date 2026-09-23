@@ -3,7 +3,7 @@ import { requireUserId } from "@/server/session";
 import { getUser } from "@/db/repo";
 import { loadEnv } from "@/lib/env";
 import { decrypt } from "@/lib/crypto";
-import { secretHint, sharedLlmConfig, userLlmConfig } from "@/lib/llm-provider";
+import { secretHint, sharedLlmConfig, userLlmSlot } from "@/lib/llm-provider";
 import { AppShell } from "@/components/AppShell";
 import { AccountSettings } from "@/components/AccountSettings";
 import { userProfileView } from "@/server/profiles";
@@ -24,7 +24,9 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
   if (user.canvasTokenEnc) {
     try { canvasHint = secretHint(decrypt(user.canvasTokenEnc, env.SECRET_KEY)); } catch { canvasHint = null; }
   }
-  const own = userLlmConfig(user, env.SECRET_KEY);
+  const own = userLlmSlot(user, "primary", env.SECRET_KEY);
+  const fb = userLlmSlot(user, "fallback", env.SECRET_KEY);
+  const view = (c: typeof own) => (c ? { baseUrl: c.baseUrl, model: c.model, keyHint: secretHint(c.apiKey), rpm: c.rpm ?? null } : null);
   const shared = sharedLlmConfig(env);
   const sharedModel = shared?.model ?? (env.ANTHROPIC_API_KEY ? env.ANTHROPIC_MODEL : null);
   const about = { ...userProfileView(getDb(), userId), hasModel: canGenerateGuides(getDb(), userId) };
@@ -44,7 +46,8 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
           verifiedAt: user.canvasVerifiedAt ?? null,
           failedAt: user.canvasTokenFailedAt ?? null,
         }}
-        llm={own ? { baseUrl: own.baseUrl, model: own.model, keyHint: secretHint(own.apiKey) } : null}
+        llm={view(own)}
+        fallback={view(fb)}
         sharedModel={sharedModel}
         signIn={{ username: user.username ?? null, hasPassword: Boolean(user.passwordHash) }}
         about={about}

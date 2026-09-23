@@ -35,6 +35,15 @@ export const users = sqliteTable("users", {
   llmBaseUrl: text("llm_base_url"),
   llmModel: text("llm_model"),
   llmKeyEnc: text("llm_key_enc"),
+  // Requests per minute the student's plan allows on that key; null = no cap.
+  // Calls beyond it wait in a queue instead of failing with 429.
+  llmRpm: integer("llm_rpm"),
+  // A second provider, tried when the first fails (down, rate-limited, out of
+  // credit, key revoked). Same shape, same encryption.
+  llmFallbackBaseUrl: text("llm_fallback_base_url"),
+  llmFallbackModel: text("llm_fallback_model"),
+  llmFallbackKeyEnc: text("llm_fallback_key_enc"),
+  llmFallbackRpm: integer("llm_fallback_rpm"),
   // --- the student profile ---------------------------------------------
   // What the student tells us (major, year) and what OpenPapr derives from
   // their courses and notes. Derived JSON is shown to them on Account and can

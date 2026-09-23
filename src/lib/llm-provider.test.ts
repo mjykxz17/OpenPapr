@@ -49,7 +49,7 @@ describe("presetFor", () => {
 describe("userLlmConfig", () => {
   it("decrypts a saved provider", () => {
     const row = { llmBaseUrl: "https://api.openai.com/v1", llmModel: "m", llmKeyEnc: encrypt("sk-1", KEY) };
-    expect(userLlmConfig(row, KEY)).toEqual({ baseUrl: "https://api.openai.com/v1", model: "m", apiKey: "sk-1" });
+    expect(userLlmConfig(row, KEY)).toEqual({ baseUrl: "https://api.openai.com/v1", model: "m", apiKey: "sk-1", rpm: null });
   });
   it("is null when any part is missing", () => {
     expect(userLlmConfig({ llmBaseUrl: "https://x.dev", llmModel: null, llmKeyEnc: encrypt("k", KEY) }, KEY)).toBeNull();
@@ -64,7 +64,7 @@ describe("sharedLlmConfig", () => {
   it("needs both the URL and the key", () => {
     expect(sharedLlmConfig({ OPENAI_COMPAT_MODEL: "m", OPENAI_COMPAT_BASE_URL: "https://x.dev" })).toBeNull();
     expect(sharedLlmConfig({ OPENAI_COMPAT_MODEL: "m", OPENAI_COMPAT_BASE_URL: "https://x.dev", OPENAI_COMPAT_API_KEY: "k" }))
-      .toEqual({ baseUrl: "https://x.dev", apiKey: "k", model: "m" });
+      .toEqual({ baseUrl: "https://x.dev", apiKey: "k", model: "m", rpm: null });
   });
 });
 

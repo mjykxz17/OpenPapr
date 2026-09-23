@@ -4,6 +4,7 @@ import { files, modules } from "../db/schema";
 import type { CanvasClient } from "../connectors/canvas/client";
 import { extractPdfText } from "../lib/pdf-text";
 import { citeDeck } from "../lib/slide-citation";
+import { modelsServed, startServedLog } from "./openai-compat";
 import { createGuideGenerator, figureSlides, selectGuideDecks, validateChapter, type CompatConfig } from "./study-guide-deps";
 
 export type GuideProgress = {
@@ -42,6 +43,7 @@ export async function generateModuleGuide(opts: {
 }): Promise<GuideResult> {
   const { db, canvas, cfg, moduleId, onProgress } = opts;
   const gen = createGuideGenerator(cfg, opts.reader ?? null);
+  startServedLog(cfg);
   const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get();
   if (!mod) throw new Error(`no module ${moduleId}`);
 
@@ -150,7 +152,7 @@ export async function generateModuleGuide(opts: {
 
   return {
     markdown: [preamble, ...chapters].join("\n\n"),
-    sourceNote: `${used.length} deck${used.length === 1 ? "" : "s"}, generated with ${cfg.model}`,
+    sourceNote: `${used.length} deck${used.length === 1 ? "" : "s"}, generated with ${(modelsServed(cfg).length ? modelsServed(cfg) : [cfg.model]).join(" + ")}`,
     problems,
     decks: used,
   };

@@ -30,6 +30,7 @@ import { readFileSync } from "node:fs";
 import { ensurePdf } from "../server/files";
 import { dirname, join } from "node:path";
 import { backfillOptimize, evictCaches, pruneSyncRuns, writeHeartbeat } from "./maintenance";
+import { setWaitListener } from "../lib/rate-gate";
 import { getStudyGuide } from "../db/repo";
 import { assembleGuide, mergeChapters, splitChapters } from "../lib/guide-chapters";
 import { ModuleProfile, UserProfile, WritingStyle, readerBrief } from "../enrich/profiles";
@@ -89,7 +90,8 @@ function kitFor(userId: number): LlmKit {
   const user = db.select().from(users).where(eq(users.id, userId)).get();
   const own = user ? userLlmConfig(user, env.SECRET_KEY) : null;
   if (!own) { userKits.delete(userId); return sharedKit; }
-  const sig = `${own.baseUrl}\n${own.model}\n${user!.llmKeyEnc}`;
+  // Any change in Account — key, model, RPM or fallback — makes a new kit.
+  const sig = JSON.stringify([own.baseUrl, own.model, own.rpm, user!.llmKeyEnc, own.fallback?.baseUrl, own.fallback?.model, own.fallback?.rpm, user!.llmFallbackKeyEnc]);
   const hit = userKits.get(userId);
   if (hit && hit.sig === sig) return hit.kit;
   const kit = compatKit(own);
@@ -429,7 +431,7 @@ async function runGuideJob(): Promise<void> {
       const old = splitChapters(previous.markdown);
       const merged = mergeChapters(old.chapters, fresh.chapters);
       markdown = assembleGuide(old.preamble || fresh.preamble, merged);
-      sourceNote = `${merged.length} chapter${merged.length === 1 ? "" : "s"}; ${result.decks.length} updated with ${compatCfg.model}`;
+      sourceNote = `${merged.length} chapter${merged.length === 1 ? "" : "s"}; ${result.decks.length} updated — ${result.sourceNote.replace(/^.*generated with /, "with ")}`;
     }
     upsertStudyGuide(db, run.moduleId, markdown, sourceNote, Date.now());
     updateGuideRun(db, run.id, {
@@ -497,6 +499,8 @@ function beat(): void {
   writeHeartbeat(HEARTBEAT, lastBeat);
 }
 const STUCK_MS = 20 * 60_000;
+// Waiting in a provider's RPM queue is progress, not a hang.
+setWaitListener(() => beat());
 setInterval(() => {
   if (Date.now() - lastBeat > STUCK_MS) {
     console.error(`worker made no progress for ${Math.round((Date.now() - lastBeat) / 60_000)} min — exiting so it restarts`);

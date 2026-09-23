@@ -35,26 +35,46 @@ export function secretHint(secret: string): string {
   return s.length <= 8 ? "••••" : `••••${s.slice(-4)}`;
 }
 
-type UserLlmColumns = { llmBaseUrl: string | null; llmModel: string | null; llmKeyEnc: string | null };
+type UserLlmColumns = {
+  llmBaseUrl: string | null; llmModel: string | null; llmKeyEnc: string | null; llmRpm?: number | null;
+  llmFallbackBaseUrl?: string | null; llmFallbackModel?: string | null; llmFallbackKeyEnc?: string | null; llmFallbackRpm?: number | null;
+};
 
-// The student's own provider, or null when they have not set one (or it can
-// no longer be decrypted, which only happens if SECRET_KEY was rotated).
-export function userLlmConfig(user: UserLlmColumns, secretHex: string): CompatConfig | null {
-  if (!user.llmBaseUrl || !user.llmModel || !user.llmKeyEnc) return null;
+function provider(baseUrl: string | null | undefined, model: string | null | undefined, keyEnc: string | null | undefined, rpm: number | null | undefined, secretHex: string): CompatConfig | null {
+  if (!baseUrl || !model || !keyEnc) return null;
   try {
-    return { baseUrl: user.llmBaseUrl, model: user.llmModel, apiKey: decrypt(user.llmKeyEnc, secretHex) };
+    return { baseUrl, model, apiKey: decrypt(keyEnc, secretHex), rpm: rpm ?? null };
   } catch {
     return null;
   }
 }
 
-type SharedLlmEnv = { OPENAI_COMPAT_BASE_URL?: string; OPENAI_COMPAT_API_KEY?: string; OPENAI_COMPAT_MODEL: string };
+// The student's own provider with its fallback attached, or null when they
+// have not set one (or it can no longer be decrypted, which only happens if
+// SECRET_KEY was rotated). A fallback without a primary stands in as primary.
+export function userLlmConfig(user: UserLlmColumns, secretHex: string): CompatConfig | null {
+  const primary = provider(user.llmBaseUrl, user.llmModel, user.llmKeyEnc, user.llmRpm, secretHex);
+  const fallback = provider(user.llmFallbackBaseUrl, user.llmFallbackModel, user.llmFallbackKeyEnc, user.llmFallbackRpm, secretHex);
+  if (!primary) return fallback;
+  return fallback ? { ...primary, fallback } : primary;
+}
+
+// Just one slot, for the account page and for "leave the key blank to keep".
+export function userLlmSlot(user: UserLlmColumns, slot: "primary" | "fallback", secretHex: string): CompatConfig | null {
+  return slot === "primary"
+    ? provider(user.llmBaseUrl, user.llmModel, user.llmKeyEnc, user.llmRpm, secretHex)
+    : provider(user.llmFallbackBaseUrl, user.llmFallbackModel, user.llmFallbackKeyEnc, user.llmFallbackRpm, secretHex);
+}
+
+type SharedLlmEnv = { OPENAI_COMPAT_BASE_URL?: string; OPENAI_COMPAT_API_KEY?: string; OPENAI_COMPAT_MODEL: string; OPENAI_COMPAT_RPM?: number };
 
 export function sharedLlmConfig(env: SharedLlmEnv): CompatConfig | null {
   return env.OPENAI_COMPAT_BASE_URL && env.OPENAI_COMPAT_API_KEY
-    ? { baseUrl: env.OPENAI_COMPAT_BASE_URL, apiKey: env.OPENAI_COMPAT_API_KEY, model: env.OPENAI_COMPAT_MODEL }
+    ? { baseUrl: env.OPENAI_COMPAT_BASE_URL, apiKey: env.OPENAI_COMPAT_API_KEY, model: env.OPENAI_COMPAT_MODEL, rpm: env.OPENAI_COMPAT_RPM ?? null }
     : null;
 }
+
+export const RPM_MAX = 100_000;
 
 // OpenAI's newer models refuse max_tokens and any non-default temperature;
 // everyone else still expects max_tokens. Only OpenAI's own host gets the

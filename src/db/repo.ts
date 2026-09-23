@@ -140,15 +140,25 @@ export function recordCanvasTokenCheck(db: Db, userId: number, ok: boolean, now:
     .where(eq(users.id, userId)).run();
 }
 
+export type LlmSlot = "primary" | "fallback";
+
 export function setLlmProvider(
-  db: Db, userId: number, cfg: { baseUrl: string; model: string; apiKey: string }, secretHex: string,
+  db: Db, userId: number, cfg: { baseUrl: string; model: string; apiKey: string; rpm?: number | null }, secretHex: string,
+  slot: LlmSlot = "primary",
 ): void {
-  db.update(users).set({ llmBaseUrl: cfg.baseUrl, llmModel: cfg.model, llmKeyEnc: encrypt(cfg.apiKey, secretHex) })
+  const keyEnc = encrypt(cfg.apiKey, secretHex);
+  const rpm = cfg.rpm ?? null;
+  db.update(users).set(slot === "primary"
+    ? { llmBaseUrl: cfg.baseUrl, llmModel: cfg.model, llmKeyEnc: keyEnc, llmRpm: rpm }
+    : { llmFallbackBaseUrl: cfg.baseUrl, llmFallbackModel: cfg.model, llmFallbackKeyEnc: keyEnc, llmFallbackRpm: rpm })
     .where(eq(users.id, userId)).run();
 }
 
-export function clearLlmProvider(db: Db, userId: number): void {
-  db.update(users).set({ llmBaseUrl: null, llmModel: null, llmKeyEnc: null }).where(eq(users.id, userId)).run();
+export function clearLlmProvider(db: Db, userId: number, slot: LlmSlot = "primary"): void {
+  db.update(users).set(slot === "primary"
+    ? { llmBaseUrl: null, llmModel: null, llmKeyEnc: null, llmRpm: null }
+    : { llmFallbackBaseUrl: null, llmFallbackModel: null, llmFallbackKeyEnc: null, llmFallbackRpm: null })
+    .where(eq(users.id, userId)).run();
 }
 
 export function getUser(db: Db, userId: number) {
