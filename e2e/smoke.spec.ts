@@ -70,7 +70,9 @@ test("a session reaches the dashboard, modules, reminders and mail", async ({ pa
   // The guide has its own page; the demo module has none yet, so it offers
   // to generate one and links back to the overview.
   await page.goto("/modules/2/guide");
-  await expect(page.getByRole("button", { name: /generate study guide/i })).toBeVisible();
+  // Without an AI provider the button is replaced by a link to add a key.
+  await expect(page.getByRole("button", { name: /generate study guide/i })
+    .or(page.getByRole("link", { name: /add an ai key/i }))).toBeVisible();
   await expect(page.getByRole("link", { name: /overview/i })).toHaveAttribute("href", "/modules/2");
 
   await page.goto("/reminders");

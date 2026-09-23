@@ -200,13 +200,23 @@ export function latestGuideRun(db: Db, moduleId: number) {
 }
 
 // A run whose worker died would otherwise pin the module forever.
-export function failStaleGuideRuns(db: Db, now: number, maxAgeMs = 30 * 60_000): void {
-  for (const r of db.select().from(guideRuns).where(isNull(guideRuns.finishedAt)).all()) {
-    if (now - (r.startedAt ?? r.requestedAt) < maxAgeMs) continue;
+// Queued runs nobody picked up for a day are given up on.
+export function failStaleGuideRuns(db: Db, now: number, maxAgeMs = 24 * 3_600_000): void {
+  for (const r of db.select().from(guideRuns).where(and(isNull(guideRuns.finishedAt), isNull(guideRuns.startedAt))).all()) {
+    if (now - r.requestedAt < maxAgeMs) continue;
     db.update(guideRuns)
       .set({ finishedAt: now, ok: false, error: "timed out", stage: "Timed out" })
       .where(eq(guideRuns.id, r.id)).run();
   }
+}
+
+// Runs started by a worker that has since died (a deploy, a crash). Called
+// only when this worker has no generation running, so every started,
+// unfinished run is one nobody is working on.
+export function failOrphanedGuideRuns(db: Db, now: number): void {
+  db.update(guideRuns)
+    .set({ finishedAt: now, ok: false, error: "interrupted — the server restarted; generate again", stage: "Interrupted" })
+    .where(and(isNull(guideRuns.finishedAt), isNotNull(guideRuns.startedAt))).run();
 }
 
 // "Sync now" from the web process. The worker has no inbox, so the request is

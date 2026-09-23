@@ -4,7 +4,7 @@ import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
 import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, selectRequestedUsers, takeSyncRequest, upsertModuleFiles, type DiscoveredFile,
-  claimNextGuideRun, updateGuideRun, failStaleGuideRuns, upsertStudyGuide, setModuleActivity, shouldAttemptWeightage, upsertMailItems, recordCanvasTokenCheck } from "../db/repo";
+  claimNextGuideRun, updateGuideRun, failStaleGuideRuns, failOrphanedGuideRuns, upsertStudyGuide, setModuleActivity, shouldAttemptWeightage, upsertMailItems, recordCanvasTokenCheck } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient, isPdfFile, type CanvasClient } from "../connectors/canvas/client";
@@ -12,7 +12,7 @@ import { extractCanvasFileLinks, type FileLinkSource } from "../lib/canvas-file-
 import { categorizeModuleFiles, createCompatFileCategorizer } from "../enrich/file-category";
 import { generateModuleGuide } from "../enrich/generate-guide";
 import { normalizeCanvasCourse } from "../connectors/canvas/normalize";
-import { fetchInboxDelta } from "../connectors/graph/client";
+import { DeltaExpiredError, fetchInboxDelta } from "../connectors/graph/client";
 import { refreshAccessToken } from "../connectors/graph/auth";
 import { linkMailToModule, normalizeMail } from "../connectors/graph/normalize";
 import { triageEmail } from "../enrich/rules";
@@ -28,6 +28,8 @@ import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type P
 import { getModuleProfileRow } from "../db/profiles-repo";
 import { readFileSync } from "node:fs";
 import { ensurePdf } from "../server/files";
+import { dirname, join } from "node:path";
+import { evictCaches, pruneSyncRuns, writeHeartbeat } from "./maintenance";
 import { getStudyGuide } from "../db/repo";
 import { assembleGuide, mergeChapters, splitChapters } from "../lib/guide-chapters";
 import { ModuleProfile, UserProfile, WritingStyle, readerBrief } from "../enrich/profiles";
@@ -70,7 +72,7 @@ function compatKit(cfg: CompatConfig): LlmKit {
 }
 
 const sharedCfg = sharedLlmConfig(env);
-const anthropic = !sharedCfg && env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY }) : null;
+const anthropic = !sharedCfg && env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, timeout: 120_000, maxRetries: 1 }) : null;
 const sharedKit: LlmKit = sharedCfg ? compatKit(sharedCfg) : {
   compatCfg: null,
   scorer: anthropic ? createScorer(anthropic, env.ANTHROPIC_MODEL) : null,
@@ -243,7 +245,18 @@ async function mailSync(userId: number): Promise<void> {
   const user = db.select().from(users).where(eq(users.id, userId)).get()!;
   if (!user.msRefreshTokenEnc || !env.MS_CLIENT_ID) return;
   const { accessToken, refreshToken } = await refreshAccessToken(env.MS_CLIENT_ID, decrypt(user.msRefreshTokenEnc, env.SECRET_KEY));
-  const { messages, deltaLink } = await fetchInboxDelta(accessToken, user.msDeltaLink);
+  // Microsoft rotates the refresh token on every use; keep the new one now,
+  // or a failure below would leave only the spent one stored.
+  db.update(users).set({ msRefreshTokenEnc: encrypt(refreshToken, env.SECRET_KEY) }).where(eq(users.id, userId)).run();
+  let delta: Awaited<ReturnType<typeof fetchInboxDelta>>;
+  try {
+    delta = await fetchInboxDelta(accessToken, user.msDeltaLink);
+  } catch (err) {
+    if (!(err instanceof DeltaExpiredError)) throw err;
+    // An expired delta link would fail forever; start a fresh delta.
+    delta = await fetchInboxDelta(accessToken, null);
+  }
+  const { messages, deltaLink } = delta;
   const byCode = new Map(db.select().from(modules).where(eq(modules.userId, userId)).all().map((m) => [m.code, m.id]));
   upsertMailItems(db, userId, messages.filter((m) => m.id).map((m) => linkMailToModule(normalizeMail(m), byCode)), Date.now());
   db.update(users).set({ msDeltaLink: deltaLink, msRefreshTokenEnc: encrypt(refreshToken, env.SECRET_KEY) })
@@ -350,6 +363,7 @@ const guardedProfiles = profileGuard("profiles", async (userId: number) => {
 });
 
 async function runFor(userId: number): Promise<void> {
+  beat();
   markSyncStarted(db, userId, Date.now());
   await runUserSync(deps, userId);
   await guardedProfiles(userId).catch(() => {});
@@ -364,7 +378,10 @@ function parseJson<T>(schema: { safeParse: (v: unknown) => { success: boolean; d
 // minutes, so it runs after the fast paths and writes progress as it goes for
 // the module page to poll.
 async function runGuideJob(): Promise<void> {
+  // Only called when no generation is running in this process, so any run
+  // marked started but unfinished belongs to a worker that died mid-way.
   failStaleGuideRuns(db, Date.now());
+  failOrphanedGuideRuns(db, Date.now());
   const run = claimNextGuideRun(db, Date.now());
   if (!run) return;
 
@@ -452,11 +469,60 @@ async function tick(): Promise<void> {
       profileGuard.resetUser(userId);
       await guardedProfiles(userId).catch(() => {});
     }
-    await runGuideJob();
+    // Generation takes minutes; it runs beside the tick rather than inside
+    // it, so "Sync now" and everyone's syncs keep flowing meanwhile.
+    if (!guideJob) guideJob = runGuideJob().catch((err) => console.error("guide job crashed", err)).finally(() => { guideJob = null; });
+    if (now - lastMaintenanceAt >= MAINTENANCE_MS) {
+      lastMaintenanceAt = now;
+      maintenance();
+    }
   } catch (err) {
     console.error("worker tick failed", err);
   }
+  beat();
   setTimeout(tick, TICK_MS);
 }
+
+let guideJob: Promise<void> | null = null;
+
+// --- liveness --------------------------------------------------------------
+// The heartbeat file tells the web server (and /api/health) the worker is
+// alive. The watchdog covers the failure a heartbeat cannot fix by itself: a
+// tick stuck on something that never returns. It exits, and start.sh starts
+// a fresh worker.
+const HEARTBEAT = join(dirname(env.DATABASE_PATH), "worker-heartbeat");
+let lastBeat = Date.now();
+function beat(): void {
+  lastBeat = Date.now();
+  writeHeartbeat(HEARTBEAT, lastBeat);
+}
+const STUCK_MS = 20 * 60_000;
+setInterval(() => {
+  if (Date.now() - lastBeat > STUCK_MS) {
+    console.error(`worker made no progress for ${Math.round((Date.now() - lastBeat) / 60_000)} min — exiting so it restarts`);
+    process.exit(1);
+  }
+}, 60_000).unref();
+
+// --- housekeeping ------------------------------------------------------------
+const MAINTENANCE_MS = 6 * 3_600_000;
+const CACHE_LIMIT_BYTES = 1_500_000_000;
+let lastMaintenanceAt = Date.now() - MAINTENANCE_MS + 5 * 60_000; // first run 5 min after start
+function maintenance(): void {
+  try {
+    const dir = dirname(env.DATABASE_PATH);
+    const pruned = pruneSyncRuns(db, Date.now());
+    const cache = evictCaches([join(dir, "deck-cache"), join(dir, "file-cache")], CACHE_LIMIT_BYTES);
+    console.log(`maintenance: pruned ${pruned} sync runs; cache ${(cache.total / 1e6).toFixed(0)} MB, evicted ${cache.removed} file(s)`);
+  } catch (err) {
+    console.error("maintenance failed", err);
+  }
+}
+
+// A crash anywhere async must not leave a zombie worker that looks alive.
+process.on("unhandledRejection", (err) => { console.error("unhandled rejection in worker", err); });
+process.on("uncaughtException", (err) => { console.error("uncaught exception in worker — exiting", err); process.exit(1); });
+
 console.log("openpapr worker starting");
+beat();
 void tick();

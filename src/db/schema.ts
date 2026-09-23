@@ -1,4 +1,4 @@
-import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -186,7 +186,8 @@ export const syncRuns = sqliteTable("sync_runs", {
   finishedAt: integer("finished_at"),
   ok: integer("ok", { mode: "boolean" }),
   error: text("error"),
-});
+// Every page load and sync poll asks for a user's latest runs per source.
+}, (t) => [index("sync_runs_user_source").on(t.userId, t.source, t.id), index("sync_runs_started").on(t.startedAt)]);
 
 // Every Canvas course the student is or was enrolled in — the record of what
 // they have already studied, which module profiles use to say what a new

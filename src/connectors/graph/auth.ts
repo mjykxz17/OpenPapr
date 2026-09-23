@@ -21,7 +21,8 @@ export type DeviceCodePoll =
 // code flow needs no redirect URI, which is why it works from a web UI without
 // registering one in the app registration.
 export async function startDeviceCode(clientId: string, fetchFn: typeof fetch = fetch): Promise<DeviceCodeStart> {
-  const res = await fetchFn(DEVICE_URL, { method: "POST", body: new URLSearchParams({ client_id: clientId, scope: SCOPE }) });
+  const res = await fetchFn(DEVICE_URL, {
+    signal: AbortSignal.timeout(30_000), method: "POST", body: new URLSearchParams({ client_id: clientId, scope: SCOPE }) });
   const dc = (await res.json()) as {
     device_code?: string; user_code?: string; verification_uri?: string;
     interval?: number; expires_in?: number; error?: string; error_description?: string;
@@ -40,6 +41,7 @@ export async function startDeviceCode(clientId: string, fetchFn: typeof fetch = 
 
 export async function pollDeviceCode(clientId: string, deviceCode: string, fetchFn: typeof fetch = fetch): Promise<DeviceCodePoll> {
   const res = await fetchFn(TOKEN_URL, {
+    signal: AbortSignal.timeout(30_000),
     method: "POST",
     body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:device_code", client_id: clientId, device_code: deviceCode }),
   });
@@ -65,6 +67,7 @@ export async function runDeviceCodeFlow(clientId: string, onCode: (info: DeviceC
 
 export async function refreshAccessToken(clientId: string, refreshToken: string, fetchFn: typeof fetch = fetch) {
   const res = await fetchFn(TOKEN_URL, {
+    signal: AbortSignal.timeout(30_000),
     method: "POST",
     body: new URLSearchParams({ grant_type: "refresh_token", client_id: clientId, refresh_token: refreshToken, scope: SCOPE }),
   });

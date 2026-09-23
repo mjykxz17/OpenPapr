@@ -1,3 +1,4 @@
+import { streamToFile } from "../../server/io";
 import type {
   CanvasAnnouncement, CanvasAssignmentGroup, CanvasCalendarEvent,
   CanvasCourse, CanvasFile, CanvasPage, CanvasSelf,
@@ -12,6 +13,12 @@ function nextLink(header: string | null): string | null {
   return null;
 }
 
+// Every Canvas call is bounded. The worker runs users one after another, so a
+// single connection that never answers would otherwise stall syncing for
+// everyone, silently.
+const JSON_TIMEOUT_MS = 30_000;
+const DOWNLOAD_TIMEOUT_MS = 180_000;
+
 export const isPdfFile = (f: CanvasFile): boolean =>
   f["content-type"] === "application/pdf" || /\.pdf$/i.test(f.display_name);
 
@@ -22,7 +29,7 @@ export function createCanvasClient(baseUrl: string, token: string, fetchFn: type
     let url: string | null = `${baseUrl}/api/v1${path}`;
     const out: T[] = [];
     while (url) {
-      const res: Response = await fetchFn(url, { headers });
+      const res: Response = await fetchFn(url, { headers, signal: AbortSignal.timeout(JSON_TIMEOUT_MS) });
       if (!res.ok) throw new Error(`Canvas ${res.status} on ${url}: ${await res.text()}`);
       out.push(...((await res.json()) as T[]));
       url = nextLink(res.headers.get("link"));
@@ -31,7 +38,7 @@ export function createCanvasClient(baseUrl: string, token: string, fetchFn: type
   }
 
   async function getOne<T>(path: string): Promise<T> {
-    const res = await fetchFn(`${baseUrl}/api/v1${path}`, { headers });
+    const res = await fetchFn(`${baseUrl}/api/v1${path}`, { headers, signal: AbortSignal.timeout(JSON_TIMEOUT_MS) });
     if (!res.ok) throw new Error(`Canvas ${res.status} on ${path}: ${await res.text()}`);
     return (await res.json()) as T;
   }
@@ -72,8 +79,14 @@ export function createCanvasClient(baseUrl: string, token: string, fetchFn: type
       getAllPages<{ id: number; name: string; short_name?: string }>(`/courses/${courseId}/users?enrollment_type[]=teacher&per_page=50`),
     listCourseFiles: (courseId: number) =>
       getAllPages<CanvasFile>(`/courses/${courseId}/files?per_page=100&sort=created_at`),
+    // Streams straight to disk; for anything that might be large.
+    downloadToFile: async (url: string, path: string, maxBytes: number) => {
+      const res = await fetchFn(url, { headers, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+      if (!res.ok || !res.body) throw new Error(`Canvas file ${res.status}`);
+      return streamToFile(res.body, path, maxBytes);
+    },
     downloadFile: async (url: string) => {
-      const res = await fetchFn(url, { headers });
+      const res = await fetchFn(url, { headers, signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
       if (!res.ok) throw new Error(`Canvas file ${res.status}`);
       return new Uint8Array(await res.arrayBuffer());
     },

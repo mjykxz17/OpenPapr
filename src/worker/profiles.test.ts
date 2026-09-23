@@ -197,3 +197,19 @@ describe("groundModuleProfile", () => {
     expect(g.lecturers).toEqual([{ name: "Dr A", background: null, emphasis: ["writing exploits"] }]);
   });
 });
+
+describe("course history from Canvas", () => {
+  it("skips courses Canvas closes to the student (no code or name) instead of failing", async () => {
+    const { db, deps } = setup();
+    deps.canvasFor = () => ({
+      listCourseHistory: async () => [
+        { id: 5, name: "Computer Networks", course_code: "CS2105", term: null, historyState: "completed" },
+        { id: 9, access_restricted_by_date: true, historyState: "completed" },
+      ],
+      listCourseTeachers: async () => [],
+    }) as unknown as CanvasClient;
+    const r = await refreshProfiles(deps, 1);
+    expect(r.errors.filter((e) => e.startsWith("history"))).toEqual([]);
+    expect(listCourseHistory(db, 1).map((h) => h.code)).toEqual(["CS2105"]);
+  });
+});

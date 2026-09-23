@@ -154,7 +154,10 @@ export async function refreshProfiles(deps: ProfileDeps, userId: number): Promis
     const canvas = deps.canvasFor(userId);
     if (canvas) {
       try {
-        const courses = await canvas.listCourseHistory();
+        // Courses closed to the student come back as a bare {id,
+        // access_restricted_by_date: true} with no code or name; they cannot
+        // say anything about what was studied, so they are skipped.
+        const courses = (await canvas.listCourseHistory()).filter((c) => c.course_code && c.name);
         upsertCourseHistory(db, userId, courses.map((c) => ({
           canvasCourseId: c.id, code: c.course_code, name: c.name, term: c.term?.name ?? null, state: c.historyState,
         })), now);

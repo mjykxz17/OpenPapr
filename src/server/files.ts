@@ -11,6 +11,7 @@ import { decrypt } from "@/lib/crypto";
 import { createCanvasClient } from "@/connectors/canvas/client";
 import { fileKind } from "@/lib/file-kind";
 import { deckCachePath } from "./deck";
+import { onceMap, TooLargeError, touch, writeAtomic } from "./io";
 
 // Every file a student opens is fetched from Canvas once and then served from
 // the volume. PDFs share the deck cache the study guide already uses, so a
@@ -31,27 +32,17 @@ export function ownedFile(db: Db, userId: number, moduleId: number, fileId: numb
 type Row = NonNullable<ReturnType<typeof ownedFile>>;
 export type Served = { path: string; size: number; mtimeMs: number } | { error: string; status: number };
 
-function writeAtomic(path: string, bytes: Uint8Array): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.${Date.now()}.part`;
-  writeFileSync(tmp, bytes);
-  renameSync(tmp, path);
-}
-
 const stat = (path: string): Served => {
   const s = statSync(path);
   return { path, size: s.size, mtimeMs: s.mtimeMs };
 };
 
 // Two tabs opening the same deck share one download rather than racing.
-const inflight = new Map<string, Promise<Served>>();
-function once(key: string, work: () => Promise<Served>): Promise<Served> {
-  const hit = inflight.get(key);
-  if (hit) return hit;
-  const p = work().finally(() => inflight.delete(key));
-  inflight.set(key, p);
-  return p;
-}
+const once = onceMap<Served>();
+
+// Past this the file is not proxied: a lecture recording that size is better
+// streamed by Canvas itself, and would crowd the cache.
+const MAX_PROXY_BYTES = 500_000_000;
 
 async function download(db: Db, userId: number, row: Row, target: string): Promise<Served> {
   const env = loadEnv();
@@ -61,9 +52,10 @@ async function download(db: Db, userId: number, row: Row, target: string): Promi
   try {
     // Download urls are signed and expire, so a fresh one is asked for each time.
     const fresh = await canvas.getFile(row.file.canvasFileId);
-    writeAtomic(target, await canvas.downloadFile(fresh.url));
+    await canvas.downloadToFile(fresh.url, target, MAX_PROXY_BYTES);
     return stat(target);
   } catch (err) {
+    if (err instanceof TooLargeError) return { error: "this file is too large to open here — use the Canvas link", status: 413 };
     const msg = String(err);
     if (/Canvas 40[13]/.test(msg)) return { error: "Canvas no longer lets this account open that file", status: 403 };
     if (/Canvas 404/.test(msg)) return { error: "that file has been removed from Canvas", status: 404 };
@@ -76,7 +68,10 @@ export function ensureOriginal(db: Db, userId: number, row: Row): Promise<Served
   const target = fileKind(row.file.displayName) === "pdf"
     ? deckCachePath(row.mod.canvasCourseId, row.file.displayName, dbPath())
     : originalCachePath(row.mod.canvasCourseId, row.file.canvasFileId);
-  if (existsSync(target)) return Promise.resolve(stat(target));
+  if (existsSync(target)) { touch(target); return Promise.resolve(stat(target)); }
+  if ((row.file.sizeBytes ?? 0) > MAX_PROXY_BYTES) {
+    return Promise.resolve({ error: "this file is too large to open here — use the Canvas link", status: 413 });
+  }
   return once(target, () => download(db, userId, row, target));
 }
 
@@ -127,7 +122,7 @@ export function ensurePdf(db: Db, userId: number, row: Row): Promise<Served> {
   if (kind !== "office") return Promise.resolve({ error: "no PDF form for this file", status: 415 });
 
   const target = deckCachePath(row.mod.canvasCourseId, row.file.displayName, dbPath());
-  if (existsSync(target)) return Promise.resolve(stat(target));
+  if (existsSync(target)) { touch(target); return Promise.resolve(stat(target)); }
   const bin = sofficeBin();
   if (!bin) return Promise.resolve({ error: "previews for this file type are not available on this server", status: 501 });
 
