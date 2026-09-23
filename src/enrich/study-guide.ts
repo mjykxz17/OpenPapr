@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { chatJson, chatText, type CompatConfig } from "./openai-compat";
+import { repairMermaidBlocks } from "../lib/mermaid-fix";
 
 // Generates a study-guide chapter from one lecture deck.
 //
@@ -143,7 +144,7 @@ It draws mainly on slides ${slides}, but read the whole deck for context.
 ${deckText}`,
         { maxTokens: 8000, temperature: 0.3 },
       ));
-      return normalizeFences(body.trim());
+      return repairMermaidBlocks(normalizeFences(body.trim()));
     },
   };
 }
