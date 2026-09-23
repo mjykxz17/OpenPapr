@@ -202,14 +202,14 @@ export function PdfViewer({ src, storageKey, preparing }: { src: string; storage
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 overflow-x-auto border-b border-line bg-surface px-2 whitespace-nowrap">
         <div className="flex items-center gap-1">
-          <button type="button" className={btn} onClick={() => goTo(current - 1)} disabled={!doc || current <= 1} aria-label="Previous page" title="Previous page (←)">‹</button>
+          <button type="button" className={btn} onClick={() => goTo(current - 1)} disabled={!doc || current <= 1} aria-label="Previous page" title="Previous page (←)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg></button>
           <form onSubmit={(e) => { e.preventDefault(); goTo(Number(pageInput) || 1); }} className="flex items-center gap-1.5 text-[13px] tabular-nums text-ink-2">
             <input aria-label="Page" value={pageInput} onChange={(e) => setPageInput(e.target.value.replace(/\D/g, ""))}
               onFocus={(e) => e.currentTarget.select()} disabled={!doc}
               className="h-8 w-12 rounded-md border border-line-2 bg-surface text-center text-ink outline-none focus:border-accent" />
             <span>/ {sizes.length || "–"}</span>
           </form>
-          <button type="button" className={btn} onClick={() => goTo(current + 1)} disabled={!doc || current >= sizes.length} aria-label="Next page" title="Next page (→)">›</button>
+          <button type="button" className={btn} onClick={() => goTo(current + 1)} disabled={!doc || current >= sizes.length} aria-label="Next page" title="Next page (→)"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m9 18 6-6-6-6" /></svg></button>
         </div>
         <div className="flex items-center gap-1">
           <button type="button" className={btn} onClick={() => zoom(1 / 1.2)} disabled={!doc} aria-label="Zoom out" title="Zoom out (−)">−</button>

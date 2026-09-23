@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BackLink } from "@/components/BackLink";
 import { requireUserId } from "@/server/session";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
@@ -97,9 +98,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     <AppShell>
       <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
         <div className="flex flex-col gap-1.5">
-          <Link href="/" className="text-[13px] text-ink-2 hover:text-accent">
-            ← Home
-          </Link>
+          <BackLink href="/">Home</BackLink>
           <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">{title}</h1>
           <p className="text-sm tabular-nums text-ink-2">
             {mod.code}

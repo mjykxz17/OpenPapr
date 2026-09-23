@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BackLink } from "@/components/BackLink";
 import { getDb } from "@/server/db";
 import { requireUserId } from "@/server/session";
 import { ownedFile } from "@/server/files";
@@ -52,7 +53,7 @@ export default async function FilePage({ params }: { params: Promise<{ id: strin
     <AppShell bleed>
       <div className="flex h-dvh flex-col">
         <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-2 sm:px-6">
-          <Link href={`/modules/${mod.id}`} className="text-[13px] text-ink-2 hover:text-accent">← {mod.code}</Link>
+          <BackLink href={`/modules/${mod.id}`}>{mod.code}</BackLink>
           <span aria-hidden className="hidden h-4 w-px bg-line sm:block" />
           <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink" title={file.displayName}>{file.displayName}</h1>
           <div className="flex items-center gap-3 text-[13px]">

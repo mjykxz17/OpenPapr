@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BackLink } from "@/components/BackLink";
 import { requireUserId } from "@/server/session";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
@@ -70,9 +71,7 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
     <AppShell wide>
       <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-line pb-4">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <Link href={`/modules/${mod.id}`} className="text-[13px] text-ink-2 hover:text-accent">
-            ← {mod.code} overview
-          </Link>
+          <BackLink href={`/modules/${mod.id}`}>{mod.code} overview</BackLink>
           <span aria-hidden className="hidden h-4 w-px bg-line sm:block" />
           <h1 className="text-base font-semibold text-ink">
             {title} <span className="font-normal text-ink-2">· Study guide</span>
