@@ -3,6 +3,7 @@ import type { Db } from "../db/client";
 import { files, modules } from "../db/schema";
 import type { CanvasClient } from "../connectors/canvas/client";
 import { extractPdfText } from "../lib/pdf-text";
+import { citeDeck } from "../lib/slide-citation";
 import { createGuideGenerator, figureSlides, selectGuideDecks, validateChapter, type CompatConfig } from "./study-guide-deps";
 
 export type GuideProgress = {
@@ -33,14 +34,23 @@ export async function generateModuleGuide(opts: {
   onProgress?: (p: GuideProgress) => void;
   // Who the guide is for, from the student and module profiles.
   reader?: string | null;
+  // The files the student picked. Without it, the module's lecture decks.
+  fileIds?: number[] | null;
+  // PDF bytes for a file — lets the worker serve decks from its cache and
+  // convert PowerPoint. Without it, PDFs are downloaded from Canvas.
+  loadPdf?: (file: typeof files.$inferSelect) => Promise<Uint8Array>;
 }): Promise<GuideResult> {
   const { db, canvas, cfg, moduleId, onProgress } = opts;
   const gen = createGuideGenerator(cfg, opts.reader ?? null);
   const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get();
   if (!mod) throw new Error(`no module ${moduleId}`);
 
-  const decks = selectGuideDecks(db.select().from(files).where(eq(files.moduleId, moduleId)).all());
-  if (decks.length === 0) throw new Error("no lecture decks recorded — run a sync first");
+  const all = db.select().from(files).where(eq(files.moduleId, moduleId)).all();
+  const chosen = opts.fileIds?.length ? new Set(opts.fileIds) : null;
+  const decks = chosen
+    ? all.filter((f) => chosen.has(f.id)).sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true }))
+    : selectGuideDecks(all);
+  if (decks.length === 0) throw new Error(chosen ? "none of the chosen files are in this module any more" : "no lecture decks recorded — run a sync first");
 
   const progress: GuideProgress = {
     stage: "Reading decks", decksTotal: decks.length, decksDone: 0, sectionsTotal: 0, sectionsDone: 0,
@@ -57,9 +67,21 @@ export async function generateModuleGuide(opts: {
     progress.stage = `Reading ${name}`;
     report();
 
-    // Signed download urls expire, so the id is re-resolved rather than stored.
-    const fresh = await canvas.getFile(deck.canvasFileId);
-    const text = await extractPdfText(await canvas.downloadFile(fresh.url));
+    let text: string;
+    try {
+      if (opts.loadPdf) {
+        text = await extractPdfText(await opts.loadPdf(deck));
+      } else {
+        // Signed download urls expire, so the id is re-resolved rather than stored.
+        const fresh = await canvas.getFile(deck.canvasFileId);
+        text = await extractPdfText(await canvas.downloadFile(fresh.url));
+      }
+    } catch (err) {
+      problems.push(`${name}: could not be read (${String(err instanceof Error ? err.message : err).slice(0, 80)})`);
+      progress.decksDone++;
+      report();
+      continue;
+    }
     const pageCount = Number(text.match(/--\s*\d+\s*of\s*(\d+)\s*--/)?.[1] ?? 0);
     // A three-slide handout is not a lecture. Asked to write a chapter from
     // one anyway, the model produced 44,000 characters citing slides 1-3 —
@@ -94,7 +116,7 @@ export async function generateModuleGuide(opts: {
     // Sections run concurrently but report as they land, so the count climbs
     // steadily instead of jumping from 0 to done.
     const bodies = await Promise.all(outline.sections.map((s, n) =>
-      gen.section(name, text, pageCount, `${i + 1}.${n + 1} ${s.heading}`, s.covers, s.slides, figures)
+      gen.section(citeDeck(name), text, pageCount, `${i + 1}.${n + 1} ${s.heading}`, s.covers, s.slides, figures)
         .then((body) => {
           progress.sectionsDone++;
           progress.stage = `Writing ${name}: ${progress.sectionsDone} of ${progress.sectionsTotal} sections`;
@@ -109,7 +131,7 @@ export async function generateModuleGuide(opts: {
         })));
 
     const chapter = [`## ${i + 1}. ${outline.title}`, ...bodies.filter(Boolean)].join("\n\n");
-    problems.push(...validateChapter(chapter, name, pageCount).map((p) => `${name}: ${p}`));
+    problems.push(...validateChapter(chapter, citeDeck(name), pageCount).map((p) => `${name}: ${p}`));
     chapters.push(chapter);
     used.push(name);
     progress.decksDone++;

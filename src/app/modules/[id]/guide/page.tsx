@@ -7,7 +7,12 @@ import { getStudyGuide, listModuleFiles } from "@/db/repo";
 import { deckStem } from "@/server/deck";
 import { AppShell } from "@/components/AppShell";
 import { StudyGuide } from "@/components/StudyGuide";
-import { GenerateGuideButton } from "@/components/GenerateGuideButton";
+import { GenerateGuideButton, type GuideCandidate } from "@/components/GenerateGuideButton";
+import { selectGuideDecks } from "@/enrich/study-guide";
+import { splitChapters } from "@/lib/guide-chapters";
+import { fileExt, fileKind } from "@/lib/file-kind";
+import { categoryLabel, sortMaterials } from "@/lib/materials";
+import { dedupeMaterials } from "@/components/Materials";
 import { moduleDisplay } from "@/lib/module-display";
 import { shortDate } from "@/lib/format-date";
 import { canGenerateGuides } from "@/server/llm-access";
@@ -38,6 +43,26 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
 
   const { title } = moduleDisplay(mod);
   const guide = getStudyGuide(db, mod.id);
+  // What the guide can be written from: every PDF and office file, lecture
+  // decks ticked, and a mark on those that already have a chapter.
+  const moduleFiles = listModuleFiles(db, mod.id);
+  // Lecture decks as the automatic pick chooses them, plus PowerPoint decks
+  // that have no PDF twin — those are converted when the guide is written.
+  const suggested = new Set(selectGuideDecks(moduleFiles).map((f) => f.id));
+  const pdfStems = new Set(moduleFiles.filter((f) => fileKind(f.displayName) === "pdf").map((f) => deckStem(f.displayName).toLowerCase()));
+  for (const f of moduleFiles) {
+    if (f.category === "slides" && fileKind(f.displayName) === "office" && !pdfStems.has(deckStem(f.displayName).toLowerCase())) suggested.add(f.id);
+  }
+  const chaptered = new Set(guide ? splitChapters(guide.markdown).chapters.map((c) => c.deck?.toLowerCase()) : []);
+  const mb = (b: number | null) => (b == null ? "" : b >= 1_000_000 ? `${(b / 1_000_000).toFixed(b >= 10_000_000 ? 0 : 1)} MB` : `${Math.max(1, Math.round(b / 1000))} KB`);
+  const candidates: GuideCandidate[] = sortMaterials(dedupeMaterials(moduleFiles))
+    .filter((f) => ["pdf", "office"].includes(fileKind(f.displayName)))
+    .map((f) => ({
+      id: f.id, name: f.displayName, group: categoryLabel(f.category),
+      meta: [fileExt(f.displayName).toUpperCase(), mb(f.sizeBytes)].filter(Boolean).join(" · "),
+      suggested: suggested.has(f.id),
+      inGuide: chaptered.has(deckStem(f.displayName).toLowerCase()),
+    }));
   // Every PDF the module has, as deck stems: the panel's "open another" list.
   const decks = [...new Set(listModuleFiles(db, mod.id).filter((f) => /\.pdf$/i.test(f.displayName)).map((f) => deckStem(f.displayName)))].sort();
 
@@ -55,7 +80,7 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {guide && <span className="text-[13px] text-ink-3">generated {shortDate(guide.generatedAt)}</span>}
-          <GenerateGuideButton moduleId={mod.id} hasGuide={Boolean(guide)} canGenerate={canGenerateGuides(db, userId)} />
+          <GenerateGuideButton moduleId={mod.id} hasGuide={Boolean(guide)} canGenerate={canGenerateGuides(db, userId)} candidates={candidates} />
         </div>
       </header>
 

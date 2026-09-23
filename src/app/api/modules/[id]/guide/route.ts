@@ -3,7 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { currentUserId } from "@/server/session";
 import { getDb } from "@/server/db";
 import { latestGuideRun, requestGuide } from "@/db/repo";
-import { modules } from "@/db/schema";
+import { files, modules } from "@/db/schema";
+import { fileKind } from "@/lib/file-kind";
 import { canGenerateGuides } from "@/server/llm-access";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ async function ownedModule(moduleId: number, userId: number) {
   return mod;
 }
 
-export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -27,8 +28,26 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!canGenerateGuides(getDb(), userId)) {
     return NextResponse.json({ error: "Add an AI key in Account to generate study guides." }, { status: 409 });
   }
-  requestGuide(getDb(), userId, moduleId, Date.now());
-  return NextResponse.json({ ok: true });
+  // Optional JSON body: {fileIds, mode}. No body keeps the old behaviour —
+  // every lecture deck, whole guide rebuilt.
+  let fileIds: number[] | null = null;
+  let mode: "replace" | "merge" = "replace";
+  if ((request.headers.get("content-type") ?? "").startsWith("application/json")) {
+    const body = (await request.json().catch(() => null)) as { fileIds?: unknown; mode?: unknown } | null;
+    if (body?.mode === "merge") mode = "merge";
+    if (Array.isArray(body?.fileIds)) {
+      const wanted = new Set(body.fileIds.map(Number).filter(Number.isInteger));
+      const valid = getDb().select().from(files).where(eq(files.moduleId, moduleId)).all()
+        .filter((f) => wanted.has(f.id) && ["pdf", "office"].includes(fileKind(f.displayName)))
+        .map((f) => f.id);
+      if (valid.length === 0) return NextResponse.json({ error: "choose at least one PDF or slide deck" }, { status: 400 });
+      if (valid.length > 30) return NextResponse.json({ error: "choose at most 30 files at a time" }, { status: 400 });
+      fileIds = valid;
+    }
+  }
+  const state = requestGuide(getDb(), userId, moduleId, Date.now(), { fileIds, mode });
+  if (state === "busy") return NextResponse.json({ error: "a guide is already being written for this module — wait for it to finish" }, { status: 409 });
+  return NextResponse.json({ ok: true, state });
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {

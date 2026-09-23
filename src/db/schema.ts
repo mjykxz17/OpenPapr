@@ -157,6 +157,11 @@ export const guideRuns = sqliteTable("guide_runs", {
   decksDone: integer("decks_done").notNull().default(0),
   sectionsTotal: integer("sections_total").notNull().default(0),
   sectionsDone: integer("sections_done").notNull().default(0),
+  // What the student chose: the files to write chapters from (null = the
+  // module's lecture decks, picked automatically) and whether the new chapters
+  // replace the whole guide or only the chapters for those files.
+  fileIdsJson: text("file_ids_json"),
+  mode: text("mode", { enum: ["replace", "merge"] }).notNull().default("replace"),
 });
 
 // A student's own note on one page of one deck. Keyed by the deck's filename

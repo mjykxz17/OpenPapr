@@ -26,6 +26,10 @@ import { sharedLlmConfig, userLlmConfig } from "../lib/llm-provider";
 import { createGuard, runUserSync } from "./sync";
 import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type ProfileDeps } from "./profiles";
 import { getModuleProfileRow } from "../db/profiles-repo";
+import { readFileSync } from "node:fs";
+import { ensurePdf } from "../server/files";
+import { getStudyGuide } from "../db/repo";
+import { assembleGuide, mergeChapters, splitChapters } from "../lib/guide-chapters";
 import { ModuleProfile, UserProfile, WritingStyle, readerBrief } from "../enrich/profiles";
 import { extractPdfText } from "../lib/pdf-text";
 import { focusAssessmentText } from "../lib/assessment-focus";
@@ -377,8 +381,18 @@ async function runGuideJob(): Promise<void> {
   console.log(`generating study guide for module ${run.moduleId}`);
   try {
     const canvas = createCanvasClient(env.CANVAS_BASE_URL, decrypt(user.canvasTokenEnc, env.SECRET_KEY));
+    let fileIds: number[] | null = null;
+    try { fileIds = run.fileIdsJson ? (JSON.parse(run.fileIdsJson) as number[]) : null; } catch { fileIds = null; }
+    const mod = db.select().from(modules).where(eq(modules.id, run.moduleId)).get()!;
     const result = await generateModuleGuide({
-      db, canvas, cfg: compatCfg, moduleId: run.moduleId,
+      db, canvas, cfg: compatCfg, moduleId: run.moduleId, fileIds,
+      // From the volume cache when the viewer or an earlier run has fetched
+      // it already; PowerPoint and Word files are converted once.
+      loadPdf: async (file) => {
+        const served = await ensurePdf(db, run.userId, { file, mod });
+        if ("error" in served) throw new Error(served.error);
+        return new Uint8Array(readFileSync(served.path));
+      },
       reader: readerBrief(
         parseJson<UserProfile>(UserProfile, user.profileJson),
         user.styleLearning ? parseJson<WritingStyle>(WritingStyle, user.writingStyleJson) : null,
@@ -389,7 +403,18 @@ async function runGuideJob(): Promise<void> {
         sectionsTotal: p.sectionsTotal, sectionsDone: p.sectionsDone,
       }),
     });
-    upsertStudyGuide(db, run.moduleId, result.markdown, result.sourceNote, Date.now());
+    let markdown = result.markdown;
+    let sourceNote = result.sourceNote;
+    const previous = run.mode === "merge" ? getStudyGuide(db, run.moduleId) : undefined;
+    if (previous) {
+      // Only the chosen chapters are rewritten; the rest of the guide stays.
+      const fresh = splitChapters(result.markdown);
+      const old = splitChapters(previous.markdown);
+      const merged = mergeChapters(old.chapters, fresh.chapters);
+      markdown = assembleGuide(old.preamble || fresh.preamble, merged);
+      sourceNote = `${merged.length} chapter${merged.length === 1 ? "" : "s"}; ${result.decks.length} updated with ${compatCfg.model}`;
+    }
+    upsertStudyGuide(db, run.moduleId, markdown, sourceNote, Date.now());
     updateGuideRun(db, run.id, {
       finishedAt: Date.now(), ok: true, stage: "Done",
       error: result.problems.length ? result.problems.slice(0, 5).join("; ") : null,

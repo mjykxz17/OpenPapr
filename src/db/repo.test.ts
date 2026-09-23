@@ -232,3 +232,20 @@ describe("setModuleHidden", () => {
     expect(db.select().from(modules).where(eq(modules.id, 2)).get()!.hidden).toBe(false);
   });
 });
+
+describe("requestGuide with a selection", () => {
+  it("queues the chosen files, lets a queued run take a newer choice, and refuses a running one", async () => {
+    const { createDb } = await import("./client");
+    const { users: u, modules: m, guideRuns } = await import("./schema");
+    const { requestGuide, claimNextGuideRun } = await import("./repo");
+    const db = createDb(":memory:");
+    db.insert(u).values({ name: "a" }).run();
+    db.insert(m).values({ userId: 1, canvasCourseId: 1, code: "CS1", name: "x", active: true }).run();
+    expect(requestGuide(db, 1, 1, 10, { fileIds: [3, 4], mode: "merge" })).toBe("queued");
+    expect(requestGuide(db, 1, 1, 11, { fileIds: [5] })).toBe("updated");
+    const row = db.select().from(guideRuns).get()!;
+    expect(row).toMatchObject({ fileIdsJson: "[5]", mode: "replace", requestedAt: 11 });
+    claimNextGuideRun(db, 12);
+    expect(requestGuide(db, 1, 1, 13)).toBe("busy");
+  });
+});

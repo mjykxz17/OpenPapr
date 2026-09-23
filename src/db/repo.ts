@@ -162,11 +162,23 @@ export function findByUsername(db: Db, username: string) {
 // --- study-guide generation queue -------------------------------------
 // A row with startedAt null is work the worker has not begun. One outstanding
 // request per module: pressing the button twice should not generate twice.
-export function requestGuide(db: Db, userId: number, moduleId: number, now: number): void {
+// A queued run that has not started yet takes the newest selection; one
+// already running is left alone.
+export function requestGuide(
+  db: Db, userId: number, moduleId: number, now: number,
+  choice: { fileIds?: number[] | null; mode?: "replace" | "merge" } = {},
+): "queued" | "updated" | "busy" {
+  const fileIdsJson = choice.fileIds?.length ? JSON.stringify(choice.fileIds) : null;
+  const mode = choice.mode ?? "replace";
   const pending = db.select().from(guideRuns)
     .where(and(eq(guideRuns.moduleId, moduleId), isNull(guideRuns.finishedAt))).get();
-  if (pending) return;
-  db.insert(guideRuns).values({ userId, moduleId, requestedAt: now }).run();
+  if (pending) {
+    if (pending.startedAt) return "busy";
+    db.update(guideRuns).set({ fileIdsJson, mode, requestedAt: now }).where(eq(guideRuns.id, pending.id)).run();
+    return "updated";
+  }
+  db.insert(guideRuns).values({ userId, moduleId, requestedAt: now, fileIdsJson, mode }).run();
+  return "queued";
 }
 
 export function claimNextGuideRun(db: Db, now: number) {

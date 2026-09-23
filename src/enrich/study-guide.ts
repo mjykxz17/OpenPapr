@@ -171,12 +171,13 @@ export function validateChapter(markdown: string, deckName: string, pageCount: n
     if (next !== undefined && next.trim() !== "") problems.push(`fence at line ${i + 1} is not followed by a blank line`);
   }
 
-  const cited = [...markdown.matchAll(new RegExp(`slide(?:-img)?:${deckName}#(\\d+)`, "g"))].map((m) => Number(m[1]));
+  const escaped = deckName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const cited = [...markdown.matchAll(new RegExp(`slide(?:-img)?:${escaped}#(\\d+)`, "g"))].map((m) => Number(m[1]));
   const bad = cited.filter((n) => n < 1 || n > pageCount);
   if (bad.length) problems.push(`${bad.length} citation(s) outside 1..${pageCount}: ${[...new Set(bad)].join(", ")}`);
   if (cited.length === 0) problems.push("no slide citations at all");
 
-  const wrongDeck = [...markdown.matchAll(/slide(?:-img)?:([A-Za-z0-9._-]+)#/g)]
+  const wrongDeck = [...markdown.matchAll(/slide(?:-img)?:([^#)\s]+)#/g)]
     .map((m) => m[1]).filter((d) => d !== deckName);
   if (wrongDeck.length) problems.push(`citations to unknown deck(s): ${[...new Set(wrongDeck)].join(", ")}`);
 
