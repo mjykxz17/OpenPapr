@@ -31,6 +31,8 @@ export function evictCaches(roots: string[], maxBytes: number, now = Date.now())
   let removed = 0, freed = 0;
   const keep: Entry[] = [];
   for (const e of all) {
+    // Compression markers are bookkeeping, removed with their PDF below.
+    if (e.path.endsWith(".pdf.opt")) continue;
     if (e.path.endsWith(".part") && now - e.used > 3_600_000) {
       try { rmSync(e.path, { force: true }); removed++; freed += e.size; } catch { /* in use */ }
     } else keep.push(e);
@@ -39,9 +41,32 @@ export function evictCaches(roots: string[], maxBytes: number, now = Date.now())
   keep.sort((a, b) => a.used - b.used);
   for (const e of keep) {
     if (total <= maxBytes) break;
-    try { rmSync(e.path, { force: true }); removed++; freed += e.size; total -= e.size; } catch { /* in use */ }
+    try {
+      rmSync(e.path, { force: true });
+      if (e.path.endsWith(".pdf")) rmSync(`${e.path}.opt`, { force: true });
+      removed++; freed += e.size; total -= e.size;
+    } catch { /* in use */ }
   }
   return { removed, freed, total };
+}
+
+// Decks cached before compression existed, or whose compression was skipped
+// because the tools were missing then: compressed a few at a time here.
+export async function backfillOptimize(root: string, max: number): Promise<{ done: number; saved: number }> {
+  const { isOptimized, optimizePdf, markerPath } = await import("../server/pdf-optimize");
+  const all: Entry[] = [];
+  if (existsSync(root)) walk(root, all);
+  // Markers whose PDF was evicted are cleared so they cannot outlive it.
+  for (const e of all) if (e.path.endsWith(".pdf.opt") && !existsSync(e.path.slice(0, -4))) rmSync(e.path, { force: true });
+  let done = 0, saved = 0;
+  for (const e of all) {
+    if (done >= max) break;
+    if (!e.path.endsWith(".pdf") || isOptimized(e.path) || existsSync(markerPath(e.path))) continue;
+    const r = await optimizePdf(e.path);
+    done++;
+    if (r.replaced) saved += r.before - r.after;
+  }
+  return { done, saved };
 }
 
 // Serving a cached file does not update its access time on a volume mounted

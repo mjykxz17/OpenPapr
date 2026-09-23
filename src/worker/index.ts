@@ -29,7 +29,7 @@ import { getModuleProfileRow } from "../db/profiles-repo";
 import { readFileSync } from "node:fs";
 import { ensurePdf } from "../server/files";
 import { dirname, join } from "node:path";
-import { evictCaches, pruneSyncRuns, writeHeartbeat } from "./maintenance";
+import { backfillOptimize, evictCaches, pruneSyncRuns, writeHeartbeat } from "./maintenance";
 import { getStudyGuide } from "../db/repo";
 import { assembleGuide, mergeChapters, splitChapters } from "../lib/guide-chapters";
 import { ModuleProfile, UserProfile, WritingStyle, readerBrief } from "../enrich/profiles";
@@ -514,6 +514,11 @@ function maintenance(): void {
     const pruned = pruneSyncRuns(db, Date.now());
     const cache = evictCaches([join(dir, "deck-cache"), join(dir, "file-cache")], CACHE_LIMIT_BYTES);
     console.log(`maintenance: pruned ${pruned} sync runs; cache ${(cache.total / 1e6).toFixed(0)} MB, evicted ${cache.removed} file(s)`);
+    // Compress decks cached before compression existed, a batch at a time,
+    // off the tick so syncing is not held up.
+    void backfillOptimize(join(dir, "deck-cache"), 40)
+      .then((r) => { if (r.done) console.log(`maintenance: compressed ${r.done} deck(s), saved ${(r.saved / 1e6).toFixed(0)} MB`); })
+      .catch((err) => console.error("deck compression failed", err));
   } catch (err) {
     console.error("maintenance failed", err);
   }

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { limiter, onceMap, touch, writeAtomic } from "./io";
+import { optimizePdf } from "./pdf-optimize";
 import { renderPdfPage } from "@/lib/pdf-render";
 import { dirname, join } from "node:path";
 import { eq } from "drizzle-orm";
@@ -29,9 +30,13 @@ export const deckCachePath = (
 // Decks are large — IFS4103's are 22MB — and a single guide page can request
 // thirty slide images from one deck. Writing the download to the volume turns
 // that into one fetch instead of thirty.
-function cacheDeck(path: string, bytes: Uint8Array): Uint8Array {
+// The cached copy is compressed before it is used (see pdf-optimize), so the
+// bytes handed back are the compressed ones when that worked.
+async function cacheDeck(path: string, bytes: Uint8Array): Promise<Uint8Array> {
   try {
     writeAtomic(path, bytes);
+    const r = await optimizePdf(path);
+    if (r.replaced) return new Uint8Array(readFileSync(path));
   } catch {
     // A read-only or full disk must not break serving the deck.
   }
@@ -72,7 +77,7 @@ async function fetchDeck(db: Db, userId: number, mod: typeof modules.$inferSelec
       // Download urls are signed and expire, so the row holds the id and the
       // url is fetched fresh here.
       const fresh = await canvas.getFile(known.canvasFileId);
-      return { bytes: cacheDeck(cached, await canvas.downloadFile(fresh.url)) };
+      return { bytes: await cacheDeck(cached, await canvas.downloadFile(fresh.url)) };
     } catch {
       // Fall through to the listing — the file may have been removed.
     }
@@ -82,7 +87,7 @@ async function fetchDeck(db: Db, userId: number, mod: typeof modules.$inferSelec
     const listed = await canvas.listCourseFiles(mod.canvasCourseId);
     const file = listed.find((f) => isPdfFile(f) && deckStem(f.display_name).toLowerCase() === deckStem(name).toLowerCase());
     if (!file) return { error: "deck not found", status: 404 };
-    return { bytes: cacheDeck(cached, await canvas.downloadFile(file.url)) };
+    return { bytes: await cacheDeck(cached, await canvas.downloadFile(file.url)) };
   } catch {
     return { error: "canvas unavailable", status: 502 };
   }

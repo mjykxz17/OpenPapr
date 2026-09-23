@@ -12,6 +12,7 @@ import { createCanvasClient } from "@/connectors/canvas/client";
 import { fileKind } from "@/lib/file-kind";
 import { deckCachePath } from "./deck";
 import { onceMap, TooLargeError, touch, writeAtomic } from "./io";
+import { optimizePdf } from "./pdf-optimize";
 
 // Every file a student opens is fetched from Canvas once and then served from
 // the volume. PDFs share the deck cache the study guide already uses, so a
@@ -53,6 +54,8 @@ async function download(db: Db, userId: number, row: Row, target: string): Promi
     // Download urls are signed and expire, so a fresh one is asked for each time.
     const fresh = await canvas.getFile(row.file.canvasFileId);
     await canvas.downloadToFile(fresh.url, target, MAX_PROXY_BYTES);
+    // A PDF is compressed once, before anyone is served it (see pdf-optimize).
+    if (fileKind(row.file.displayName) === "pdf") await optimizePdf(target);
     return stat(target);
   } catch (err) {
     if (err instanceof TooLargeError) return { error: "this file is too large to open here — use the Canvas link", status: 413 };
@@ -133,6 +136,7 @@ export function ensurePdf(db: Db, userId: number, row: Row): Promise<Served> {
     const pdf = await serial(() => runSoffice(bin, original.path, ext));
     if (!pdf || pdf.length === 0) return { error: "this file could not be converted for preview", status: 422 };
     writeAtomic(target, pdf);
+    await optimizePdf(target);
     return stat(target);
   });
 }

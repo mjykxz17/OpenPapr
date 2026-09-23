@@ -17,8 +17,11 @@ ENV NODE_ENV=production
 # (and for study-guide citations). Only the three office components are
 # installed; the fonts cover Latin, symbols and Chinese/Japanese/Korean.
 RUN apk add --no-cache libreoffice-impress libreoffice-writer libreoffice-calc \
-    font-liberation font-dejavu font-noto font-noto-cjk
+    font-liberation font-dejavu font-noto font-noto-cjk \
+    ghostscript qpdf
 ENV SOFFICE_BIN=/usr/bin/soffice
+# Ghostscript compresses lecture decks (22.7MB -> 3.4MB on a real one) and
+# qpdf lays them out for range loading; see src/server/pdf-optimize.ts.
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
 COPY --from=build /app/public ./public
