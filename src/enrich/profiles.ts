@@ -199,15 +199,16 @@ export type WeeklyPlanInput = {
 const PLAN_SYSTEM = `You plan a university student's study week across their modules. You get today's date, the days left this week, a profile of the student, a profile of each module (with assessment weightage) and everything due in the next two weeks.
 
 Return ONLY a JSON object:
-{"overview": "<two sentences: what this week is about>",
- "priorities": [{"module": "<code>", "focus": "<what to focus on this week>", "why": "<the reason: a deadline, weightage, a known gap>"}],
- "days": [{"day": "Mon|Tue|Wed|Thu|Fri|Sat|Sun", "items": [{"module": "<code>", "task": "<concrete task>", "minutes": <number>}]}]}
+{"overview": "<one short sentence, under 100 characters: the theme of the week>",
+ "priorities": [{"module": "<code>", "focus": "<under 50 characters, e.g. \"Tutorial 5 + quiz prep\">", "why": "<under 80 characters: the deadline, weightage or gap behind it>"}],
+ "days": [{"day": "Mon|Tue|Wed|Thu|Fri|Sat|Sun", "items": [{"module": "<code>", "task": "<under 60 characters, starts with a verb>", "minutes": <number>}]}]}
 
 Rules:
-- One priority per module that needs attention, most urgent first. Tie every "why" to a given deadline, weightage or profile point — do not invent deadlines.
-- Only plan the days listed as left. Keep each day realistic: at most 4 hours of tasks on weekdays, 6 on weekends.
-- Tasks must be concrete ("do tutorial 5 Q1-4", "revise slides 12-30 of L6 before the quiz"), sized in minutes.
-- Strings under 180 characters. No emoji.`;
+- The student reads this at a glance, so be brief. No filler, no restating the module name in the task.
+- At most 4 priorities, only modules that need attention this week, most urgent first. Tie every "why" to a given deadline, weightage or profile point — do not invent deadlines.
+- Only plan the days listed as left. At most 3 tasks a day; at most 3 hours on weekdays and 4 on weekends.
+- Tasks must be concrete and short ("Do Tutorial 5 Q1-4", "Revise L6 slides 12-30"), sized in minutes.
+- No emoji.`;
 
 export async function buildWeeklyPlan(cfg: CompatConfig, input: WeeklyPlanInput, fetchFn: typeof fetch = fetch): Promise<WeeklyPlan> {
   const body = [
