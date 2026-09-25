@@ -44,4 +44,4 @@ export async function middleware(req: NextRequest) {
     ? NextResponse.json({ error: "unauthorized" }, { status: 401 })
     : NextResponse.redirect(new URL("/login", req.url));
 }
-export const config = { matcher: ["/((?!_next|favicon.ico).*)"] };
+export const config = { matcher: ["/((?!_next|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|brand/).*)"] };

@@ -1,4 +1,4 @@
-# one-ring: Canvas + NUS Outlook dashboard — design
+# OpenPapr: Canvas + NUS Outlook dashboard — design
 
 Date: 2026-08-12
 Status: approved (brainstorming session)
@@ -13,7 +13,7 @@ professors, about deadlines, exams, grades) with large volumes of noise
 (newsletters, event blasts, mass mail). Important information is scattered
 across two systems with no unified view.
 
-one-ring is a web application that pulls from both sources and presents the
+OpenPapr is a web application that pulls from both sources and presents the
 important information in one place.
 
 ## Users and scope

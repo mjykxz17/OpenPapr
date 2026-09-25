@@ -1,4 +1,5 @@
 import { LoginForm } from "@/components/LoginForm";
+import { PapiMark } from "@/components/brand/PapiMark";
 
 // Rendered per request, not at build time: the Canvas URL comes from the
 // runtime environment, and the image is built without any secrets present.
@@ -11,7 +12,10 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-svh items-center justify-center bg-surface px-6">
       <div className="w-full max-w-sm rounded-[10px] border border-line bg-panel p-8">
-        <h1 className="mb-1 text-xl font-semibold tracking-[-0.01em] text-ink">OpenPapr</h1>
+        <div className="mb-2 flex items-center gap-2.5">
+          <PapiMark size={36} />
+          <h1 className="text-xl font-semibold tracking-[-0.01em] text-ink">OpenPapr</h1>
+        </div>
         <p className="mb-6 text-sm leading-relaxed text-ink-2">
           Your courses, deadlines and notes stay yours. First time here, use your
           invite code and Canvas token — after that, just your username.

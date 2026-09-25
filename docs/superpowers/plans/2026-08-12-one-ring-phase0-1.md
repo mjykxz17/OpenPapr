@@ -1,8 +1,8 @@
-# one-ring Phase 0–1 Implementation Plan
+# OpenPapr Phase 0–1 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build the one-ring core dashboard: pollers pulling Canvas + NUS Outlook (Graph) into a normalized SQLite store, LLM enrichment (email triage + syllabus weightage), and the quiet-ink web UI — per the approved spec at `docs/superpowers/specs/2026-08-12-canvas-outlook-dashboard-design.md`.
+**Goal:** Build the OpenPapr core dashboard: pollers pulling Canvas + NUS Outlook (Graph) into a normalized SQLite store, LLM enrichment (email triage + syllabus weightage), and the quiet-ink web UI — per the approved spec at `docs/superpowers/specs/2026-08-12-canvas-outlook-dashboard-design.md`.
 
 **Architecture:** One Next.js (App Router) TypeScript app, two processes in one container: `web` (UI + API routes, reads DB + writes user-state only) and `worker` (pollers + enricher, sole writer of source data). SQLite via Drizzle. Connectors and enrichers are pure modules with injected `fetch`/SDK clients so everything is testable with fixtures and fakes.
 
@@ -241,7 +241,7 @@ describe("loadEnv", () => {
     expect(env.CANVAS_BASE_URL).toBe("https://canvas.nus.edu.sg");
     expect(env.ANTHROPIC_MODEL).toBe("claude-haiku-4-5");
     expect(env.POLL_INTERVAL_MS).toBe(300000);
-    expect(env.DATABASE_PATH).toBe("data/one-ring.db");
+    expect(env.DATABASE_PATH).toBe("data/openpapr.db");
   });
   it("rejects a short SECRET_KEY", () => {
     expect(() => loadEnv({ ...good, SECRET_KEY: "abc" } as never)).toThrow();
@@ -261,7 +261,7 @@ describe("loadEnv", () => {
 import { z } from "zod";
 
 const EnvSchema = z.object({
-  DATABASE_PATH: z.string().default("data/one-ring.db"),
+  DATABASE_PATH: z.string().default("data/openpapr.db"),
   SECRET_KEY: z.string().regex(/^[0-9a-f]{64}$/i, "SECRET_KEY must be 64 hex chars (openssl rand -hex 32)"),
   APP_PASSWORD: z.string().min(8),
   CANVAS_BASE_URL: z.string().url().default("https://canvas.nus.edu.sg"),
@@ -1739,7 +1739,7 @@ function guarded(source: string, fn: (userId: number) => Promise<void>) {
     catch (err) { failures.set(key, (failures.get(key) ?? 0) + 1); failures.set(`${key}:at`, Date.now()); throw err; }
   };
 }
-console.log("one-ring worker starting");
+console.log("openpapr worker starting");
 void loop();
 ```
 Note the double bookkeeping (`syncRuns` in DB for the UI, in-memory `failures` for backoff) is deliberate — restarts reset backoff, which is fine.
@@ -2039,7 +2039,7 @@ git add scripts/seed-demo.ts e2e/ playwright.config.ts && git commit -m "test: s
 
 **Interfaces:**
 - Consumes: everything. Requires `flyctl` auth'd (`fly auth login` — ask Aiden to run it interactively if needed).
-- Produces: a running app at `https://one-ring-<suffix>.fly.dev` with a persistent volume at `/data`.
+- Produces: a running app at `https://openpapr.fly.dev` with a persistent volume at `/data`.
 
 - [ ] **Step 1: Dockerfile + start.sh**
 
@@ -2079,13 +2079,13 @@ node server.js
 
 ```toml
 # fly.toml
-app = "one-ring"
+app = "openpapr"
 primary_region = "sin"
 [build]
 [env]
-  DATABASE_PATH = "/data/one-ring.db"
+  DATABASE_PATH = "/data/openpapr.db"
 [mounts]
-  source = "one_ring_data"
+  source = "openpapr_data"
   destination = "/data"
 [http_service]
   internal_port = 3000
@@ -2093,7 +2093,7 @@ primary_region = "sin"
   auto_stop_machines = false   # worker must keep polling
   min_machines_running = 1
 ```
-Run: `fly launch --no-deploy --copy-config`, then `fly volumes create one_ring_data --size 1 --region sin`, then `fly secrets set SECRET_KEY=$(openssl rand -hex 32) APP_PASSWORD=... ANTHROPIC_API_KEY=... MS_CLIENT_ID=...`, then `fly deploy`. **Show Aiden the full command lines before running them** (per his standing preference for launch commands).
+Run: `fly launch --no-deploy --copy-config`, then `fly volumes create openpapr_data --size 1 --region sin`, then `fly secrets set SECRET_KEY=$(openssl rand -hex 32) APP_PASSWORD=... ANTHROPIC_API_KEY=... MS_CLIENT_ID=...`, then `fly deploy`. **Show Aiden the full command lines before running them** (per his standing preference for launch commands).
 
 - [ ] **Step 3: Post-deploy setup**
 

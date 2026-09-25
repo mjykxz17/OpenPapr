@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SignOutButton } from "./SignOutButton";
 import { AppearanceMenu } from "./AppearanceMenu";
+import { PapiMark } from "./brand/PapiMark";
 
 function HomeIcon() {
   return (
@@ -66,6 +67,9 @@ export function Rail() {
   const isActive = (href: string) => (href === "/" ? pathname === "/" || pathname.startsWith("/modules") : pathname.startsWith(href));
   return (
     <nav aria-label="Primary" className="fixed inset-y-0 left-0 z-10 flex w-14 flex-col items-center gap-1 border-r border-line bg-surface py-3">
+      <Link href="/" title="OpenPapr" aria-label="OpenPapr home" className="mb-2 flex h-11 w-11 items-center justify-center rounded-md transition-transform hover:-translate-y-0.5">
+        <PapiMark size={30} />
+      </Link>
       {NAV.map(({ href, label, Icon }) => {
         const active = isActive(href);
         return (

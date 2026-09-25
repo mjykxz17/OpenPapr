@@ -38,5 +38,5 @@
 - `https://your-openai-compatible-host/v1` (OpenAI-compatible), model
   `agnes-2.5-flash`, key from your provider console. Verified via
   `/v1/models` and a chat completion; follows JSON-only instructions;
-  reasoning tokens not separately billed. one-ring gains an
+  reasoning tokens not separately billed. OpenPapr gains an
   OpenAI-compatible provider path selected by env.
