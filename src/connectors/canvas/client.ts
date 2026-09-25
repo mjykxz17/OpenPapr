@@ -1,7 +1,7 @@
 import { streamToFile } from "../../server/io";
 import type {
   CanvasAnnouncement, CanvasAssignmentGroup, CanvasCalendarEvent,
-  CanvasCourse, CanvasFile, CanvasPage, CanvasSelf,
+  CanvasCourse, CanvasDiscussion, CanvasDiscussionView, CanvasFile, CanvasMissing, CanvasPage, CanvasPlannerItem, CanvasSelf,
 } from "./types";
 
 function nextLink(header: string | null): string | null {
@@ -77,6 +77,21 @@ export function createCanvasClient(baseUrl: string, token: string, fetchFn: type
     },
     listCourseTeachers: (courseId: number) =>
       getAllPages<{ id: number; name: string; short_name?: string }>(`/courses/${courseId}/users?enrollment_type[]=teacher&per_page=50`),
+    // Discussions, and the whole thread of one. Courses can switch the
+    // Discussions tab off, which Canvas answers with a 404.
+    listDiscussions: (courseId: number) =>
+      getAllPages<CanvasDiscussion>(`/courses/${courseId}/discussion_topics?per_page=50`),
+    getDiscussionView: (courseId: number, topicId: number) =>
+      getOne<CanvasDiscussionView>(`/courses/${courseId}/discussion_topics/${topicId}/view`),
+    // Lecturers and TAs: whose discussion posts count as the course speaking.
+    listCourseStaff: (courseId: number) =>
+      getAllPages<{ id: number; name: string }>(`/courses/${courseId}/users?enrollment_type[]=teacher&enrollment_type[]=ta&per_page=100`),
+    // Canvas's own to-do feed (with what the student ticked off there) and
+    // its list of missing work.
+    listPlannerItems: (startIso: string, endIso: string) =>
+      getAllPages<CanvasPlannerItem>(`/planner/items?per_page=100&start_date=${encodeURIComponent(startIso)}&end_date=${encodeURIComponent(endIso)}`),
+    listMissingSubmissions: () =>
+      getAllPages<CanvasMissing>("/users/self/missing_submissions?per_page=100&filter[]=submittable"),
     listCourseFiles: (courseId: number) =>
       getAllPages<CanvasFile>(`/courses/${courseId}/files?per_page=100&sort=created_at`),
     // Streams straight to disk; for anything that might be large.

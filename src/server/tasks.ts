@@ -12,6 +12,7 @@ export type TaskView = {
   // Formatted here, on the server, so the page and the browser never disagree
   // about the time zone.
   dueText: string; overdue: boolean;
+  missing: boolean;  // Canvas flags work this task covers as missing
 };
 export type TodayStep = TaskStep & { taskId: number; taskTitle: string; code: string | null; dueAt: number | null; late: boolean };
 export type TasksView = {
@@ -26,13 +27,15 @@ export function tasksView(db: Db, userId: number, now: number): TasksView {
   const mods = new Map(db.select().from(modules).where(eq(modules.userId, userId)).all().map((m) => [m.id, m]));
   const rows = db.select().from(tasks).where(eq(tasks.userId, userId)).all();
   const itemIds = rows.flatMap((t) => parse<TaskSource>(t.sourcesJson).filter((s) => s.itemId).map((s) => s.itemId!));
+  // Also the source rows' own flags (missing), read once for all tasks.
   const urls = new Map(itemIds.length
-    ? db.select({ id: items.id, url: items.url, type: items.type }).from(items).where(and(eq(items.userId, userId), inArray(items.id, itemIds))).all().map((i) => [i.id, i])
+    ? db.select({ id: items.id, url: items.url, type: items.type, missing: items.missing }).from(items).where(and(eq(items.userId, userId), inArray(items.id, itemIds))).all().map((i) => [i.id, i])
     : []);
 
   const link = (s: TaskSource, moduleId: number | null): SourceLink => {
     if (s.kind === "file" && s.fileId && moduleId) return { ...s, href: `/modules/${moduleId}/files/${s.fileId}`, external: false };
-    if (s.kind === "announcement" && s.itemId && moduleId) return { ...s, href: `/modules/${moduleId}#a-${s.itemId}`, external: false };
+    if ((s.kind === "announcement" || s.kind === "discussion") && s.itemId && moduleId) return { ...s, href: `/modules/${moduleId}#a-${s.itemId}`, external: false };
+    if (s.kind === "planner") return { ...s, href: null, external: false };
     if ((s.kind === "weightage" || s.kind === "nusmods") && moduleId) return { ...s, href: `/modules/${moduleId}`, external: false };
     const it = s.itemId ? urls.get(s.itemId) : undefined;
     if (it?.url) return { ...s, href: it.url, external: true };
@@ -47,6 +50,7 @@ export function tasksView(db: Db, userId: number, now: number): TasksView {
       done: steps.filter((s) => s.done).length, total: steps.length,
       dueText: t.dueAt === null ? "Date not announced" : t.dueConfidence === "estimated" ? `around ${shortDate(t.dueAt)}` : dueLabel(t.dueAt, now),
       overdue: t.dueAt !== null && t.dueAt < now,
+      missing: parse<TaskSource>(t.sourcesJson).some((s) => s.itemId != null && urls.get(s.itemId)?.missing === true),
     };
   };
   const byDue = (a: TaskView, b: TaskView) => (a.dueAt ?? Number.MAX_SAFE_INTEGER) - (b.dueAt ?? Number.MAX_SAFE_INTEGER) || a.id - b.id;

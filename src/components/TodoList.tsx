@@ -68,6 +68,9 @@ function renderRows(todos: Overview["todos"], modules: Overview["modules"], now:
                 >
                   {todo.title}
                 </span>
+                {todo.type === "discussion" && <span className="shrink-0 text-[13px] text-ink-3">post needed</span>}
+                {todo.type === "planner_note" && <span className="shrink-0 text-[13px] text-ink-3">your note</span>}
+                {todo.missing && <span className="shrink-0 text-[13px] font-medium text-danger">Missing on Canvas</span>}
                 {todo.type === "deadline" && (
                   <span className="shrink-0 text-[13px] text-ink-3">extracted</span>
                 )}

@@ -72,7 +72,7 @@ function Code({ code, moduleId }: { code: string | null; moduleId?: number | nul
 }
 
 function Sources({ sources }: { sources: SourceLink[] }) {
-  const icon: Record<string, string> = { canvas: "Canvas", announcement: "Announcement", file: "Slides", weightage: "Weightage", nusmods: "NUSMods" };
+  const icon: Record<string, string> = { canvas: "Canvas", announcement: "Announcement", discussion: "Discussion", planner: "Canvas planner", file: "Slides", weightage: "Weightage", nusmods: "NUSMods" };
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       <span className="text-[12px] text-ink-3">Seen in</span>
@@ -101,7 +101,7 @@ function TaskCard({ t, today, tick }: { t: TaskView; today: string; tick: Return
               <Code code={t.code} />
               <span className="min-w-0 text-[15px] font-medium text-ink">{t.title}</span>
             </div>
-            <span className={`shrink-0 text-[13px] tabular-nums ${overdue ? "text-danger" : "text-ink-2"}`}>{overdue ? "Overdue · " : ""}{t.dueText}</span>
+            <span className={`shrink-0 text-[13px] tabular-nums ${overdue || t.missing ? "text-danger" : "text-ink-2"}`}>{t.missing ? "Missing on Canvas · " : overdue ? "Overdue · " : ""}{t.dueText}</span>
           </div>
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-ink-3">
             <span>{KIND[t.kind] ?? t.kind}</span>

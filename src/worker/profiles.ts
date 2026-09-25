@@ -111,8 +111,9 @@ export async function moduleProfileInput(deps: ProfileDeps, userId: number, mod:
   const allReviews = code ? await ensureReviews(deps, code) : [];
   const lecturers = await refreshLecturers(deps, userId, mod);
   const anns = db.select().from(items)
-    .where(and(eq(items.userId, userId), eq(items.moduleId, mod.id), eq(items.type, "announcement")))
-    .orderBy(desc(items.sourceCreatedAt)).limit(8).all();
+    // What lecturers said in discussions reads like an announcement.
+    .where(and(eq(items.userId, userId), eq(items.moduleId, mod.id), inArray(items.type, ["announcement", "staff_reply"])))
+    .orderBy(desc(items.sourceCreatedAt)).limit(10).all();
   const history = listCourseHistory(db, userId).filter((h) => h.canvasCourseId !== mod.canvasCourseId);
   return {
     module: { code: mod.code, name: mod.name, term: mod.term },
@@ -122,7 +123,7 @@ export async function moduleProfileInput(deps: ProfileDeps, userId: number, mod:
     lecturers: lecturers.map((l) => ({ name: l.name, pageText: l.pageText ?? null })),
     components: effectiveComponents(db.select().from(components).where(eq(components.moduleId, mod.id)).all()),
     announcements: anns.map((a) => ({
-      title: a.title, text: htmlToText(a.body).slice(0, 800),
+      title: a.type === "staff_reply" ? `${a.sender ?? "Lecturer"} in a discussion: ${a.title.replace(/^Re: /, "")}` : a.title, text: htmlToText(a.body).slice(0, 800),
       postedAt: a.sourceCreatedAt ? new Date(a.sourceCreatedAt).toISOString() : null,
     })),
     fileNames: db.select().from(files).where(eq(files.moduleId, mod.id)).all().map((f) => f.displayName),
@@ -261,8 +262,8 @@ async function refreshWeeklyPlan(deps: ProfileDeps, userId: number, cfg: CompatC
   const codeById = new Map(active.map((m) => [m.id, m.code]));
   const due = db.select().from(items).where(and(
     eq(items.userId, userId),
-    inArray(items.type, ["assignment", "deadline", "event"]),
-    eq(items.dismissed, false), eq(items.submitted, false),
+    inArray(items.type, ["assignment", "deadline", "event", "discussion", "planner_note"]),
+    eq(items.dismissed, false), eq(items.submitted, false), eq(items.canvasDone, false),
     isNotNull(items.dueAt), gte(items.dueAt, now - 6 * H), lte(items.dueAt, now + 14 * D),
   )).orderBy(items.dueAt).limit(40).all();
   const fmt = (ms: number) => new Date(ms + SGT).toUTCString().replace(/:\d\d GMT$/, "").replace(/^(\w+), 0?(\d+) (\w+) \d+ /, "$1 $2 $3 ");
@@ -276,7 +277,7 @@ async function refreshWeeklyPlan(deps: ProfileDeps, userId: number, cfg: CompatC
       profile: parse<ModuleProfile>(ModuleProfile, getModuleProfileRow(db, m.id)?.profileJson),
       components: effectiveComponents(db.select().from(components).where(eq(components.moduleId, m.id)).all()),
     })),
-    due: due.map((d) => ({ module: d.moduleId ? codeById.get(d.moduleId) ?? null : null, title: d.title, due: fmt(d.dueAt!), kind: d.category ?? d.type })),
+    due: due.map((d) => ({ module: d.moduleId ? codeById.get(d.moduleId) ?? null : null, title: d.title, due: fmt(d.dueAt!), kind: d.missing ? "MISSING on Canvas" : d.category ?? d.type })),
   };
   // The day is part of the hash: a plan made on Monday is replanned on
   // Thursday with only the days that are left.

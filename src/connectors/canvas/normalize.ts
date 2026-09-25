@@ -6,6 +6,13 @@ export interface NormalizedItem {
   title: string; body: string | null; url: string | null;
   dueAt: number | null; sourceCreatedAt: number | null; submitted: boolean;
 }
+export interface NormalizedDiscussionItem {
+  type: "discussion" | "staff_reply";
+  sourceId: string;
+  title: string; body: string | null; url: string | null; sender: string | null;
+  dueAt: number | null; sourceCreatedAt: number | null; submitted: boolean;
+  metaJson: string;
+}
 export interface NormalizedCanvasSync {
   module: { canvasCourseId: number; code: string; name: string; term: string | null; syllabusBody: string | null };
   components: { name: string; weightPct: number; scorePct: number | null; source: "canvas_api" }[];

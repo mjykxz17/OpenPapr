@@ -74,12 +74,24 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
   const GRACE_MS = 12 * 3_600_000;
   const DELIVERABLE_LINGER_MS = 72 * 3_600_000; // reminders are notifications: a miss shows for 3 days, then fades
   const pastBy = (i: ItemRow, ms: number) => i.dueAt !== null && i.dueAt < now - ms;
+  // A discussion is a reminder only when it asks for a post and is not graded
+  // (a graded one is already here as its assignment); a planner note is the
+  // student's own reminder. Ticked off in the Canvas planner counts as done.
+  const discussionTodo = (i: ItemRow) => {
+    if (i.type !== "discussion" || i.dueAt === null) return false;
+    try {
+      const m = JSON.parse(i.metaJson ?? "{}") as { graded?: boolean; posted?: boolean; locked?: boolean };
+      return !m.graded && !m.posted && !m.locked;
+    } catch { return false; }
+  };
   const todoCandidates = scopedItems.filter(
-    (i) => (i.type === "assignment" || i.type === "event" || i.type === "deadline") && !i.dismissed && !i.submitted,
+    (i) => (i.type === "assignment" || i.type === "event" || i.type === "deadline" || i.type === "planner_note" || discussionTodo(i))
+      && !i.dismissed && !i.submitted && !i.canvasDone,
   ).filter((i) => {
     // A lab that happened is not a reminder; a missed submittable lingers 72h.
     // Canvas assignments never auto-hide — they clear on submission.
     if (i.type === "event") return !pastBy(i, GRACE_MS);
+    if (i.type === "planner_note" || i.type === "discussion") return !pastBy(i, DELIVERABLE_LINGER_MS);
     if (i.type === "deadline") return !pastBy(i, i.category === "routine" ? GRACE_MS : DELIVERABLE_LINGER_MS);
     return true;
   });

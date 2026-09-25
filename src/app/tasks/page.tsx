@@ -30,7 +30,7 @@ export default async function TasksPage() {
       <header className="mb-8 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-line pb-4">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">Tasks</h1>
-          <p className="text-[13px] text-ink-3">From Canvas, announcements and your slides — one task each, in small steps.</p>
+          <p className="text-[13px] text-ink-3">From Canvas, announcements, discussions and your slides — one task each, in small steps.</p>
         </div>
         {hasModel
           ? <RebuildButton scope="tasks" status={taskPlanStatus(db, userId)} noun="tasks" />

@@ -121,7 +121,11 @@ export const items = sqliteTable("items", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull().references(() => users.id),
   moduleId: integer("module_id").references(() => modules.id),
-  type: text("type", { enum: ["announcement", "assignment", "email", "event", "deadline_change", "deadline"] }).notNull(),
+  // discussion = a course discussion topic (not an announcement); staff_reply =
+  // a lecturer's or TA's post inside one, kept as its own item so it reads like
+  // an announcement everywhere; planner_note = the student's own Canvas
+  // planner note. Other students' posts are never stored, only counted.
+  type: text("type", { enum: ["announcement", "assignment", "email", "event", "deadline_change", "deadline", "discussion", "staff_reply", "planner_note"] }).notNull(),
   source: text("source", { enum: ["canvas", "graph"] }).notNull(),
   sourceId: text("source_id").notNull(),
   title: text("title").notNull(),
@@ -139,6 +143,13 @@ export const items = sqliteTable("items", {
   actionsExtractedAt: integer("actions_extracted_at"),   // deadline-extraction marker: null = not yet processed
   actionsAttempts: integer("actions_attempts").notNull().default(0),  // failed extraction tries; bounds the retry loop
   category: text("category", { enum: ["deliverable", "routine"] }),  // deadline tier; null = unclassified, treated as deliverable
+  // Per-type detail as JSON: for a discussion its reply counts, whether the
+  // student has posted, whether it is graded, the parent topic of a staff reply.
+  metaJson: text("meta_json"),
+  // Canvas's own view of the work: flagged missing, or ticked off in the
+  // Canvas planner. Both are refreshed every sync.
+  missing: integer("missing", { mode: "boolean" }).notNull().default(false),
+  canvasDone: integer("canvas_done", { mode: "boolean" }).notNull().default(false),
 }, (t) => [uniqueIndex("items_user_source").on(t.userId, t.source, t.sourceId)]);
 
 export const studyGuides = sqliteTable("study_guides", {

@@ -133,3 +133,37 @@ describe("moduleSignals", () => {
     expect(input.today).toBe("2026-09-25 (Fri)");
   });
 });
+
+describe("discussions, planner notes and the safety net", () => {
+  it("feeds staff replies, discussions and notes to the planner, and covers what it skips", async () => {
+    const db = setup();
+    db.insert(items).values([
+      { userId: 1, moduleId: 1, type: "discussion", source: "canvas", sourceId: "discussion:7", title: "Forum: intro post", dueAt: NOW + 2 * 24 * H, firstSeenAt: NOW,
+        metaJson: JSON.stringify({ graded: false, requireInitialPost: true, posted: false, replies: 4, locked: false, assignmentId: null }) },
+      { userId: 1, moduleId: 1, type: "staff_reply", source: "canvas", sourceId: "discussion:7:entry:9", title: "Re: Forum: intro post", sender: "Dr Tan",
+        body: "Quiz 2 only covers L1-L4.", sourceCreatedAt: NOW - H, firstSeenAt: NOW, metaJson: JSON.stringify({ topicSourceId: "discussion:7", topicTitle: "Forum: intro post" }) },
+      { userId: 1, moduleId: 1, type: "planner_note", source: "canvas", sourceId: "planner_note:3", title: "Email tutor about groups", dueAt: NOW + 24 * H, firstSeenAt: NOW },
+      { userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: "a5", title: "Lab report 2", dueAt: NOW + 3 * 24 * H, missing: false, firstSeenAt: NOW },
+    ]).run();
+    const log: string[] = [];
+    await refreshTasks(deps(db, llm(quizPlan, log)), 1);
+    expect(log[0]).toContain("Dr Tan replied in the discussion “Forum: intro post”");
+    expect(log[0]).toContain("Quiz 2 only covers L1-L4.");
+    expect(log[0]).toMatch(/\[D4\] Discussion: Forum: intro post — due .* must post before seeing replies, you have NOT posted/);
+    expect(log[0]).toContain("[P6] Your own Canvas planner note: Email tutor about groups");
+    const keys = db.select().from(tasks).all().map((t) => t.key).sort();
+    // The planner's plan did not mention the note or the lab report, so the net catches them.
+    expect(keys).toEqual(expect.arrayContaining(["st2334-canvas-6", "st2334-canvas-7", "st2334-quiz-2"]));
+  });
+
+  it("marks a discussion task done once you post, and a note done once ticked in Canvas", async () => {
+    const db = setup();
+    db.insert(items).values({ userId: 1, moduleId: 1, type: "planner_note", source: "canvas", sourceId: "planner_note:3", title: "Email tutor", dueAt: NOW + 24 * H, firstSeenAt: NOW }).run();
+    await refreshTasks({ ...deps(db, llm(quizPlan)), cfgFor: () => null }, 1);
+    const note = db.select().from(tasks).where(eq(tasks.key, "st2334-canvas-4")).get()!;
+    expect(note.status).toBe("open");
+    db.update(items).set({ canvasDone: true }).where(eq(items.id, 4)).run();
+    tidyTasks(db, 1, NOW);
+    expect(db.select().from(tasks).where(eq(tasks.id, note.id)).get()!.status).toBe("done");
+  });
+});

@@ -27,6 +27,8 @@ import { createGuard, runUserSync } from "./sync";
 import { pollIntervalAt } from "../lib/poll-schedule";
 import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type ProfileDeps } from "./profiles";
 import { refreshTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
+import { needsThread, normalizeDiscussion } from "../connectors/canvas/discussions";
+import { applyDiscussions, applyPlanner, discussionMetaFor } from "../db/canvas-extra";
 import { getModuleProfileRow } from "../db/profiles-repo";
 import { readFileSync } from "node:fs";
 import { ensurePdf } from "../server/files";
@@ -200,6 +202,8 @@ async function canvasSync(userId: number): Promise<void> {
       { label: "Syllabus", html: course.syllabus_body ?? null },
     ], fileCategorizer);
 
+    await syncDiscussions(canvas, user.canvasUserId ?? null, course.id, moduleId);
+
     // Weightage extraction: component-less modules only, at most weekly.
     if (!extractor) continue;
     const modRow = db.select().from(modules).where(eq(modules.id, moduleId)).get()!;
@@ -243,6 +247,44 @@ async function canvasSync(userId: number): Promise<void> {
     }
   }
   setModuleActivity(db, userId);
+  await syncPlanner(canvas, userId);
+}
+
+const THREADS_PER_COURSE = 6;
+
+// Discussions are optional per course (the tab can be off). Only threads whose
+// last reply moved are re-read, a few per course per sync, newest first.
+async function syncDiscussions(canvas: CanvasClient, selfId: number | null, courseId: number, moduleId: number): Promise<void> {
+  let topics: Awaited<ReturnType<CanvasClient["listDiscussions"]>>;
+  try { topics = await canvas.listDiscussions(courseId); } catch { return; }
+  if (!topics.length) return;
+  const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get()!;
+  const prev = new Map(topics.map((t) => [t.id, discussionMetaFor(db, mod.userId, t.id)]));
+  const stale = topics.filter((t) => needsThread(t, prev.get(t.id) ?? null))
+    .sort((a, b) => Date.parse(b.last_reply_at ?? b.posted_at ?? "0") - Date.parse(a.last_reply_at ?? a.posted_at ?? "0"))
+    .slice(0, THREADS_PER_COURSE);
+  let staff = new Set<number>();
+  if (stale.length) {
+    try { staff = new Set((await canvas.listCourseStaff(courseId)).map((u) => u.id)); } catch { /* treat nobody as staff */ }
+  }
+  const views = new Map<number, Awaited<ReturnType<CanvasClient["getDiscussionView"]>>>();
+  for (const t of stale) {
+    // "Post before seeing replies" answers 403 until the student posts.
+    try { views.set(t.id, await canvas.getDiscussionView(courseId, t.id)); } catch { /* keep what we had */ }
+  }
+  const rows = topics.flatMap((t) => normalizeDiscussion(t, views.get(t.id) ?? null, staff, selfId, prev.get(t.id) ?? null));
+  applyDiscussions(db, mod.userId, moduleId, rows, Date.now());
+}
+
+async function syncPlanner(canvas: CanvasClient, userId: number): Promise<void> {
+  const now = Date.now();
+  const window = { start: now - 14 * 86_400_000, end: now + 75 * 86_400_000 };
+  let planner: Awaited<ReturnType<CanvasClient["listPlannerItems"]>> = [];
+  let missing: Awaited<ReturnType<CanvasClient["listMissingSubmissions"]>> = [];
+  try { planner = await canvas.listPlannerItems(new Date(window.start).toISOString(), new Date(window.end).toISOString()); } catch { return; }
+  try { missing = await canvas.listMissingSubmissions(); } catch { /* planner alone still helps */ }
+  const byCourse = new Map(db.select().from(modules).where(eq(modules.userId, userId)).all().map((m) => [m.canvasCourseId, m.id]));
+  applyPlanner(db, userId, planner, missing, byCourse, window, now);
 }
 
 async function mailSync(userId: number): Promise<void> {

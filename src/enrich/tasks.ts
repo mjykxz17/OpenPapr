@@ -15,7 +15,7 @@ import { TASK_KINDS } from "../db/schema";
 
 export type TaskKind = (typeof TASK_KINDS)[number];
 export type TaskSource = {
-  kind: "canvas" | "announcement" | "file" | "weightage" | "nusmods";
+  kind: "canvas" | "announcement" | "discussion" | "planner" | "file" | "weightage" | "nusmods";
   label: string;
   itemId?: number;
   fileId?: number;
@@ -31,7 +31,9 @@ export type ModuleTaskInput = {
   module: { code: string; name: string };
   canvas: SignalItem[];          // open assignments, quizzes, dated events, extracted deadlines
   past: SignalItem[];            // recent past/submitted work, for spotting a weekly pattern
-  announcements: SignalItem[];
+  announcements: SignalItem[];  // includes lecturers' and TAs' replies in discussions
+  discussions: SignalItem[];    // discussions that ask something of the student
+  notes: SignalItem[];          // the student's own Canvas planner notes
   fileHints: SignalItem[];       // obligation-looking lines from slides and handouts
   weightage: { name: string; weightPct: number }[];
   examDate: string | null;       // NUSMods final exam date for this semester
@@ -57,13 +59,16 @@ const PlannedTask = z.object({
 const PlanResult = z.object({ tasks: z.array(z.unknown()).max(30).default([]) });
 export type PlannedTask = z.infer<typeof PlannedTask>;
 
-export const PLANNER_SYSTEM = `You are the planner in a study app for an NUS student. For ONE module you get today's date and every signal we have: open Canvas assignments/quizzes/deadlines, recent past work, announcements, obligation-looking lines from the slides and handouts, the assessment weightage, the final exam date, study advice, and the tasks already planned.
+export const PLANNER_SYSTEM = `You are the planner in a study app for an NUS student. For ONE module you get today's date and every signal we have: open Canvas assignments/quizzes/deadlines (with Canvas's own "missing" flag), recent past work, announcements, what lecturers and TAs replied in discussions, discussions that need a post, the student's own Canvas planner notes, obligation-looking lines from the slides and handouts, the assessment weightage, the final exam date, study advice, and the tasks already planned.
 
 Find every obligation for this module and anticipate what is coming, then break each into small executable steps.
 
 Rules:
 - ONE task per obligation. A quiz that is a Canvas item AND mentioned in an announcement AND on a slide is one task citing all three refs.
 - Include graded work, quizzes, tests, exams, submissions, presentations, project milestones, prep the sources explicitly ask for (readings, pre-lecture work), and admin with a consequence (registration, forms, bidding).
+- A graded discussion appears both as a Canvas item and as a discussion: one task, citing both. A discussion the student HAS posted in is done — skip it. A staff reply that changes scope or dates ("the quiz only covers L1-L5") must shape the task and its steps; cite it.
+- The student's own planner notes are tasks they chose: keep their wording, add steps only if the note is bigger than one sitting.
+- Work Canvas marks MISSING comes first: make its first step today.
 - Skip attending lectures, labs or tutorials, bringing or charging a laptop, anything already submitted or past, and generic advice with no source.
 - Anticipate only when grounded in a source you cite (anticipated=true, dueConfidence="estimated"): the next instance of a clear weekly pattern, preparation for a dated or week-numbered assessment, a milestone the schedule implies, revision for the final exam. Never invent an assessment. The weightage alone tells you an assessment exists, never its date: without a dated or week-numbered source, set due to null.
 - Horizon: things due in the next 6 weeks, plus the final exam.
@@ -72,7 +77,7 @@ Rules:
 - steps: every task needs 1-6 steps (only a task resting on the weightage alone may have none), each 15-90 minutes, verb first, under 70 characters, specific to this module's material (name the lecture, chapter, question range or topic). A form or registration is one step. Each step has doBy (YYYY-MM-DD) between today and the due date, spread out and finishing a day early where possible. For anticipated tasks more than two weeks away give only the first one or two steps.
 - key: lowercase slug starting with the module code, e.g. "cs2103t-v1-2-milestone". Reuse the key of an existing task when it is the same obligation.
 - why: under 90 characters — the weight, what it covers, or what the source says.
-- sources: refs exactly as given (e.g. "C12", "A40", "F7p3", "W", "X"), each with the key phrase quoted (under 120 characters).
+- sources: refs exactly as given (e.g. "C12", "A40", "R88", "D5", "P3", "F7p3", "W", "X"), each with the key phrase quoted (under 120 characters).
 
 Return ONLY a JSON object: {"tasks": [{"key": "", "title": "<under 60 characters>", "kind": "exam|quiz|submission|project|presentation|prep|reading|admin", "due": "<ISO or null>", "dueConfidence": "exact|estimated", "anticipated": false, "weightPct": <number or null>, "why": "", "sources": [{"ref": "", "quote": ""}], "steps": [{"text": "", "minutes": 30, "doBy": "YYYY-MM-DD"}]}]}
 No emoji.`;
@@ -85,7 +90,9 @@ export function plannerPrompt(input: ModuleTaskInput): string {
     `Module: ${input.module.code} ${input.module.name}`,
     block("Open Canvas work", input.canvas),
     block("Recent past work (for patterns)", input.past),
-    block("Announcements", input.announcements),
+    block("Announcements, and lecturers' or TAs' replies in discussions", input.announcements),
+    block("Discussions", input.discussions),
+    block("Your own Canvas planner notes", input.notes),
     block("From the slides and handouts", input.fileHints),
     `[W] Weightage: ${input.weightage.length ? input.weightage.map((c) => `${c.name} ${c.weightPct}%`).join(", ") : "(unknown)"}`,
     `[X] Final exam: ${input.examDate ?? "(no date on NUSMods)"}`,
