@@ -49,7 +49,7 @@ export default async function Home() {
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <SyncStatus syncStatus={overview.syncStatus} now={now} />
-          <SyncButton />
+          <SyncButton lastSyncedAt={overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null} />
         </div>
       </header>
 

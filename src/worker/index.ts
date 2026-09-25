@@ -24,6 +24,7 @@ import { createWeightageExtractor, type ExtractedComponent, type WeightageSource
 import type { CompatConfig } from "../enrich/openai-compat";
 import { sharedLlmConfig, userLlmConfig } from "../lib/llm-provider";
 import { createGuard, runUserSync } from "./sync";
+import { pollIntervalAt } from "../lib/poll-schedule";
 import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type ProfileDeps } from "./profiles";
 import { refreshTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
 import { getModuleProfileRow } from "../db/profiles-repo";
@@ -488,7 +489,7 @@ async function tick(): Promise<void> {
       lastSweepAt = now;
       const total = db.select().from(users).all().length;
       const cap = Math.max(1, Math.ceil(total / TICKS_PER_INTERVAL));
-      for (const user of selectDueUsers(db, Date.now(), env.POLL_INTERVAL_MS, cap)) {
+      for (const user of selectDueUsers(db, Date.now(), pollIntervalAt(Date.now(), env.POLL_INTERVAL_MS), cap)) {
         await runFor(user.id);
       }
     }

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { SYNC_ON_OPEN_AFTER_MS } from "@/lib/poll-schedule";
 
 function SpinnerIcon() {
   return (
@@ -24,7 +25,10 @@ function RefreshIcon() {
 
 type State = { pending: boolean; running: boolean; lastOk: boolean | null; lastError: string | null };
 
-export function SyncButton() {
+// With lastSyncedAt, opening the page syncs straight away when Canvas was last
+// read more than a couple of minutes ago, so the student never starts from
+// stale data even overnight, when the background schedule is hourly.
+export function SyncButton({ lastSyncedAt }: { lastSyncedAt?: number | null } = {}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +68,7 @@ export function SyncButton() {
     timer.current = setTimeout(poll, 1500);
   }, [router]);
 
-  async function syncNow() {
+  async function syncNow(quiet = false) {
     setError(null);
     setBusy(true);
     deadline.current = Date.now() + 3 * 60_000;
@@ -73,18 +77,27 @@ export function SyncButton() {
       if (!res.ok) throw new Error("Could not request a sync");
     } catch {
       setBusy(false);
-      setError("Could not reach the server.");
+      if (!quiet) setError("Could not reach the server.");
       return;
     }
     watch();
   }
+
+  const auto = useRef(false);
+  useEffect(() => {
+    if (auto.current || lastSyncedAt === undefined) return;
+    auto.current = true;
+    if (lastSyncedAt !== null && Date.now() - lastSyncedAt < SYNC_ON_OPEN_AFTER_MS) return;
+    void syncNow(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastSyncedAt]);
 
   return (
     <div className="flex items-center gap-2">
       {error && <span className="text-[13px] text-danger">{error}</span>}
       <button
         type="button"
-        onClick={syncNow}
+        onClick={() => syncNow()}
         disabled={busy}
         className="inline-flex h-9 items-center gap-2 rounded-md border border-line-2 bg-panel px-3 text-[13px] font-medium text-ink transition-colors hover:border-accent hover:text-accent disabled:opacity-60"
       >
