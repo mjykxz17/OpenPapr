@@ -345,7 +345,7 @@ function SlideNote({ moduleId, slide, onSaved }: { moduleId: number; slide: Slid
   return (
     <div className="flex min-h-0 flex-grow flex-col gap-2 rounded-md border border-line bg-panel px-3.5 pt-2.5">
       <div className="flex items-center justify-between">
-        <span className="inline-flex items-center rounded bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent">Note · {slide.deck} · {slide.page}</span>
+        <span className="inline-flex items-center rounded bg-sunken px-2 py-0.5 text-xs font-medium text-ink-2">Note · {slide.deck} · {slide.page}</span>
         <span className={`text-xs ${state === "error" ? "text-danger" : "text-ink-3"}`}>{status}</span>
       </div>
       <label className="flex min-h-0 flex-grow flex-col">

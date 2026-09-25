@@ -90,7 +90,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     const staff = a.type === "discussion" ? (staffReplies.get(a.sourceId) ?? []).sort((x, y) => (y.sourceCreatedAt ?? 0) - (x.sourceCreatedAt ?? 0)) : [];
     const needsPost = meta && !meta.posted && !a.canvasDone && !meta.locked && (meta.graded || meta.requireInitialPost || a.dueAt !== null);
     return (
-      <li key={a.id} id={`a-${a.id}`} className="min-w-0 scroll-mt-20 py-3 first:pt-3.5 last:pb-3.5 target:rounded-md target:bg-accent-soft target:px-2">
+      <li key={a.id} id={`a-${a.id}`} className="min-w-0 scroll-mt-20 py-3 first:pt-3.5 last:pb-3.5 target:rounded-md target:bg-sunken target:px-2">
         <details className="group">
           {/* The first lines of the body show while closed; opening shows all. */}
           <summary className="cursor-pointer select-none list-none">
@@ -104,8 +104,8 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
             {meta && (
               <p className="mt-1 flex flex-wrap gap-x-2 text-[12px] text-ink-3">
                 <span>{meta.replies} {meta.replies === 1 ? "reply" : "replies"}</span>
-                {meta.unread > 0 && <span className="text-accent">· {meta.unread} unread</span>}
-                {staff.length > 0 && <span className="text-accent">· {staff[0]!.sender ?? "Staff"} replied {relativeDay(staff[0]!.sourceCreatedAt ?? staff[0]!.firstSeenAt, now).toLowerCase()}</span>}
+                {meta.unread > 0 && <span className="text-ink-2">· {meta.unread} unread</span>}
+                {staff.length > 0 && <span className="text-ink-2">· {staff[0]!.sender ?? "Staff"} replied {relativeDay(staff[0]!.sourceCreatedAt ?? staff[0]!.firstSeenAt, now).toLowerCase()}</span>}
                 {meta.graded && <span>· graded</span>}
                 {needsPost && <span className="text-warn-ink">· you haven&rsquo;t posted{a.dueAt ? ` · due ${dueLabel(a.dueAt, now)}` : ""}</span>}
                 {meta.posted && <span>· you posted</span>}
@@ -117,7 +117,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           {staff.length > 0 && (
             <ul className="mt-3 flex flex-col gap-2">
               {staff.slice(0, 6).map((r) => (
-                <li key={r.id} className="rounded-md border-l-2 border-accent bg-accent-soft/60 px-3 py-2">
+                <li key={r.id} className="border-l-2 border-line-2 py-0.5 pl-3">
                   <p className="text-[12px] font-medium text-ink-2">{r.sender ?? "Staff"} · {relativeDay(r.sourceCreatedAt ?? r.firstSeenAt, now)}</p>
                   <p className="mt-0.5 whitespace-pre-line text-sm leading-[1.6] text-ink [overflow-wrap:anywhere]">{htmlToText(r.body)}</p>
                 </li>

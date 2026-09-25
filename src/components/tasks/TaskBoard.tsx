@@ -106,7 +106,7 @@ function TaskCard({ t, today, tick }: { t: TaskView; today: string; tick: Return
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-ink-3">
             <span>{KIND[t.kind] ?? t.kind}</span>
             {t.weightPct != null && <><span aria-hidden>·</span><span className="tabular-nums">{t.weightPct}% of grade</span></>}
-            {t.anticipated && <><span aria-hidden>·</span><span className="rounded-full bg-accent-soft px-1.5 text-accent">Anticipated</span></>}
+            {t.anticipated && <><span aria-hidden>·</span><span className="rounded-full border border-line px-1.5 text-ink-2">Anticipated</span></>}
             {t.total > 0 && (
               <span className="ml-auto inline-flex items-center gap-2">
                 <span className="h-1 w-16 overflow-hidden rounded-full bg-line" aria-hidden>
@@ -154,7 +154,7 @@ function TaskCard({ t, today, tick }: { t: TaskView; today: string; tick: Return
 function TodayList({ steps, minutes, nextDay, today, tick }: { steps: TodayStep[]; minutes: number; nextDay: TasksView["nextDay"]; today: string; tick: ReturnType<typeof useTick> }) {
   const left = steps.filter((s) => !tick.isDone(s.taskId, s));
   return (
-    <section aria-labelledby="today" className="rounded-[10px] border border-accent/30 bg-accent-soft/60">
+    <section aria-labelledby="today" className="rounded-[10px] border border-line bg-panel">
       <div className="flex items-baseline justify-between px-4 pt-3.5">
         <h2 id="today" className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-2">Today</h2>
         {steps.length > 0 && <span className="text-[13px] tabular-nums text-ink-2">{!left.length ? "All done" : left.length === steps.length ? `${steps.length} step${steps.length > 1 ? "s" : ""} · ${fmtMin(minutes)}` : `${left.length} of ${steps.length} left · ${fmtMin(left.reduce((n, s) => n + s.minutes, 0))}`}</span>}

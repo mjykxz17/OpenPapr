@@ -386,7 +386,7 @@ export function AccountSettings(props: Props) {
   return (
     <div className="flex max-w-3xl flex-col gap-6">
       {props.welcome && (
-        <p role="status" className="rounded-[10px] border border-accent/30 bg-accent-soft px-4 py-3 text-[14px] leading-relaxed text-ink">
+        <p role="status" className="rounded-[10px] border border-line bg-panel px-4 py-3 text-[14px] leading-relaxed text-ink">
           You’re in. Your Canvas token is saved, so you won’t need it again.
           {!props.llm && " Add an AI key below to generate study guides with your own model."}
         </p>

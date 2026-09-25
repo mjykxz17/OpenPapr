@@ -50,7 +50,7 @@ export function ModuleProfileCard(p: Props) {
         <div className="px-5 py-5">
           <p className="max-w-3xl text-[16px] leading-[1.5] text-ink">{prof.oneLine}</p>
           {p.focus && (
-            <p className="mt-3 max-w-3xl rounded-md border border-accent/25 bg-accent-soft px-3 py-2 text-[14px] leading-[1.5] text-ink">
+            <p className="mt-3 max-w-3xl rounded-md border border-line bg-panel px-3 py-2 text-[14px] leading-[1.5] text-ink">
               <span className="font-semibold">This week:</span> {p.focus.focus} <span className="text-ink-2">— {p.focus.why}</span>
             </p>
           )}
