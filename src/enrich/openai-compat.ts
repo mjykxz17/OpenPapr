@@ -36,7 +36,7 @@ export function extractJson(text: string): unknown | null {
   }
 }
 
-type Message = { role: "system" | "user"; content: string };
+type Message = { role: "system" | "user" | "assistant"; content: string };
 
 const gateKey = (cfg: CompatConfig) => createHash("sha256").update(`${cfg.baseUrl}\n${cfg.apiKey}`).digest("hex").slice(0, 24);
 

@@ -179,3 +179,40 @@ body {
   cursor: default;
   user-select: none;
 }
+
+/* --- Papi, the study buddy at the bottom of the page --------------------- */
+:root {
+  --papi-paper: #fffaf0;
+  --papi-fold: #f1e7d3;
+  --papi-ink: #27272a;
+  --papi-rule: #e7dcc6;
+  --papi-cheek: #f6c9c2;
+  --papi-foot: #27272a;
+  --papi-shadow: rgba(0, 0, 0, 0.1);
+}
+[data-theme="dark"] {
+  --papi-paper: #f4efe4;
+  --papi-fold: #ddd3bf;
+  --papi-ink: #18181b;
+  --papi-rule: #d9cdb5;
+  --papi-cheek: #eeb4ab;
+  --papi-foot: #d4d4d8;
+  --papi-shadow: rgba(255, 255, 255, 0.08);
+}
+@keyframes papi-bob { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-3px) } }
+@keyframes papi-hop { 0% { transform: translateY(0) scale(1, 1) } 20% { transform: translateY(1px) scale(1.06, .92) } 55% { transform: translateY(-14px) scale(.96, 1.05) } 80% { transform: translateY(0) scale(1.04, .96) } 100% { transform: translateY(0) scale(1, 1) } }
+@keyframes papi-pop { from { opacity: 0; transform: translateY(6px) scale(.96) } to { opacity: 1; transform: none } }
+@keyframes papi-talk { 0%, 100% { transform: scaleY(1) } 50% { transform: scaleY(.45) } }
+@keyframes papi-z { 0% { opacity: 0; transform: translate(0, 4px) } 30% { opacity: 1 } 100% { opacity: 0; transform: translate(6px, -10px) } }
+@keyframes papi-dots { 0% { content: "" } 33% { content: "." } 66% { content: ".." } 100% { content: "..." } }
+.papi-bob { animation: papi-bob 3.2s ease-in-out infinite; }
+.papi-hop { animation: papi-hop .7s cubic-bezier(.3, .7, .4, 1) 1; }
+.papi-pop { animation: papi-pop .22s ease-out; }
+.papi-talk { transform-origin: 30.5px 39.5px; animation: papi-talk .28s ease-in-out 4; }
+.papi-z { animation: papi-z 2.6s ease-in-out infinite; }
+.papi-dots::after { content: ""; animation: papi-dots 1.2s steps(1) infinite; }
+.papi { transition: transform .15s ease; }
+.papi:active { transform: scale(.94); }
+@media (prefers-reduced-motion: reduce) {
+  .papi-bob, .papi-hop, .papi-talk, .papi-z, .papi-pop { animation: none; }
+}
