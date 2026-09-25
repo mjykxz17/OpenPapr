@@ -66,8 +66,8 @@ describe("userLlmConfig with a fallback", () => {
   const fb = { llmFallbackBaseUrl: "https://b.test/v1", llmFallbackModel: "mb", llmFallbackKeyEnc: encrypt("kb", KEY), llmFallbackRpm: null };
   it("attaches the fallback and each RPM", () => {
     expect(userLlmConfig({ ...base, ...fb }, KEY)).toEqual({
-      baseUrl: "https://a.test/v1", model: "ma", apiKey: "ka", rpm: 30,
-      fallback: { baseUrl: "https://b.test/v1", model: "mb", apiKey: "kb", rpm: null },
+      baseUrl: "https://a.test/v1", model: "ma", apiKey: "ka", rpm: 30, extra: null,
+      fallback: { baseUrl: "https://b.test/v1", model: "mb", apiKey: "kb", rpm: null, extra: null },
     });
   });
   it("uses a lone fallback as the provider", () => {

@@ -7,7 +7,7 @@ import { relativeDay, shortTime } from "@/lib/format-date";
 import { AboutYou } from "./profile/AboutYou";
 import type { ComponentProps } from "react";
 
-type ProviderView = { baseUrl: string; model: string; keyHint: string; rpm: number | null };
+type ProviderView = { baseUrl: string; model: string; keyHint: string; rpm: number | null; extra: string };
 
 type Props = {
   welcome: boolean;
@@ -161,6 +161,7 @@ function ProviderForm({ slot, current, onSaved, onRemoved, removeLabel }: {
   const [model, setModel] = useState(current?.model ?? "");
   const [apiKey, setApiKey] = useState("");
   const [rpm, setRpm] = useState(current?.rpm ? String(current.rpm) : "");
+  const [extra, setExtra] = useState(current?.extra ?? "");
   const [pending, setPending] = useState<"save" | "remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -179,7 +180,7 @@ function ProviderForm({ slot, current, onSaved, onRemoved, removeLabel }: {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setPending("save"); setError(null); setOk(null);
-    const r = await send("/api/account/llm", "PUT", { slot, baseUrl, model, apiKey, rpm: rpm.trim() || null });
+    const r = await send("/api/account/llm", "PUT", { slot, baseUrl, model, apiKey, rpm: rpm.trim() || null, extra });
     setPending(null);
     if (!r.ok) { setError(String(r.data.error ?? "Could not save that provider.")); return; }
     setApiKey(""); setOk(onSaved);
@@ -191,7 +192,7 @@ function ProviderForm({ slot, current, onSaved, onRemoved, removeLabel }: {
     const r = await send(`/api/account/llm?slot=${slot}`, "DELETE");
     setPending(null);
     if (!r.ok) { setError(String(r.data.error ?? "Could not remove the key.")); return; }
-    setApiKey(""); setModel(""); setRpm("");
+    setApiKey(""); setModel(""); setRpm(""); setExtra("");
     setOk(onRemoved);
     router.refresh();
   }
@@ -214,12 +215,14 @@ function ProviderForm({ slot, current, onSaved, onRemoved, removeLabel }: {
 
       <label className={label} htmlFor={`${id}-url`}>
         Base URL
-        <input id={`${id}-url`} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} readOnly={preset !== "custom"} required
-          spellCheck={false} inputMode="url" placeholder="https://…/v1"
-          className={`${field} font-mono text-[13px] ${preset !== "custom" ? "bg-sunken text-ink-2" : ""}`} />
-        {preset === "custom" && (
-          <span className="text-[12px] text-ink-3">Any endpoint that speaks the OpenAI chat-completions API.</span>
-        )}
+        {/* Always editable: a preset only fills it in. Editing it to anything
+            else switches the provider to Other. */}
+        <input id={`${id}-url`} value={baseUrl} required spellCheck={false} inputMode="url" placeholder="https://…/v1"
+          onChange={(e) => { setBaseUrl(e.target.value); setPreset(presetFor(e.target.value)); }}
+          className={`${field} font-mono text-[13px]`} />
+        <span className="text-[12px] text-ink-3">
+          {preset === "custom" ? "Any endpoint that speaks the OpenAI chat-completions API — a gateway, a proxy, or a self-hosted server." : "Filled in for you — edit it if you use a different address."}
+        </span>
       </label>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_11rem]">
@@ -238,6 +241,19 @@ function ProviderForm({ slot, current, onSaved, onRemoved, removeLabel }: {
         Set this to your plan&apos;s rate limit. Requests beyond it wait their turn in a queue instead of failing — a study
         guide fires many at once, so free and low tiers need it.
       </p>
+
+      <details className="group" open={Boolean(current?.extra)}>
+        <summary className="cursor-pointer text-[13px] text-ink-2 hover:text-ink">Advanced request options</summary>
+        <label className={`${label} mt-2`} htmlFor={`${id}-extra`}>
+          <span className="text-[12px] leading-relaxed text-ink-3">
+            JSON added to every request to this provider — for example OpenRouter&apos;s routing or reasoning settings.
+            OpenPapr still sets the model, messages and length itself.
+          </span>
+          <textarea id={`${id}-extra`} value={extra} onChange={(e) => setExtra(e.target.value)} rows={4} spellCheck={false}
+            placeholder={'{\n  "reasoning": { "effort": "low" },\n  "provider": { "sort": "throughput" }\n}'}
+            className="w-full rounded-md border border-line-2 bg-surface px-3 py-2 font-mono text-[12.5px] text-ink outline-none placeholder:text-ink-3 focus:border-accent" />
+        </label>
+      </details>
 
       <label className={label} htmlFor={`${id}-key`}>
         API key

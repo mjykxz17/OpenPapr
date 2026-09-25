@@ -143,21 +143,22 @@ export function recordCanvasTokenCheck(db: Db, userId: number, ok: boolean, now:
 export type LlmSlot = "primary" | "fallback";
 
 export function setLlmProvider(
-  db: Db, userId: number, cfg: { baseUrl: string; model: string; apiKey: string; rpm?: number | null }, secretHex: string,
+  db: Db, userId: number, cfg: { baseUrl: string; model: string; apiKey: string; rpm?: number | null; extra?: Record<string, unknown> | null }, secretHex: string,
   slot: LlmSlot = "primary",
 ): void {
   const keyEnc = encrypt(cfg.apiKey, secretHex);
   const rpm = cfg.rpm ?? null;
+  const extra = cfg.extra ? JSON.stringify(cfg.extra) : null;
   db.update(users).set(slot === "primary"
-    ? { llmBaseUrl: cfg.baseUrl, llmModel: cfg.model, llmKeyEnc: keyEnc, llmRpm: rpm }
-    : { llmFallbackBaseUrl: cfg.baseUrl, llmFallbackModel: cfg.model, llmFallbackKeyEnc: keyEnc, llmFallbackRpm: rpm })
+    ? { llmBaseUrl: cfg.baseUrl, llmModel: cfg.model, llmKeyEnc: keyEnc, llmRpm: rpm, llmExtraJson: extra }
+    : { llmFallbackBaseUrl: cfg.baseUrl, llmFallbackModel: cfg.model, llmFallbackKeyEnc: keyEnc, llmFallbackRpm: rpm, llmFallbackExtraJson: extra })
     .where(eq(users.id, userId)).run();
 }
 
 export function clearLlmProvider(db: Db, userId: number, slot: LlmSlot = "primary"): void {
   db.update(users).set(slot === "primary"
-    ? { llmBaseUrl: null, llmModel: null, llmKeyEnc: null, llmRpm: null }
-    : { llmFallbackBaseUrl: null, llmFallbackModel: null, llmFallbackKeyEnc: null, llmFallbackRpm: null })
+    ? { llmBaseUrl: null, llmModel: null, llmKeyEnc: null, llmRpm: null, llmExtraJson: null }
+    : { llmFallbackBaseUrl: null, llmFallbackModel: null, llmFallbackKeyEnc: null, llmFallbackRpm: null, llmFallbackExtraJson: null })
     .where(eq(users.id, userId)).run();
 }
 

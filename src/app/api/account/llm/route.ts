@@ -5,7 +5,7 @@ import { checkLlmProvider } from "@/server/llm-check";
 import { currentUserId } from "@/server/session";
 import { clearLlmProvider, getUser, setLlmProvider, type LlmSlot } from "@/db/repo";
 import { loadEnv } from "@/lib/env";
-import { checkBaseUrl, RPM_MAX, secretHint, userLlmSlot } from "@/lib/llm-provider";
+import { checkBaseUrl, parseExtra, RPM_MAX, secretHint, userLlmSlot } from "@/lib/llm-provider";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +37,9 @@ export async function PUT(request: Request) {
     }
   }
 
+  const extra = parseExtra(typeof req.body.extra === "string" ? req.body.extra : "");
+  if (!extra.ok) return NextResponse.json({ error: extra.error }, { status: 400 });
+
   let apiKey = str(req.body.apiKey);
   if (apiKey.length > 1000) return NextResponse.json({ error: "that key is too long" }, { status: 400 });
   if (!apiKey) {
@@ -48,12 +51,12 @@ export async function PUT(request: Request) {
     apiKey = stored.apiKey;
   }
 
-  const cfg = { baseUrl: url.url, model, apiKey, rpm };
+  const cfg = { baseUrl: url.url, model, apiKey, rpm, extra: extra.value };
   const check = await checkLlmProvider(cfg);
   if (!check.ok) return NextResponse.json({ error: check.error }, { status: 400 });
 
   setLlmProvider(db, req.userId, cfg, env.SECRET_KEY, slot);
-  return NextResponse.json({ ok: true, slot, baseUrl: cfg.baseUrl, model, rpm, keyHint: secretHint(apiKey) });
+  return NextResponse.json({ ok: true, slot, baseUrl: cfg.baseUrl, model, rpm, extra: extra.value ? JSON.stringify(extra.value, null, 2) : "", keyHint: secretHint(apiKey) });
 }
 
 export async function DELETE(request: Request) {

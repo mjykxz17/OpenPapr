@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { LlmScore } from "./llm";
 import type { ExtractedComponent, WeightageSourceText } from "./weightage";
 import { createHash } from "node:crypto";
-import { tokenParams } from "../lib/llm-provider";
+import { requestBody, requestHeaders, tokenParams } from "../lib/llm-provider";
 import { gateFor } from "../lib/rate-gate";
 
 // OpenAI-compatible provider (Agnes agrouter). Same contracts as ./llm and
@@ -17,6 +17,8 @@ export interface CompatConfig {
   rpm?: number | null;
   // Tried when this provider fails.
   fallback?: CompatConfig | null;
+  // Extra request-body fields (provider routing, reasoning effort, …).
+  extra?: Record<string, unknown> | null;
 }
 
 const EmailScore = z.object({ important: z.boolean(), score: z.number(), reason: z.string() });
@@ -54,8 +56,8 @@ async function callOnce(cfg: CompatConfig, messages: Message[], params: Record<s
     await gateFor(gateKey(cfg), cfg.rpm).acquire();
     const res = await fetchFn(`${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: cfg.model, ...params, messages }),
+      headers: requestHeaders(cfg),
+      body: JSON.stringify(requestBody(cfg, params, messages)),
       signal: AbortSignal.timeout(timeoutMs),
     });
     // Rate-limited or briefly overloaded, with a short wait suggested: wait

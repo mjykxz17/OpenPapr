@@ -1,5 +1,5 @@
 import type { CompatConfig } from "@/enrich/openai-compat";
-import { tokenParams } from "@/lib/llm-provider";
+import { requestBody, requestHeaders, tokenParams } from "@/lib/llm-provider";
 
 export type LlmCheck = { ok: true } | { ok: false; error: string };
 
@@ -21,12 +21,8 @@ export async function checkLlmProvider(cfg: CompatConfig, fetchFn: typeof fetch 
   try {
     res = await fetchFn(`${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: cfg.model,
-        ...tokenParams(cfg.baseUrl, 64),
-        messages: [{ role: "user", content: "Reply with the single word OK." }],
-      }),
+      headers: requestHeaders(cfg),
+      body: JSON.stringify(requestBody(cfg, tokenParams(cfg.baseUrl, 64), [{ role: "user", content: "Reply with the single word OK." }])),
       signal: AbortSignal.timeout(20_000),
       redirect: "error",
     });

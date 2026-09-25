@@ -95,7 +95,7 @@ function kitFor(userId: number): LlmKit {
   const own = user ? userLlmConfig(user, env.SECRET_KEY) : null;
   if (!own) { userKits.delete(userId); return sharedKit; }
   // Any change in Account — key, model, RPM or fallback — makes a new kit.
-  const sig = JSON.stringify([own.baseUrl, own.model, own.rpm, user!.llmKeyEnc, own.fallback?.baseUrl, own.fallback?.model, own.fallback?.rpm, user!.llmFallbackKeyEnc]);
+  const sig = JSON.stringify([own.baseUrl, own.model, own.rpm, user!.llmKeyEnc, user!.llmExtraJson, own.fallback?.baseUrl, own.fallback?.model, own.fallback?.rpm, user!.llmFallbackKeyEnc, user!.llmFallbackExtraJson]);
   const hit = userKits.get(userId);
   if (hit && hit.sig === sig) return hit.kit;
   const kit = compatKit(own);

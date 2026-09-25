@@ -49,7 +49,7 @@ describe("presetFor", () => {
 describe("userLlmConfig", () => {
   it("decrypts a saved provider", () => {
     const row = { llmBaseUrl: "https://api.openai.com/v1", llmModel: "m", llmKeyEnc: encrypt("sk-1", KEY) };
-    expect(userLlmConfig(row, KEY)).toEqual({ baseUrl: "https://api.openai.com/v1", model: "m", apiKey: "sk-1", rpm: null });
+    expect(userLlmConfig(row, KEY)).toEqual({ baseUrl: "https://api.openai.com/v1", model: "m", apiKey: "sk-1", rpm: null, extra: null });
   });
   it("is null when any part is missing", () => {
     expect(userLlmConfig({ llmBaseUrl: "https://x.dev", llmModel: null, llmKeyEnc: encrypt("k", KEY) }, KEY)).toBeNull();
@@ -75,5 +75,25 @@ describe("tokenParams", () => {
   it("keeps max_tokens and temperature everywhere else", () => {
     expect(tokenParams("https://openrouter.ai/api/v1", 100, 0.3)).toEqual({ max_tokens: 100, temperature: 0.3 });
     expect(tokenParams("https://api.anthropic.com/v1", 100)).toEqual({ max_tokens: 100 });
+  });
+});
+
+import { parseExtra as _parseExtra, requestBody as _requestBody, requestHeaders as _requestHeaders } from "./llm-provider";
+describe("extra request options", () => {
+  it("accepts a JSON object and refuses fields the app sets", () => {
+    expect(_parseExtra("")).toEqual({ ok: true, value: null });
+    expect(_parseExtra('{"reasoning":{"effort":"low"}}')).toEqual({ ok: true, value: { reasoning: { effort: "low" } } });
+    expect(_parseExtra("[1]").ok).toBe(false);
+    expect(_parseExtra("{nope").ok).toBe(false);
+    const r = _parseExtra('{"model":"x","max_tokens":5}');
+    expect(r.ok === false && r.error).toMatch(/model, max_tokens/);
+  });
+  it("adds fields without overriding the app's", () => {
+    expect(_requestBody({ model: "m", extra: { top_p: 0.9, temperature: 1 } }, { max_tokens: 10, temperature: 0.2 }, [{ role: "user" }]))
+      .toEqual({ top_p: 0.9, temperature: 0.2, model: "m", max_tokens: 10, messages: [{ role: "user" }] });
+  });
+  it("names the app to OpenRouter only", () => {
+    expect(_requestHeaders({ baseUrl: "https://openrouter.ai/api/v1", apiKey: "k" })["X-Title"]).toBe("OpenPapr");
+    expect(_requestHeaders({ baseUrl: "https://api.openai.com/v1", apiKey: "k" })["X-Title"]).toBeUndefined();
   });
 });

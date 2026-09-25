@@ -26,7 +26,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
   }
   const own = userLlmSlot(user, "primary", env.SECRET_KEY);
   const fb = userLlmSlot(user, "fallback", env.SECRET_KEY);
-  const view = (c: typeof own) => (c ? { baseUrl: c.baseUrl, model: c.model, keyHint: secretHint(c.apiKey), rpm: c.rpm ?? null } : null);
+  const view = (c: typeof own) => (c ? { baseUrl: c.baseUrl, model: c.model, keyHint: secretHint(c.apiKey), rpm: c.rpm ?? null, extra: c.extra ? JSON.stringify(c.extra, null, 2) : "" } : null);
   const shared = sharedLlmConfig(env);
   const sharedModel = shared?.model ?? (env.ANTHROPIC_API_KEY ? env.ANTHROPIC_MODEL : null);
   const about = { ...userProfileView(getDb(), userId), hasModel: canGenerateGuides(getDb(), userId) };
