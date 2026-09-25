@@ -205,6 +205,10 @@ body {
 @keyframes papi-talk { 0%, 100% { transform: scaleY(1) } 50% { transform: scaleY(.45) } }
 @keyframes papi-z { 0% { opacity: 0; transform: translate(0, 4px) } 30% { opacity: 1 } 100% { opacity: 0; transform: translate(6px, -10px) } }
 @keyframes papi-dots { 0% { content: "" } 33% { content: "." } 66% { content: ".." } 100% { content: "..." } }
+@keyframes papi-spin { 0% { transform: translateY(0) rotate(0) } 40% { transform: translateY(-18px) rotate(200deg) } 100% { transform: translateY(0) rotate(360deg) } }
+@keyframes papi-bounce { 0% { transform: scale(1.12, .86) } 35% { transform: scale(.94, 1.08) } 65% { transform: scale(1.03, .97) } 100% { transform: scale(1, 1) } }
+.papi-spin { animation: papi-spin .9s cubic-bezier(.3, .7, .4, 1) 1; transform-origin: 50% 60%; }
+.papi-bounce { animation: papi-bounce .6s ease-out 1; transform-origin: 50% 100%; }
 .papi-bob { animation: papi-bob 3.2s ease-in-out infinite; }
 .papi-hop { animation: papi-hop .7s cubic-bezier(.3, .7, .4, 1) 1; }
 .papi-pop { animation: papi-pop .22s ease-out; }
@@ -214,5 +218,5 @@ body {
 .papi { transition: transform .15s ease; }
 .papi:active { transform: scale(.94); }
 @media (prefers-reduced-motion: reduce) {
-  .papi-bob, .papi-hop, .papi-talk, .papi-z, .papi-pop { animation: none; }
+  .papi-bob, .papi-hop, .papi-talk, .papi-z, .papi-pop, .papi-spin, .papi-bounce { animation: none; }
 }

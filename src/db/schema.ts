@@ -323,3 +323,14 @@ export const taskPlans = sqliteTable("task_plans", {
   error: text("error"),
   errorAt: integer("error_at"),
 });
+
+// Conversations with Papi, kept per student so they can go back to one or
+// start fresh. messagesJson is [{role, content, at}], capped in the app.
+export const petChats = sqliteTable("pet_chats", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  title: text("title").notNull(),
+  messagesJson: text("messages_json").notNull().default("[]"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (t) => [index("pet_chats_user").on(t.userId, t.updatedAt)]);

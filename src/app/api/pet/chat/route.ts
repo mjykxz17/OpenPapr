@@ -9,14 +9,15 @@ import { loadEnv } from "@/lib/env";
 import { sharedLlmConfig, userLlmConfig } from "@/lib/llm-provider";
 import { complete } from "@/enrich/openai-compat";
 import { PET_SYSTEM, dueList, factSheet, recentlySaid, ruleAnswer } from "@/server/pet";
+import { appendToChat, getChat } from "@/server/pet-chats";
 
 export const dynamic = "force-dynamic";
 
-type Msg = { role: "user" | "assistant"; content: string };
-
-// Ask Papi something. With an AI provider the question is answered from a
-// sheet of the student's own facts; without one, simple date questions still
-// get an answer from the rules.
+// Ask Papi something, inside a conversation. The conversation is stored, so
+// its earlier turns give the model context and the student can come back to
+// it. No sessionId starts a new one. With an AI provider the question is
+// answered from a sheet of the student's own facts; without one, simple date
+// questions still get an answer from the rules.
 export async function POST(request: Request) {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -24,13 +25,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "expected a JSON body" }, { status: 415 });
   }
   if (!rateLimit(`pet:${userId}`, 40, 10 * 60_000)) return NextResponse.json({ reply: "I need a little breather — too many questions at once. Try again in a few minutes?" });
-  let body: { messages?: unknown };
-  try { body = (await request.json()) as { messages?: unknown }; } catch { return NextResponse.json({ error: "invalid body" }, { status: 400 }); }
-  const messages: Msg[] = (Array.isArray(body.messages) ? body.messages : [])
-    .filter((m): m is Msg => !!m && typeof m === "object" && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
-    .slice(-8).map((m) => ({ role: m.role, content: m.content.slice(0, 1000) }));
-  const last = [...messages].reverse().find((m) => m.role === "user");
-  if (!last) return NextResponse.json({ error: "nothing to answer" }, { status: 400 });
+  let body: { message?: unknown; sessionId?: unknown };
+  try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: "invalid body" }, { status: 400 }); }
+  const question = typeof body.message === "string" ? body.message.trim().slice(0, 1000) : "";
+  if (!question) return NextResponse.json({ error: "nothing to answer" }, { status: 400 });
+  const sessionId = typeof body.sessionId === "number" && Number.isInteger(body.sessionId) ? body.sessionId : null;
 
   const db = getDb();
   const now = Date.now();
@@ -38,18 +37,26 @@ export async function POST(request: Request) {
   const user = getUser(db, userId);
   const cfg = (user && userLlmConfig(user, env.SECRET_KEY)) || sharedLlmConfig(env);
   const codes = db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all().map((m) => m.code);
-  const fallback = () => ruleAnswer(last.content, dueList(db, userId, now), codes, now, recentlySaid(db, userId, now));
+  const fallback = () => ruleAnswer(question, dueList(db, userId, now), codes, now, recentlySaid(db, userId, now));
+  const earlier = sessionId !== null ? (getChat(db, userId, sessionId)?.messages ?? []) : [];
 
-  if (!cfg) return NextResponse.json({ reply: fallback(), smart: false });
-  try {
-    const reply = await complete(cfg, [
-      { role: "system", content: `${PET_SYSTEM}\n\nFACTS\n${factSheet(db, userId, now)}` },
-      ...messages,
-    ], { maxTokens: 400, temperature: 0.6, timeoutMs: 45_000 });
-    const text = reply.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#+\s*/gm, "").trim();
-    return NextResponse.json({ reply: text || fallback(), smart: true });
-  } catch {
-    // The model is down or out of credit: the rules still know the dates.
-    return NextResponse.json({ reply: `${fallback()} (My big brain is offline, so that's the short version.)`, smart: false });
+  let reply: string;
+  let smart = false;
+  if (!cfg) reply = fallback();
+  else {
+    try {
+      const out = await complete(cfg, [
+        { role: "system", content: `${PET_SYSTEM}\n\nFACTS\n${factSheet(db, userId, now)}` },
+        ...earlier.slice(-8).map((m) => ({ role: m.role, content: m.content })),
+        { role: "user", content: question },
+      ], { maxTokens: 400, temperature: 0.6, timeoutMs: 45_000 });
+      reply = out.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#+\s*/gm, "").trim() || fallback();
+      smart = true;
+    } catch {
+      // The model is down or out of credit: the rules still know the dates.
+      reply = `${fallback()} (My big brain is offline, so that's the short version.)`;
+    }
   }
+  const saved = appendToChat(db, userId, earlier.length ? sessionId : null, question, reply, now);
+  return NextResponse.json({ reply, smart, sessionId: saved.id, title: saved.title });
 }
