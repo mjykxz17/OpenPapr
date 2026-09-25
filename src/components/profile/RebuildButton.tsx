@@ -14,7 +14,7 @@ const built = (ms: number) => {
 // "Built today 14:02 · Rebuild". Rebuilding is done by the worker, so the
 // button asks for it and then watches for the new version to land.
 export function RebuildButton({ scope, moduleId, status, noun = "profile" }: {
-  scope: "me" | "plan" | "module"; moduleId?: number; status: Status; noun?: string;
+  scope: "me" | "plan" | "module" | "tasks"; moduleId?: number; status: Status; noun?: string;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(status.pending);

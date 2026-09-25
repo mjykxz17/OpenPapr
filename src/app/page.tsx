@@ -11,6 +11,7 @@ import { getUser } from "@/db/repo";
 import { weeklyPlanView } from "@/server/profiles";
 import { canGenerateGuides } from "@/server/llm-access";
 import { WeekPlan } from "@/components/profile/WeekPlan";
+import { tasksView } from "@/server/tasks";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,7 @@ export default async function Home() {
       <div className="flex flex-col gap-9">
         <WeekPlan
           {...weeklyPlanView(getDb(), userId, now)}
-          today={new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "Asia/Singapore" }).format(now)}
+          todaySteps={(() => { const v = tasksView(getDb(), userId, now); return { count: v.today.length, minutes: v.todayMinutes }; })()}
           moduleIdByCode={Object.fromEntries(overview.modules.map((m) => [m.code.toUpperCase(), m.id]))}
           hasModel={canGenerateGuides(getDb(), userId)}
         />

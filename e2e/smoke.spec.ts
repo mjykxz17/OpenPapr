@@ -75,8 +75,10 @@ test("a session reaches the dashboard, modules, reminders and mail", async ({ pa
     .or(page.getByRole("link", { name: /add an ai key/i }))).toBeVisible();
   await expect(page.getByRole("link", { name: /overview/i })).toHaveAttribute("href", "/modules/2");
 
+  // Reminders became Tasks; the old address still works.
   await page.goto("/reminders");
-  await expect(page.getByRole("heading", { name: "Reminders" })).toBeVisible();
+  await expect(page).toHaveURL(/\/tasks$/);
+  await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
   await expect(page.getByText(/overdue/i).first()).toBeVisible();
 
   await page.goto("/mail");

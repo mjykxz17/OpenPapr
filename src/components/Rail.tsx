@@ -53,7 +53,7 @@ function AccountIcon() {
 
 const NAV = [
   { href: "/", label: "Home", Icon: HomeIcon },
-  { href: "/reminders", label: "Reminders", Icon: RemindersIcon },
+  { href: "/tasks", label: "Tasks", Icon: RemindersIcon },
   { href: "/study", label: "Study guides", Icon: StudyIcon },
   { href: "/mail", label: "Mail", Icon: MailIcon },
 ] as const;

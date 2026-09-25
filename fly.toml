@@ -8,6 +8,8 @@ swap_size_mb = 512
 [build]
 [env]
   DATABASE_PATH = "/data/openpapr.db"
+  # Dates and times are shown as the students live them, not in UTC.
+  TZ = "Asia/Singapore"
 [mounts]
   source = "openpapr_data"
   destination = "/data"

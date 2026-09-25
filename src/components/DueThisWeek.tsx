@@ -26,8 +26,8 @@ export function DueThisWeek({ todos, modules, now }: { todos: Overview["todos"];
     <section className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between">
         <h2 className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-2">Due this week</h2>
-        <Link href="/reminders" className="text-[13px] text-ink-2 hover:text-accent">
-          All reminders →
+        <Link href="/tasks" className="text-[13px] text-ink-2 hover:text-accent">
+          All tasks →
         </Link>
       </div>
       {due.length === 0 ? (

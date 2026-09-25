@@ -25,6 +25,7 @@ import type { CompatConfig } from "../enrich/openai-compat";
 import { sharedLlmConfig, userLlmConfig } from "../lib/llm-provider";
 import { createGuard, runUserSync } from "./sync";
 import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type ProfileDeps } from "./profiles";
+import { refreshTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
 import { getModuleProfileRow } from "../db/profiles-repo";
 import { readFileSync } from "node:fs";
 import { ensurePdf } from "../server/files";
@@ -364,11 +365,35 @@ const guardedProfiles = profileGuard("profiles", async (userId: number) => {
   if (r.errors.length) console.warn(`profile issues for user ${userId}: ${r.errors.slice(0, 4).join(" | ")}`);
 });
 
+// Tasks are planned after profiles, which they read. Like profiles they never
+// fail a sync: a model that is down leaves the current tasks standing.
+const taskDeps: TaskDeps = {
+  db, now: Date.now,
+  cfgFor: (userId) => kitFor(userId).compatCfg,
+  fileText: async (userId, file, mod) => {
+    const served = await ensurePdf(db, userId, { file, mod });
+    if ("error" in served) return null;
+    return extractPdfText(new Uint8Array(readFileSync(served.path)));
+  },
+};
+const taskGuard = createGuard(env.POLL_INTERVAL_MS);
+const guardedTasks = taskGuard("tasks", async (userId: number) => {
+  try {
+    const r = await refreshTasks(taskDeps, userId);
+    if (r.planned || r.files) console.log(`tasks for user ${userId}: ${r.planned} module(s) planned, ${r.files} file(s) read`);
+    if (r.errors.length) console.warn(`task issues for user ${userId}: ${r.errors.slice(0, 4).join(" | ")}`);
+  } catch (err) {
+    db.update(users).set({ tasksRequestedAt: null }).where(eq(users.id, userId)).run();
+    throw err;
+  }
+});
+
 async function runFor(userId: number): Promise<void> {
   beat();
   markSyncStarted(db, userId, Date.now());
   await runUserSync(deps, userId);
   await guardedProfiles(userId).catch(() => {});
+  await guardedTasks(userId).catch(() => {});
 }
 
 function parseJson<T>(schema: { safeParse: (v: unknown) => { success: boolean; data?: unknown } }, json: string | null | undefined): T | null {
@@ -470,6 +495,10 @@ async function tick(): Promise<void> {
     for (const userId of usersWithProfileRequests(db)) {
       profileGuard.resetUser(userId);
       await guardedProfiles(userId).catch(() => {});
+    }
+    for (const userId of usersWithTaskRequests(db)) {
+      taskGuard.resetUser(userId);
+      await guardedTasks(userId).catch(() => {});
     }
     // Generation takes minutes; it runs beside the tick rather than inside
     // it, so "Sync now" and everyone's syncs keep flowing meanwhile.

@@ -280,7 +280,7 @@ async function refreshWeeklyPlan(deps: ProfileDeps, userId: number, cfg: CompatC
   };
   // The day is part of the hash: a plan made on Monday is replanned on
   // Thursday with only the days that are left.
-  const h = hash({ ...input, today: input.today.slice(0, 3), v: 2 }); // v: bump when the plan prompt changes
+  const h = hash({ ...input, today: input.today.slice(0, 3), v: 3 }); // v: bump when the plan prompt changes
   const requested = Boolean(row?.requestedAt);
   const current = row && row.weekStart === week && row.planJson;
   if (!requested && current && (row.inputsHash === h || (row.generatedAt && now - row.generatedAt < TTL.plan))) return "skipped";

@@ -60,6 +60,8 @@ export const users = sqliteTable("users", {
   profileRequestedAt: integer("profile_requested_at"),
   profileError: text("profile_error"),
   courseHistoryAt: integer("course_history_at"),
+  // "Replan" on the Tasks page; the worker clears it as it picks it up.
+  tasksRequestedAt: integer("tasks_requested_at"),
 }, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId), uniqueIndex("users_username").on(t.username)]);
 
 export const modules = sqliteTable("modules", {
@@ -255,3 +257,54 @@ export const weeklyPlans = sqliteTable("weekly_plans", {
   requestedAt: integer("requested_at"),
   error: text("error"),
 }, (t) => [uniqueIndex("weekly_plans_user").on(t.userId)]);
+
+// --- smart tasks ------------------------------------------------------------
+// One obligation the student has to meet, however it reached us: a Canvas
+// quiz, a line in an announcement, a slide that says "submit before Week 6",
+// or something OpenPapr anticipates (the next tutorial, prep for a midterm the
+// syllabus weights at 30%). The same obligation seen in several places is one
+// task citing every place. Big tasks carry small steps, each with a day to do
+// it by, scheduled backwards from the due date.
+export const TASK_KINDS = ["exam", "quiz", "submission", "project", "presentation", "prep", "reading", "admin"] as const;
+export const tasks = sqliteTable("tasks", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  moduleId: integer("module_id").references(() => modules.id),
+  // Stable identity across rebuilds, chosen by the planner and reused when the
+  // same obligation is seen again ("cs2103t-v1.2-milestone").
+  key: text("key").notNull(),
+  title: text("title").notNull(),
+  kind: text("kind", { enum: TASK_KINDS }).notNull(),
+  dueAt: integer("due_at"),
+  // exact = a date someone published; estimated = inferred (a pattern, a week
+  // number, the NUSMods exam date); null dueAt = no date known yet.
+  dueConfidence: text("due_confidence", { enum: ["exact", "estimated"] }).notNull().default("exact"),
+  anticipated: integer("anticipated", { mode: "boolean" }).notNull().default(false),
+  weightPct: real("weight_pct"),
+  why: text("why"),
+  sourcesJson: text("sources_json").notNull().default("[]"),  // [{kind, label, itemId?, deck?, page?, quote?}]
+  stepsJson: text("steps_json").notNull().default("[]"),      // [{id, text, minutes, doBy, done}]
+  status: text("status", { enum: ["open", "done", "dismissed"] }).notNull().default("open"),
+  // Set once the student ticks a step or changes the task: from then on a
+  // rebuild may refresh the date and sources but leaves the steps alone.
+  touchedAt: integer("touched_at"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (t) => [uniqueIndex("tasks_user_key").on(t.userId, t.key), index("tasks_user_status").on(t.userId, t.status)]);
+
+// Obligation-looking lines found in a file's text ("Quiz 2 in Week 7 covers
+// L1-L5", "read Ch. 4 before the next lecture"), read once per file.
+export const fileHints = sqliteTable("file_hints", {
+  fileId: integer("file_id").primaryKey().references(() => files.id),
+  hintsJson: text("hints_json").notNull(),   // [{page, text}]
+  extractedAt: integer("extracted_at").notNull(),
+});
+
+// When a module's tasks were last planned, and from what.
+export const taskPlans = sqliteTable("task_plans", {
+  moduleId: integer("module_id").primaryKey().references(() => modules.id),
+  inputsHash: text("inputs_hash"),
+  generatedAt: integer("generated_at"),
+  error: text("error"),
+  errorAt: integer("error_at"),
+});

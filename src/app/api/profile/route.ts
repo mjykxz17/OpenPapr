@@ -4,18 +4,20 @@ import { getDb } from "@/server/db";
 import { accountRequest } from "@/server/account-request";
 import { currentUserId } from "@/server/session";
 import { users } from "@/db/schema";
+import { taskPlanStatus } from "@/server/tasks";
 import { getModuleProfileRow, getWeeklyPlanRow, ownedModule, patchModuleProfile, patchWeeklyPlan, weekStartSgt } from "@/db/profiles-repo";
 
 export const dynamic = "force-dynamic";
 
-type Scope = "me" | "plan" | "module";
-const scopeOf = (v: unknown): Scope | null => (v === "me" || v === "plan" || v === "module" ? v : null);
+type Scope = "me" | "plan" | "module" | "tasks";
+const scopeOf = (v: unknown): Scope | null => (v === "me" || v === "plan" || v === "module" || v === "tasks" ? v : null);
 
 function status(db: ReturnType<typeof getDb>, userId: number, scope: Scope, moduleId: number) {
   if (scope === "me") {
     const u = db.select().from(users).where(eq(users.id, userId)).get()!;
     return { builtAt: u.profileAt, pending: Boolean(u.profileRequestedAt), error: u.profileError };
   }
+  if (scope === "tasks") return taskPlanStatus(db, userId);
   if (scope === "plan") {
     const p = getWeeklyPlanRow(db, userId);
     return { builtAt: p?.generatedAt ?? null, pending: Boolean(p?.requestedAt), error: p?.error ?? null };
@@ -36,6 +38,7 @@ export async function POST(request: Request) {
   const now = Date.now();
   if (scope === "me") db.update(users).set({ profileRequestedAt: now, profileError: null }).where(eq(users.id, req.userId)).run();
   if (scope === "plan") patchWeeklyPlan(db, req.userId, { requestedAt: now, error: null, ...(getWeeklyPlanRow(db, req.userId) ? {} : { weekStart: weekStartSgt(now) }) });
+  if (scope === "tasks") db.update(users).set({ tasksRequestedAt: now }).where(eq(users.id, req.userId)).run();
   if (scope === "module") {
     if (!ownedModule(db, req.userId, moduleId)) return NextResponse.json({ error: "not found" }, { status: 404 });
     patchModuleProfile(db, moduleId, { requestedAt: now, error: null });

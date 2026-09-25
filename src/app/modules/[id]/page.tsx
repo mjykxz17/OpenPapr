@@ -76,7 +76,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
     const text = htmlToText(a.body);
     const posted = a.sourceCreatedAt ?? a.firstSeenAt;
     return (
-      <li key={a.id} className="min-w-0 py-3 first:pt-3.5 last:pb-3.5">
+      <li key={a.id} id={`a-${a.id}`} className="min-w-0 scroll-mt-20 py-3 first:pt-3.5 last:pb-3.5 target:rounded-md target:bg-accent-soft target:px-2">
         <details className="group">
           {/* The first lines of the body show while closed; opening shows all. */}
           <summary className="cursor-pointer select-none list-none">
