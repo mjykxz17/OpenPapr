@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { fileHints, files, items, modules, taskPlans, tasks, users } from "../db/schema";
-import { moduleSignals, refreshTasks, tidyTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
+import { ensureQuizSeries, moduleSignals, refreshTasks, tidyTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
 import type { TaskStep } from "../enrich/tasks";
 
 const NOW = Date.UTC(2026, 8, 25, 2, 0); // Fri 25 Sep 2026, 10:00 SGT
@@ -173,5 +173,21 @@ describe("discussions, planner notes and the safety net", () => {
     db.update(items).set({ canvasDone: true }).where(eq(items.id, 4)).run();
     tidyTasks(db, 1, NOW);
     expect(db.select().from(tasks).where(eq(tasks.id, note.id)).get()!.status).toBe("done");
+  });
+});
+
+describe("ensureQuizSeries", () => {
+  it("anticipates the next quiz, then gives way to the real one", () => {
+    const db = setup();   // Quiz 2 is open on Canvas: nothing to anticipate yet
+    expect(ensureQuizSeries(db, 1, NOW)).toBe(0);
+    db.update(items).set({ submitted: true }).where(eq(items.sourceId, "a1")).run();
+    db.insert(items).values({ userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: "a2", title: "Quiz 1", dueAt: NOW - 2 * 24 * H, submitted: true, firstSeenAt: NOW }).run();
+    expect(ensureQuizSeries(db, 1, NOW + 6 * 24 * H)).toBe(1);
+    const t = db.select().from(tasks).where(eq(tasks.key, "st2334-series-quiz-3")).get()!;
+    expect(t).toMatchObject({ title: "Quiz 3 (expected)", kind: "quiz", anticipated: true, dueConfidence: "estimated", status: "open" });
+    expect(ensureQuizSeries(db, 1, NOW + 6 * 24 * H)).toBe(0);            // once only
+    db.insert(items).values({ userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: "a3", title: "Quiz 3", dueAt: NOW + 12 * 24 * H, firstSeenAt: NOW }).run();
+    ensureQuizSeries(db, 1, NOW + 7 * 24 * H);
+    expect(db.select().from(tasks).where(eq(tasks.key, "st2334-series-quiz-3")).get()!.status).toBe("dismissed");
   });
 });

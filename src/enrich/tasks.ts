@@ -294,3 +294,46 @@ export function obligationLines(text: string, max = 12): { page: number; text: s
   const score = (l: string) => (/\b(week \d|\d{1,2} (jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}\/\d{1,2}|due|deadline)\b/i.test(l) ? 1 : 0);
   return out.sort((a, b) => score(b.text) - score(a.text) || a.page - b.page).slice(0, max);
 }
+
+// --- quiz series ------------------------------------------------------------
+// Lecturers post quizzes one at a time: "Quiz 4" is on Canvas, "Quiz 5" is not
+// yet. When a module has run a numbered quiz series and the latest one is
+// done, the next is coming. This spots that without a model, so the Tasks
+// page anticipates it whatever the planner does.
+const QUIZ_NUM_RE = /\bquiz\s*[-#]?\s*(\d{1,2})\b/i;
+const DAY = 86_400_000;
+
+export type QuizSeries = { next: number; seen: number; lastId: number; lastDue: number | null; everyDays: number | null; estimate: number | null };
+
+export function quizNumber(title: string): number | null {
+  const m = QUIZ_NUM_RE.exec(title);
+  return m ? Number(m[1]) : null;
+}
+
+export function quizSeries(rows: { id: number; title: string; dueAt: number | null; submitted: boolean; canvasDone?: boolean }[], now: number): QuizSeries | null {
+  const byNum = new Map<number, { ids: number[]; due: number | null; open: boolean }>();
+  for (const r of rows) {
+    const n = quizNumber(r.title);
+    if (n === null || n < 1 || n > 20) continue;
+    const e = byNum.get(n) ?? { ids: [], due: null, open: false };
+    e.ids.push(r.id);
+    if (r.dueAt !== null && (e.due === null || r.dueAt < e.due)) e.due = r.dueAt;
+    if (!r.submitted && !r.canvasDone && (r.dueAt === null || r.dueAt > now - DAY)) e.open = true;
+    byNum.set(n, e);
+  }
+  if (byNum.size < 2) return null;
+  const last = Math.max(...byNum.keys());
+  const top = byNum.get(last)!;
+  if (top.open) return null;                     // the current one is still on Canvas to do
+  const dated = [...byNum.entries()].filter(([, e]) => e.due !== null).sort((a, b) => a[0] - b[0]);
+  const gaps: number[] = [];
+  for (let i = 1; i < dated.length; i++) gaps.push((dated[i][1].due! - dated[i - 1][1].due!) / (dated[i][0] - dated[i - 1][0]));
+  gaps.sort((a, b) => a - b);
+  const median = gaps.length ? gaps[Math.floor(gaps.length / 2)] : null;
+  const everyDays = median !== null && median >= 4 * DAY && median <= 21 * DAY ? Math.round(median / DAY) : null;
+  const lastDue = top.due ?? (dated.length ? dated[dated.length - 1][1].due : null);
+  // A series that went quiet long ago has probably ended.
+  if (lastDue !== null && now - lastDue > Math.max(35, 3 * (everyDays ?? 0)) * DAY) return null;
+  const guess = lastDue !== null && everyDays !== null ? lastDue + everyDays * DAY : null;
+  return { next: last + 1, seen: byNum.size, lastId: top.ids[0], lastDue, everyDays, estimate: guess !== null && guess > now ? guess : null };
+}

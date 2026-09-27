@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { balanceDays, cleanPlan, dailyCap, mergeTasks, obligationLines, rollForward, sgtDate, stepId, type TaskSource, type TaskStep } from "./tasks";
+import { balanceDays, cleanPlan, dailyCap, mergeTasks, obligationLines, quizNumber, quizSeries, rollForward, sgtDate, stepId, type TaskSource, type TaskStep } from "./tasks";
 
 const NOW = Date.UTC(2026, 8, 25, 2, 0); // Fri 25 Sep 2026, 10:00 SGT
 const refs = new Map<string, TaskSource>([
@@ -107,5 +107,25 @@ describe("obligationLines", () => {
   it("ignores lecture content that only sounds like work", () => {
     const text = "To pen-test your own systems too\n23% owner's correct name and physical address\nMandatory Access Control\nGoogle Project Zero: 90-day window\nIndividual Quizzes (approx. 4): 40%\nTry to get the local environment sorted by Week 2 of the course!\n-- 1 of 1 --";
     expect(obligationLines(text).map((l) => l.text)).toEqual(["Try to get the local environment sorted by Week 2 of the course!", "Individual Quizzes (approx. 4): 40%"]);
+  });
+});
+
+describe("quizSeries", () => {
+  const NOW = Date.UTC(2026, 8, 27, 9);
+  const DAY = 86_400_000;
+  const q = (id: number, title: string, daysAgo: number | null, submitted = true) => ({ id, title, dueAt: daysAgo === null ? null : NOW - daysAgo * DAY, submitted });
+  it("expects the next weekly quiz once the latest is done", () => {
+    const s = quizSeries([q(1, "(Normal) Quiz 2 (Graded)", 28), q(2, "Preview Quiz 2", 28), q(3, "Quiz 3 (Graded)", 21), q(4, "Quiz 4 (graded)", 14), q(5, "Lab 1 (graded)", 9)], NOW)!;
+    expect(s).toMatchObject({ next: 5, seen: 3, lastId: 4, everyDays: 7, estimate: null });   // a week after Quiz 4 has passed: no guess
+    const soon = quizSeries([q(3, "Quiz 3", 10), q(4, "Quiz 4", 3)], NOW)!;
+    expect(soon.estimate).toBe(NOW + 4 * DAY);
+  });
+  it("works with an undated first quiz and odd spellings, and stays quiet otherwise", () => {
+    expect(quizSeries([q(1, "Quiz 1", null), q(2, "Quiz-2", 7)], NOW)).toMatchObject({ next: 3, everyDays: null, estimate: null });
+    expect(quizNumber("Quiz10")).toBe(10);
+    expect(quizNumber("Lab2 Post-Lab Quiz")).toBeNull();
+    expect(quizSeries([q(1, "Quiz 1", 20), q(2, "Quiz 2", -3, false)], NOW)).toBeNull();        // Quiz 2 is still to do
+    expect(quizSeries([q(1, "Quiz 1", 90), q(2, "Quiz 2", 80)], NOW)).toBeNull();               // series went quiet
+    expect(quizSeries([q(1, "Quiz 1", 10)], NOW)).toBeNull();                                  // one quiz is not a series
   });
 });

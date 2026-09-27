@@ -76,7 +76,7 @@ function renderRows(todos: Overview["todos"], modules: Overview["modules"], now:
                 </span>
                 {todo.type === "discussion" && <span className="shrink-0 text-[13px] text-ink-3">post needed</span>}
                 {todo.type === "planner_note" && <span className="shrink-0 text-[13px] text-ink-3">your note</span>}
-                {quizOf(todo) && <span className="shrink-0 text-[13px] text-ink-3">{quizOf(todo)!.practice ? "practice quiz" : "quiz"}</span>}
+                {quizOf(todo) && <span className="shrink-0 text-[13px] text-ink-3">{/survey|questionnaire|feedback/i.test(todo.title) ? "survey" : quizOf(todo)!.practice ? "practice quiz" : "quiz"}</span>}
                 {todo.missing && <span className="shrink-0 text-[13px] font-medium text-danger">Missing on Canvas</span>}
                 {todo.type === "deadline" && (
                   <span className="shrink-0 text-[13px] text-ink-3">extracted</span>

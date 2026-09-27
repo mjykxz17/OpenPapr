@@ -7,7 +7,7 @@ import { moduleCodes } from "../connectors/nusmods/client";
 import type { CompatConfig } from "../enrich/openai-compat";
 import { ModuleProfile } from "../enrich/profiles";
 import {
-  balanceDays, dailyCap, mergeTasks, obligationLines, planModuleTasks, rollForward, sgtDate,
+  balanceDays, dailyCap, mergeTasks, obligationLines, planModuleTasks, quizNumber, quizSeries, rollForward, sgtDate,
   type ModuleTaskInput, type SignalItem, type TaskSource, type TaskStep,
 } from "../enrich/tasks";
 import { htmlToText } from "../lib/html-text";
@@ -92,7 +92,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     const body = i.type === "assignment" ? htmlToText(i.body).slice(0, 300) : (i.body ?? "").slice(0, 200);
     const q = i.type === "assignment" ? parseMeta<AssignmentMeta>(i.metaJson) : null;
     const origin = i.type === "deadline" ? (i.sourceId.startsWith("page_todo:") ? "Canvas planner (page to read)" : "From an announcement") : i.type === "event" ? "Calendar"
-      : q?.practice ? "Canvas practice quiz (ungraded)" : q?.quiz ? "Canvas quiz" : "Canvas";
+      : q?.practice ? (/survey|questionnaire|feedback/i.test(i.title) ? "Canvas survey" : "Canvas practice quiz (ungraded)") : q?.quiz ? "Canvas quiz" : "Canvas";
     const when = q?.closesOnly ? `closes ${sgtLabel(i.dueAt!)}` : due(i.dueAt);
     const opens = q?.opensAt && q.opensAt > now ? `, opens ${sgtLabel(q.opensAt)}` : "";
     return { ref: `C${i.id}`, line: `${origin}: ${i.title} — ${when}${opens}${i.missing ? " — Canvas marks this MISSING" : ""}`, body: body || undefined };
@@ -101,6 +101,12 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     refs.set(`C${i.id}`, { kind: "canvas", label: i.title, itemId: i.id });
     return { ref: `C${i.id}`, line: `${i.title} — ${due(i.dueAt)}${i.submitted ? " (submitted)" : ""}` };
   });
+  const series = quizSeries(rows.filter((r) => r.type === "assignment" && !r.dismissed), now);
+  if (series) {
+    const lastRow = byId.get(series.lastId)!;
+    refs.set(`C${lastRow.id}`, { kind: "canvas", label: lastRow.title, itemId: lastRow.id });
+    pastRows.unshift({ ref: `C${lastRow.id}`, line: `PATTERN: ${series.seen} numbered quizzes on Canvas so far${series.everyDays ? `, about every ${series.everyDays} days` : ""}${series.lastDue ? `, the last ${sgtLabel(series.lastDue)}` : ""}. Quiz ${series.next} is not on Canvas yet — plan it as an anticipated quiz task unless the course says the quizzes are over.` });
+  }
 
   // Announcements and what lecturers or TAs said in discussions read the same
   // way: the course telling the student something.
@@ -211,6 +217,7 @@ function applyPlan(db: Db, userId: number, moduleId: number, planned: Awaited<Re
   const byIdNow = new Map(current.map((t) => [t.id, t]));
   ops.remove = ops.remove.filter((id) => {
     const t = byIdNow.get(id)!;
+    if (t.key.includes("-series-quiz-")) return planned.some((p) => p.kind === "quiz" && (p.dueAt === null || p.dueAt > now));
     if (!t.key.includes("-canvas-")) return true;
     return parseList<TaskSource>(t.sourcesJson).some((x) => x.itemId != null && citedNow.has(x.itemId));
   });
@@ -331,6 +338,44 @@ export function ensureCanvasCovered(db: Db, userId: number, now: number): number
   return added;
 }
 
+// The next quiz of a running series (see quizSeries), when no upcoming quiz
+// task covers the module. It gives way once the real quiz is on Canvas.
+export function ensureQuizSeries(db: Db, userId: number, now: number): number {
+  const mods = db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true), eq(modules.hidden, false))).all();
+  const all = db.select().from(tasks).where(eq(tasks.userId, userId)).all();
+  const keys = new Set(all.map((t) => t.key));
+  let changed = 0;
+  for (const mod of mods) {
+    const rows = db.select().from(items).where(and(eq(items.userId, userId), eq(items.moduleId, mod.id), eq(items.type, "assignment"))).all().filter((r) => !r.dismissed);
+    const onCanvas = new Set(rows.map((r) => quizNumber(r.title)).filter((n): n is number => n !== null));
+    const mine = all.filter((t) => t.moduleId === mod.id && t.status === "open");
+    // The real quiz arrived: the placeholder steps aside for its Canvas task.
+    for (const t of mine) {
+      const m = /-series-quiz-(\d+)$/.exec(t.key);
+      if (m && onCanvas.has(Number(m[1]))) {
+        db.update(tasks).set({ status: "dismissed", updatedAt: now }).where(eq(tasks.id, t.id)).run();
+        changed++;
+      }
+    }
+    const s = quizSeries(rows, now);
+    if (!s) continue;
+    const key = `${mod.code.toLowerCase()}-series-quiz-${s.next}`;
+    if (keys.has(key)) continue;   // made before; dismissed or done stays that way
+    if (mine.some((t) => t.kind === "quiz" && !t.key.includes("-series-quiz-") && (t.dueAt === null || t.dueAt > now))) continue;
+    const last = rows.find((r) => r.id === s.lastId)!;
+    db.insert(tasks).values({
+      userId, moduleId: mod.id, key, title: `Quiz ${s.next} (expected)`, kind: "quiz",
+      dueAt: s.estimate, dueConfidence: "estimated", anticipated: true, weightPct: null,
+      why: `${s.seen} quizzes so far${s.everyDays ? `, about every ${s.everyDays} days` : ""}; the next isn't on Canvas yet`,
+      sourcesJson: JSON.stringify([{ kind: "canvas", label: `${last.title} — the last one`, itemId: last.id }]),
+      stepsJson: "[]", status: "open", createdAt: now, updatedAt: now,
+    }).onConflictDoNothing().run();
+    keys.add(key);
+    changed++;
+  }
+  return changed;
+}
+
 export type TaskRefreshResult = { files: number; planned: number; errors: string[] };
 
 export async function refreshTasks(deps: TaskDeps, userId: number): Promise<TaskRefreshResult> {
@@ -371,6 +416,7 @@ export async function refreshTasks(deps: TaskDeps, userId: number): Promise<Task
   }
 
   ensureCanvasCovered(db, userId, deps.now());
+  ensureQuizSeries(db, userId, deps.now());
   tidyTasks(db, userId, deps.now());
   if (requested) db.update(users).set({ tasksRequestedAt: null }).where(eq(users.id, userId)).run();
   return out;
