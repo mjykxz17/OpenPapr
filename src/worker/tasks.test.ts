@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { fileHints, files, items, modules, taskPlans, tasks, users } from "../db/schema";
-import { ensureQuizSeries, moduleSignals, refreshTasks, tidyTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
+import { ensureCanvasCovered, ensureQuizSeries, moduleSignals, refreshTasks, tidyTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
 import type { TaskStep } from "../enrich/tasks";
 
 const NOW = Date.UTC(2026, 8, 25, 2, 0); // Fri 25 Sep 2026, 10:00 SGT
@@ -189,5 +189,24 @@ describe("ensureQuizSeries", () => {
     db.insert(items).values({ userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: "a3", title: "Quiz 3", dueAt: NOW + 12 * 24 * H, firstSeenAt: NOW }).run();
     ensureQuizSeries(db, 1, NOW + 7 * 24 * H);
     expect(db.select().from(tasks).where(eq(tasks.key, "st2334-series-quiz-3")).get()!.status).toBe("dismissed");
+  });
+});
+
+describe("forms posted once per tutorial group", () => {
+  it("become one task, replace per-form tasks, and finish when yours is in", () => {
+    const db = setup();
+    const due = NOW + 5 * 24 * H;
+    db.insert(items).values(["TD1", "TD2", "TE1", "TE2", "TE3"].map((c, k) => ({ userId: 1, moduleId: 1, type: "assignment" as const, source: "canvas" as const, sourceId: `f${k}`, title: `Indemnity Form (${c})`, dueAt: due, firstSeenAt: NOW }))).run();
+    const forms = db.select().from(items).where(eq(items.dueAt, due)).all().filter((r) => r.title.startsWith("Indemnity"));
+    db.insert(tasks).values({ userId: 1, moduleId: 1, key: `st2334-canvas-${forms[2].id}`, title: forms[2].title, kind: "submission", dueAt: due, dueConfidence: "exact", anticipated: false, sourcesJson: JSON.stringify([{ kind: "canvas", label: forms[2].title, itemId: forms[2].id }]), stepsJson: "[]", status: "open", createdAt: NOW, updatedAt: NOW }).run();
+    ensureCanvasCovered(db, 1, NOW);
+    const mine = db.select().from(tasks).all().filter((t) => t.title.startsWith("Indemnity"));
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ key: `st2334-canvas-set-${forms[0].id}`, title: "Indemnity Form (your group's)" });
+    ensureCanvasCovered(db, 1, NOW);
+    expect(db.select().from(tasks).all().filter((t) => t.title.startsWith("Indemnity"))).toHaveLength(1);
+    db.update(items).set({ submitted: true }).where(eq(items.id, forms[3].id)).run();
+    tidyTasks(db, 1, NOW);
+    expect(db.select().from(tasks).where(eq(tasks.id, mine[0].id)).get()!.status).toBe("done");
   });
 });

@@ -6,6 +6,7 @@
 // 5. unaccountedPct: components summing to 75 → 25; summing to 100 → null; none → null
 // 6. syncStatus.stale true when last ok run is older than 3 * pollIntervalMs
 import { describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, syncRuns, users } from "../db/schema";
 import { getOverview } from "./overview";
@@ -127,6 +128,18 @@ describe("todo tidying", () => {
     expect(todos).toHaveLength(1);
     expect(todos[0].dueAt).toBe(now + 50 * HOUR);
     expect(todos[0].seriesCount).toBe(3);
+  });
+  it("shows a form posted once per tutorial group as one to-do, gone once any is in", () => {
+    const { db, moduleId } = setup();
+    const now = 100 * HOUR;
+    const f = (k: number, code: string) => ({ userId: 1, moduleId, source: "canvas" as const, type: "assignment" as const, sourceId: `f:${k}`, title: `Indemnity Form (${code})`, firstSeenAt: 1, dueAt: now + 48 * HOUR });
+    db.insert(items).values([f(1, "TD1"), f(2, "TD2"), f(3, "TE1"), f(4, "TE2")]).run();
+    let todos = getOverview(db, 1, now, 300_000).todos;
+    expect(todos).toHaveLength(1);
+    expect(todos[0]).toMatchObject({ title: "Indemnity Form", variantCount: 4 });
+    db.update(items).set({ submitted: true }).where(eq(items.sourceId, "f:3")).run();
+    todos = getOverview(db, 1, now, 300_000).todos;
+    expect(todos).toHaveLength(0);
   });
   it("hides past events and past routine deadlines after a 12h grace, keeps overdue submittables", () => {
     const { db, moduleId } = setup();

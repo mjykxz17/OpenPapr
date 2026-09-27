@@ -81,6 +81,9 @@ function renderRows(todos: Overview["todos"], modules: Overview["modules"], now:
                 {todo.type === "deadline" && (
                   <span className="shrink-0 text-[13px] text-ink-3">extracted</span>
                 )}
+                {todo.variantCount !== undefined && (
+                  <span className="shrink-0 text-[13px] text-ink-3" title="Canvas has one per tutorial group; hand in yours">one per group ×{todo.variantCount}</span>
+                )}
                 {todo.seriesCount !== undefined && todo.seriesCount > 1 && (
                   <span className="shrink-0 text-[13px] tabular-nums text-ink-3">×{todo.seriesCount} sessions</span>
                 )}

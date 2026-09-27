@@ -1,10 +1,11 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { staleAfterMs } from "../lib/poll-schedule";
+import { variantGroups } from "../lib/variants";
 import { components, items, modules, syncRuns, users } from "../db/schema";
 
 export type ItemRow = typeof items.$inferSelect;
-export type TodoEntry = ItemRow & { seriesCount?: number };
+export type TodoEntry = ItemRow & { seriesCount?: number; variantCount?: number };
 export type ComponentRow = typeof components.$inferSelect;
 
 export interface Overview {
@@ -104,9 +105,22 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
     const k = seriesKey(i);
     seriesTotals.set(k, (seriesTotals.get(k) ?? 0) + 1);
   }
+  // One form per tutorial group reads as one to-do; handing in yours clears it.
+  const variants = variantGroups(scopedItems.filter((i) => !i.dismissed));
+  const doneVariant = new Set([...variants.values()].filter((g) => g.ids.some((id) => {
+    const r = scopedItems.find((x) => x.id === id);
+    return Boolean(r && (r.submitted || r.canvasDone));
+  })).map((g) => g.key));
   const seen = new Set<string>();
   const todos: TodoEntry[] = [];
   for (const i of [...todoCandidates].sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity))) {
+    const v = variants.get(i.id);
+    if (v) {
+      if (doneVariant.has(v.key) || seen.has(v.key)) continue;
+      seen.add(v.key);
+      todos.push({ ...i, title: v.stem, variantCount: v.ids.length });
+      continue;
+    }
     if (i.type === "event" && (seriesTotals.get(seriesKey(i)) ?? 0) >= 3) {
       const k = seriesKey(i);
       if (seen.has(k)) continue;

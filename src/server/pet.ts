@@ -1,4 +1,5 @@
 import { and, eq } from "drizzle-orm";
+import { variantGroups } from "../lib/variants";
 import type { Db } from "@/db/client";
 import { components, items, modules, tasks } from "@/db/schema";
 import { getNusmods } from "@/db/profiles-repo";
@@ -44,8 +45,18 @@ export function dueList(db: Db, userId: number, now: number): Due[] {
     .filter((i) => ["assignment", "deadline", "discussion", "planner_note", "event"].includes(i.type))
     .filter((i) => i.dueAt! >= now - 14 * D && i.dueAt! <= now + (i.type === "event" ? 14 : 120) * D);
   const seenEvent = new Set<string>();
+  const sets = variantGroups(rows);
   const out: Due[] = [];
   for (const i of rows.sort((a, b) => a.dueAt! - b.dueAt!)) {
+    const set = sets.get(i.id);
+    if (set) {  // one form per tutorial group: one entry, done if any is in
+      if (seenEvent.has(set.key)) continue;
+      seenEvent.add(set.key);
+      const members = rows.filter((r) => set.ids.includes(r.id));
+      out.push({ id: i.id, code: i.moduleId ? mods.get(i.moduleId)!.code : null, title: `${set.stem} (one per tutorial group, hand in yours)`, kind: kindOf(i.title, i.type), dueAt: i.dueAt!,
+        done: members.some((r) => r.submitted || r.canvasDone), missing: members.every((r) => r.missing), weightPct: null, weightName: null });
+      continue;
+    }
     if (i.type === "event") {  // a weekly class only needs its next occurrence
       const k = `${i.moduleId}:${i.title}`;
       if (i.dueAt! < now || seenEvent.has(k)) continue;

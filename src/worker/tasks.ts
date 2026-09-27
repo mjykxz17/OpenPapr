@@ -11,6 +11,7 @@ import {
   type ModuleTaskInput, type SignalItem, type TaskSource, type TaskStep,
 } from "../enrich/tasks";
 import { htmlToText } from "../lib/html-text";
+import { variantGroups } from "../lib/variants";
 import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
 
@@ -80,9 +81,13 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   const bySource = new Map(rows.map((r) => [r.sourceId, r]));
+  const variants = variantGroups(rows.filter((r) => !r.dismissed));
+  const setDone = (ids: number[]) => ids.some((id) => { const r = byId.get(id); return Boolean(r && (r.submitted || r.canvasDone)); });
   const open = rows
     .filter((i) => ["assignment", "event", "deadline"].includes(i.type) && !i.dismissed && !i.submitted && !i.canvasDone && i.category !== "routine"
       && (i.dueAt === null ? i.type === "assignment" : i.dueAt >= now - D && i.dueAt <= now + 60 * D))
+    // A per-group set is one line (its first form); done once any is handed in.
+    .filter((i) => { const v = variants.get(i.id); return !v || (v.ids[0] === i.id && !setDone(v.ids)); })
     .sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity)).slice(0, 25);
   const past = rows
     .filter((i) => ["assignment", "deadline"].includes(i.type) && i.dueAt !== null && i.dueAt < now && i.dueAt >= now - 60 * D)
@@ -94,6 +99,8 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     const origin = i.type === "deadline" ? (i.sourceId.startsWith("page_todo:") ? "Canvas planner (page to read)" : "From an announcement") : i.type === "event" ? "Calendar"
       : q?.practice ? (/survey|questionnaire|feedback/i.test(i.title) ? "Canvas survey" : "Canvas practice quiz (ungraded)") : q?.quiz ? "Canvas quiz" : "Canvas";
     const when = q?.closesOnly ? `closes ${sgtLabel(i.dueAt!)}` : due(i.dueAt);
+    const set = variants.get(i.id);
+    if (set) return { ref: `C${i.id}`, line: `Canvas: ${set.stem} — ${when} — posted ${set.ids.length} times, once per tutorial group; the student hands in only their own. ONE task.` };
     const opens = q?.opensAt && q.opensAt > now ? `, opens ${sgtLabel(q.opensAt)}` : "";
     return { ref: `C${i.id}`, line: `${origin}: ${i.title} — ${when}${opens}${i.missing ? " — Canvas marks this MISSING" : ""}`, body: body || undefined };
   });
@@ -261,7 +268,14 @@ export function tidyTasks(db: Db, userId: number, now: number): number {
     const m = parseMeta<{ graded: boolean; requireInitialPost: boolean }>(r.metaJson);
     return Boolean(m?.graded || m?.requireInitialPost || r.dueAt !== null);
   };
-  const finished = (id: number) => { const r = citedRows.get(id); return Boolean(r && (r.submitted || r.canvasDone)); };
+  const setOf = new Map<number, number[]>();
+  if (open.some((t) => t.key.includes("-canvas-set-"))) {
+    const all = db.select().from(items).where(and(eq(items.userId, userId), eq(items.type, "assignment"))).all();
+    const vg = variantGroups(all.filter((r) => !r.dismissed));
+    const done = new Set(all.filter((r) => r.submitted || r.canvasDone).map((r) => r.id));
+    for (const [id, g] of vg) if (g.ids.some((x) => done.has(x))) setOf.set(id, g.ids);
+  }
+  const finished = (id: number) => { const r = citedRows.get(id); return Boolean(r && (r.submitted || r.canvasDone)) || setOf.has(id); };
   const today = sgtDate(now);
   let changed = 0;
   const live: { id: number; key: string; dueAt: number | null; steps: TaskStep[]; before: string }[] = [];
@@ -312,8 +326,21 @@ export function ensureCanvasCovered(db: Db, userId: number, now: number): number
     const m = parseMeta<{ assignmentId: number | null }>(r.metaJson);
     if (m?.assignmentId) gradedDiscussion.set(`assignment:${m.assignmentId}`, r);
   }
+  const variants = variantGroups(rows.filter((r) => !r.dismissed));
+  const rowById = new Map(rows.map((r) => [r.id, r]));
+  // Per-form tasks this net made before sets were understood.
+  const oldForms = all.filter((t) => t.status === "open" && t.touchedAt === null && /-canvas-\d+$/.test(t.key) && variants.has(Number(t.key.split("-canvas-")[1])));
+  if (oldForms.length) {
+    db.delete(tasks).where(inArray(tasks.id, oldForms.map((t) => t.id))).run();
+    for (const t of oldForms) { keys.delete(t.key); for (const s of parseList<TaskSource>(t.sourcesJson)) if (s.itemId != null) covered.delete(s.itemId); }
+  }
   let added = 0;
   for (const r of rows) {
+    const set = variants.get(r.id);
+    if (set) {
+      if (set.ids[0] !== r.id || set.ids.some((id) => covered.has(id))) continue;
+      if (set.ids.some((id) => { const x = rowById.get(id); return Boolean(x && (x.submitted || x.canvasDone)); })) continue;
+    }
     const eligible = (r.type === "assignment" || r.type === "planner_note" || (r.type === "deadline" && r.sourceId.startsWith("page_todo:")))
       && !r.dismissed && !r.submitted && !r.canvasDone && r.dueAt !== null && r.dueAt >= now - D && r.dueAt <= now + 14 * D
       && (r.moduleId === null ? r.type === "planner_note" : mods.has(r.moduleId));
@@ -321,15 +348,16 @@ export function ensureCanvasCovered(db: Db, userId: number, now: number): number
     const pair = gradedDiscussion.get(r.sourceId);
     if (pair && (covered.has(pair.id) || pair.submitted)) continue;
     const code = r.moduleId ? mods.get(r.moduleId)!.code : "note";
-    const key = `${code.toLowerCase()}-canvas-${r.id}`;
+    const key = set ? `${code.toLowerCase()}-canvas-set-${r.id}` : `${code.toLowerCase()}-canvas-${r.id}`;
     if (keys.has(key)) continue;
-    const sources: TaskSource[] = [{ kind: r.type === "planner_note" ? "planner" : "canvas", label: r.type === "planner_note" ? `Your note: ${r.title}` : r.title, itemId: r.id }];
+    const sources: TaskSource[] = [{ kind: r.type === "planner_note" ? "planner" : "canvas", label: r.type === "planner_note" ? `Your note: ${r.title}` : set ? `${set.stem} — ${set.ids.length} on Canvas, one per group` : r.title, itemId: r.id }];
     if (pair) sources.push({ kind: "discussion", label: pair.title, itemId: pair.id });
     db.insert(tasks).values({
-      userId, moduleId: r.moduleId, key, title: r.title.slice(0, 80),
+      userId, moduleId: r.moduleId, key, title: set ? `${set.stem} (your group's)`.slice(0, 80) : r.title.slice(0, 80),
       kind: r.type === "planner_note" ? "admin" : r.type === "deadline" ? "reading" : pair ? "submission"
         : parseMeta<AssignmentMeta>(r.metaJson)?.quiz ? "quiz" : guessKind(r.title),
-      dueAt: r.dueAt, dueConfidence: "exact", anticipated: false, why: r.missing ? "Canvas marks this as missing" : null,
+      dueAt: r.dueAt, dueConfidence: "exact", anticipated: false,
+      why: set ? `Canvas lists ${set.ids.length}, one per tutorial group — hand in only yours` : r.missing ? "Canvas marks this as missing" : null,
       sourcesJson: JSON.stringify(sources), stepsJson: "[]", status: "open", createdAt: now, updatedAt: now,
     }).onConflictDoNothing().run();
     keys.add(key);
