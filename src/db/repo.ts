@@ -329,7 +329,7 @@ export function applyCanvasSync(db: Db, userId: number, sync: NormalizedCanvasSy
         url: it.url, firstSeenAt: now,
       }).onConflictDoNothing().run();
     }
-    db.update(items).set({ title: it.title, body: it.body, url: it.url, dueAt: it.dueAt, submitted: it.submitted })
+    db.update(items).set({ title: it.title, body: it.body, url: it.url, dueAt: it.dueAt, submitted: it.submitted, ...(it.metaJson !== undefined ? { metaJson: it.metaJson } : {}) })
       .where(eq(items.id, existing.id)).run();
   }
   return { moduleId: mod.id };

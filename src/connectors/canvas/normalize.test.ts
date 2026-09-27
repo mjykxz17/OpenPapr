@@ -41,3 +41,25 @@ describe("normalizeCanvasCourse", () => {
     expect(normalizeCanvasCourse(course, g, [], []).items[0].submitted).toBe(true);
   });
 });
+
+describe("quizzes", () => {
+  const quizGroup = (a: Partial<import("./types").CanvasAssignment>): CanvasAssignmentGroup[] => [{ id: 3, name: "Quizzes", group_weight: 20, assignments: [
+    { id: 31, name: "Quiz 3", due_at: null, html_url: "q", points_possible: 10, submission: { workflow_state: "unsubmitted", score: null }, ...a },
+  ]}];
+  it("uses the close time as the deadline when a quiz has only a window", () => {
+    const n = normalizeCanvasCourse(course, quizGroup({ is_quiz_assignment: true, unlock_at: "2026-09-28T01:00:00Z", lock_at: "2026-10-02T15:59:00Z" }), [], []);
+    const q = n.items[0];
+    expect(q.dueAt).toBe(Date.parse("2026-10-02T15:59:00Z"));
+    expect(JSON.parse(q.metaJson!)).toEqual({ quiz: true, opensAt: Date.parse("2026-09-28T01:00:00Z"), closesAt: Date.parse("2026-10-02T15:59:00Z"), closesOnly: true });
+  });
+  it("keeps the due date when there is one, and spots New Quizzes and quiz names", () => {
+    const lti = normalizeCanvasCourse(course, quizGroup({ due_at: "2026-10-01T15:59:00Z", lock_at: "2026-10-03T15:59:00Z", submission_types: ["external_tool"], is_quiz_lti_assignment: true }), [], []).items[0];
+    expect(lti.dueAt).toBe(Date.parse("2026-10-01T15:59:00Z"));
+    expect(JSON.parse(lti.metaJson!).closesOnly).toBe(false);
+    expect(JSON.parse(normalizeCanvasCourse(course, quizGroup({ name: "Weekly MCQ 4", due_at: "2026-10-01T15:59:00Z" }), [], []).items[0].metaJson!).quiz).toBe(true);
+  });
+  it("leaves plain assignments without meta", () => {
+    expect(normalizeCanvasCourse(course, groups, [], []).items[0].metaJson).toBeNull();
+    expect(normalizeCanvasCourse(course, quizGroup({ name: "Pen Test Report", due_at: "2026-10-01T15:59:00Z" }), [], []).items[0].metaJson).toBeNull();
+  });
+});

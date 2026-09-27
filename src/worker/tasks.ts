@@ -11,6 +11,7 @@ import {
   type ModuleTaskInput, type SignalItem, type TaskSource, type TaskStep,
 } from "../enrich/tasks";
 import { htmlToText } from "../lib/html-text";
+import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
 
 const H = 3_600_000;
@@ -89,8 +90,12 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   const canvas: SignalItem[] = open.map((i) => {
     refs.set(`C${i.id}`, { kind: "canvas", label: i.title, itemId: i.id });
     const body = i.type === "assignment" ? htmlToText(i.body).slice(0, 300) : (i.body ?? "").slice(0, 200);
-    const origin = i.type === "deadline" ? (i.sourceId.startsWith("page_todo:") ? "Canvas planner (page to read)" : "From an announcement") : i.type === "event" ? "Calendar" : "Canvas";
-    return { ref: `C${i.id}`, line: `${origin}: ${i.title} — ${due(i.dueAt)}${i.missing ? " — Canvas marks this MISSING" : ""}`, body: body || undefined };
+    const q = i.type === "assignment" ? parseMeta<AssignmentMeta>(i.metaJson) : null;
+    const origin = i.type === "deadline" ? (i.sourceId.startsWith("page_todo:") ? "Canvas planner (page to read)" : "From an announcement") : i.type === "event" ? "Calendar"
+      : q?.practice ? "Canvas practice quiz (ungraded)" : q?.quiz ? "Canvas quiz" : "Canvas";
+    const when = q?.closesOnly ? `closes ${sgtLabel(i.dueAt!)}` : due(i.dueAt);
+    const opens = q?.opensAt && q.opensAt > now ? `, opens ${sgtLabel(q.opensAt)}` : "";
+    return { ref: `C${i.id}`, line: `${origin}: ${i.title} — ${when}${opens}${i.missing ? " — Canvas marks this MISSING" : ""}`, body: body || undefined };
   });
   const pastRows: SignalItem[] = past.map((i) => {
     refs.set(`C${i.id}`, { kind: "canvas", label: i.title, itemId: i.id });
@@ -315,7 +320,8 @@ export function ensureCanvasCovered(db: Db, userId: number, now: number): number
     if (pair) sources.push({ kind: "discussion", label: pair.title, itemId: pair.id });
     db.insert(tasks).values({
       userId, moduleId: r.moduleId, key, title: r.title.slice(0, 80),
-      kind: r.type === "planner_note" ? "admin" : r.type === "deadline" ? "reading" : pair ? "submission" : guessKind(r.title),
+      kind: r.type === "planner_note" ? "admin" : r.type === "deadline" ? "reading" : pair ? "submission"
+        : parseMeta<AssignmentMeta>(r.metaJson)?.quiz ? "quiz" : guessKind(r.title),
       dueAt: r.dueAt, dueConfidence: "exact", anticipated: false, why: r.missing ? "Canvas marks this as missing" : null,
       sourcesJson: JSON.stringify(sources), stepsJson: "[]", status: "open", createdAt: now, updatedAt: now,
     }).onConflictDoNothing().run();

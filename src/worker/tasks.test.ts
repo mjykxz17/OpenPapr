@@ -132,6 +132,14 @@ describe("moduleSignals", () => {
     expect(input.canvas.map((c) => c.ref)).toEqual(["C1"]);
     expect(input.today).toBe("2026-09-25 (Fri)");
   });
+  it("tells the planner a quiz is a quiz, and when it opens and closes", () => {
+    const db = setup();
+    db.insert(items).values({ userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: "assignment:5", title: "Quiz 3", dueAt: NOW + 7 * 24 * H, firstSeenAt: NOW,
+      metaJson: JSON.stringify({ quiz: true, opensAt: NOW + 5 * 24 * H, closesAt: NOW + 7 * 24 * H, closesOnly: true }) }).run();
+    const { input } = moduleSignals(db, 1, db.select().from(modules).get()!, NOW);
+    const line = input.canvas.find((c) => c.line.includes("Quiz 3"))!.line;
+    expect(line).toMatch(/^Canvas quiz: Quiz 3 — closes .*, opens /);
+  });
 });
 
 describe("discussions, planner notes and the safety net", () => {

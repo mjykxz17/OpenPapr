@@ -3,6 +3,12 @@ import { findWeightBadge } from "@/lib/component-display";
 import { DismissButton } from "@/components/DismissButton";
 import { dueLabel } from "@/lib/format-date";
 
+// Quiz facts the sync stored with an assignment (see AssignmentMeta).
+function quizOf(t: { type: string; metaJson: string | null }): { practice?: boolean; closesOnly: boolean } | null {
+  if (t.type !== "assignment" || !t.metaJson) return null;
+  try { const m = JSON.parse(t.metaJson); return m?.quiz ? m : null; } catch { return null; }
+}
+
 export function TodoList({
   todos,
   modules,
@@ -70,6 +76,7 @@ function renderRows(todos: Overview["todos"], modules: Overview["modules"], now:
                 </span>
                 {todo.type === "discussion" && <span className="shrink-0 text-[13px] text-ink-3">post needed</span>}
                 {todo.type === "planner_note" && <span className="shrink-0 text-[13px] text-ink-3">your note</span>}
+                {quizOf(todo) && <span className="shrink-0 text-[13px] text-ink-3">{quizOf(todo)!.practice ? "practice quiz" : "quiz"}</span>}
                 {todo.missing && <span className="shrink-0 text-[13px] font-medium text-danger">Missing on Canvas</span>}
                 {todo.type === "deadline" && (
                   <span className="shrink-0 text-[13px] text-ink-3">extracted</span>
@@ -79,7 +86,7 @@ function renderRows(todos: Overview["todos"], modules: Overview["modules"], now:
                 )}
               </div>
               <div className="mt-0.5 text-[13px] tabular-nums text-ink-2">
-                {todo.dueAt !== null ? dueLabel(todo.dueAt, now) : "No due date"}
+                {todo.dueAt !== null ? `${quizOf(todo)?.closesOnly ? "Closes " : ""}${dueLabel(todo.dueAt, now)}` : "No due date"}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">

@@ -70,6 +70,20 @@ export function applyPlanner(
       if (r) db.update(items).set(fields).where(eq(items.id, r.id)).run();
       else db.insert(items).values({ userId, source: "canvas", type: "planner_note", sourceId, firstSeenAt: now, ...fields }).run();
     }
+    // Practice quizzes and surveys are not assignments, so the assignment list
+    // never has them; Canvas's planner does, with their date and done state.
+    if (p.plannable_type === "quiz" && !assignmentId && moduleId) {
+      const sourceId = `quiz:${p.plannable_id}`;
+      const dueAt = ts(p.plannable.due_at ?? p.plannable_date);
+      const fields = {
+        title: p.plannable.title, dueAt, url: p.html_url ?? null,
+        submitted: p.submissions !== false && p.submissions?.submitted === true,
+        metaJson: JSON.stringify({ quiz: true, practice: true, opensAt: null, closesAt: null, closesOnly: false }),
+      };
+      const r = bySource.get(sourceId);
+      if (r) { db.update(items).set(fields).where(eq(items.id, r.id)).run(); if (completed) doneIds.add(r.id); }
+      else db.insert(items).values({ userId, moduleId, source: "canvas", type: "assignment", sourceId, firstSeenAt: now, canvasDone: completed, ...fields }).run();
+    }
     if (p.plannable_type === "wiki_page" && p.plannable.todo_date && moduleId) {
       const sourceId = `page_todo:${p.plannable_id}`;
       const fields = { title: `Read: ${p.plannable.title}`, dueAt: ts(p.plannable.todo_date), url: p.html_url ?? null, canvasDone: Boolean(p.planner_override?.marked_complete) };

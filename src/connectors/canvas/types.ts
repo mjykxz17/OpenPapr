@@ -1,6 +1,11 @@
 export interface CanvasCourse { id: number; name: string; course_code: string; syllabus_body?: string | null; term?: { name: string } | null; }
 export interface CanvasSubmission { workflow_state: string; score: number | null; }
-export interface CanvasAssignment { id: number; name: string; due_at: string | null; html_url: string; points_possible: number | null; submission?: CanvasSubmission; }
+export interface CanvasAssignment {
+  id: number; name: string; due_at: string | null; html_url: string; points_possible: number | null; submission?: CanvasSubmission;
+  // When it opens and closes. A quiz often has only these, no due date.
+  unlock_at?: string | null; lock_at?: string | null;
+  submission_types?: string[]; is_quiz_assignment?: boolean; is_quiz_lti_assignment?: boolean; quiz_id?: number | null;
+}
 export interface CanvasAssignmentGroup { id: number; name: string; group_weight: number | null; assignments?: CanvasAssignment[]; }
 export interface CanvasAnnouncement { id: number; title: string; message: string; html_url: string; posted_at: string | null; }
 export interface CanvasCalendarEvent { id: number; title: string; start_at: string | null; html_url: string; description: string | null; }

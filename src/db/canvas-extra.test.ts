@@ -51,4 +51,19 @@ describe("applyPlanner", () => {
     expect(bySrc("assignment:51").missing).toBe(false);
     expect(bySrc("planner_note:3").dismissed).toBe(true);
   });
+
+  it("adds practice quizzes, which are not assignments, and follows their done state", () => {
+    const db = setup();
+    const window = { start: NOW - 14 * 86_400_000, end: NOW + 75 * 86_400_000 };
+    const pq = (done: boolean) => ({ plannable_type: "quiz", plannable_id: 77, course_id: 11, html_url: "q", plannable: { id: 77, title: "Practice Quiz 2", due_at: "2026-09-30T15:59:00Z" }, submissions: { submitted: done } });
+    applyPlanner(db, 1, [pq(false)], [], new Map([[11, 1]]), window, NOW);
+    const q = () => db.select().from(items).where(eq(items.sourceId, "quiz:77")).get()!;
+    expect(q()).toMatchObject({ type: "assignment", title: "Practice Quiz 2", moduleId: 1, dueAt: Date.parse("2026-09-30T15:59:00Z"), submitted: false });
+    expect(JSON.parse(q().metaJson!)).toMatchObject({ quiz: true, practice: true });
+    applyPlanner(db, 1, [pq(true)], [], new Map([[11, 1]]), window, NOW + 1);
+    expect(q()).toMatchObject({ submitted: true, canvasDone: true });
+    // A graded quiz is already an assignment; the planner only flags it.
+    applyPlanner(db, 1, [{ plannable_type: "quiz", plannable_id: 78, course_id: 11, plannable: { id: 78, title: "Forum post 1", assignment_id: 50 }, submissions: { submitted: true } }], [], new Map([[11, 1]]), window, NOW + 2);
+    expect(db.select().from(items).where(eq(items.sourceId, "quiz:78")).get()).toBeUndefined();
+  });
 });
