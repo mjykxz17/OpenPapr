@@ -338,13 +338,16 @@ export function ensureCanvasCovered(db: Db, userId: number, now: number): number
   for (const r of rows) {
     const set = variants.get(r.id);
     if (set) {
-      if (set.ids[0] !== r.id || set.ids.some((id) => covered.has(id))) continue;
+      // Old per-form tasks the student dismissed were clearing noise, not the set.
+      const coveredBySet = new Set(all.filter((t) => !oldForms.includes(t) && !(t.status === "dismissed" && /-canvas-\d+$/.test(t.key)))
+        .flatMap((t) => parseList<TaskSource>(t.sourcesJson).map((s) => s.itemId)));
+      if (set.ids[0] !== r.id || set.ids.some((id) => coveredBySet.has(id))) continue;
       if (set.ids.some((id) => { const x = rowById.get(id); return Boolean(x && (x.submitted || x.canvasDone)); })) continue;
     }
     const eligible = (r.type === "assignment" || r.type === "planner_note" || (r.type === "deadline" && r.sourceId.startsWith("page_todo:")))
       && !r.dismissed && !r.submitted && !r.canvasDone && r.dueAt !== null && r.dueAt >= now - D && r.dueAt <= now + 14 * D
       && (r.moduleId === null ? r.type === "planner_note" : mods.has(r.moduleId));
-    if (!eligible || covered.has(r.id)) continue;
+    if (!eligible || (!set && covered.has(r.id))) continue;
     const pair = gradedDiscussion.get(r.sourceId);
     if (pair && (covered.has(pair.id) || pair.submitted)) continue;
     const code = r.moduleId ? mods.get(r.moduleId)!.code : "note";

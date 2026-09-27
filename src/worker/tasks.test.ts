@@ -198,13 +198,14 @@ describe("forms posted once per tutorial group", () => {
     const due = NOW + 5 * 24 * H;
     db.insert(items).values(["TD1", "TD2", "TE1", "TE2", "TE3"].map((c, k) => ({ userId: 1, moduleId: 1, type: "assignment" as const, source: "canvas" as const, sourceId: `f${k}`, title: `Indemnity Form (${c})`, dueAt: due, firstSeenAt: NOW }))).run();
     const forms = db.select().from(items).where(eq(items.dueAt, due)).all().filter((r) => r.title.startsWith("Indemnity"));
+    db.insert(tasks).values({ userId: 1, moduleId: 1, key: `st2334-canvas-${forms[4].id}`, title: forms[4].title, kind: "submission", dueAt: due, dueConfidence: "exact", anticipated: false, sourcesJson: JSON.stringify([{ kind: "canvas", label: forms[4].title, itemId: forms[4].id }]), stepsJson: "[]", status: "dismissed", touchedAt: NOW, createdAt: NOW, updatedAt: NOW }).run();
     db.insert(tasks).values({ userId: 1, moduleId: 1, key: `st2334-canvas-${forms[2].id}`, title: forms[2].title, kind: "submission", dueAt: due, dueConfidence: "exact", anticipated: false, sourcesJson: JSON.stringify([{ kind: "canvas", label: forms[2].title, itemId: forms[2].id }]), stepsJson: "[]", status: "open", createdAt: NOW, updatedAt: NOW }).run();
     ensureCanvasCovered(db, 1, NOW);
-    const mine = db.select().from(tasks).all().filter((t) => t.title.startsWith("Indemnity"));
+    const mine = db.select().from(tasks).all().filter((t) => t.title.startsWith("Indemnity") && t.status === "open");
     expect(mine).toHaveLength(1);
     expect(mine[0]).toMatchObject({ key: `st2334-canvas-set-${forms[0].id}`, title: "Indemnity Form (your group's)" });
     ensureCanvasCovered(db, 1, NOW);
-    expect(db.select().from(tasks).all().filter((t) => t.title.startsWith("Indemnity"))).toHaveLength(1);
+    expect(db.select().from(tasks).all().filter((t) => t.title.startsWith("Indemnity") && t.status === "open")).toHaveLength(1);
     db.update(items).set({ submitted: true }).where(eq(items.id, forms[3].id)).run();
     tidyTasks(db, 1, NOW);
     expect(db.select().from(tasks).where(eq(tasks.id, mine[0].id)).get()!.status).toBe("done");
