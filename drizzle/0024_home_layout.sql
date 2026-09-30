@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `home_layout_json` text;

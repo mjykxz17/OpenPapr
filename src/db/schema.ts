@@ -48,6 +48,8 @@ export const users = sqliteTable("users", {
   llmFallbackKeyEnc: text("llm_fallback_key_enc"),
   llmFallbackRpm: integer("llm_fallback_rpm"),
   llmFallbackExtraJson: text("llm_fallback_extra_json"),
+  // Home screen widgets: [{ id, size, hidden }], in order. Null = default layout.
+  homeLayoutJson: text("home_layout_json"),
   // --- the student profile ---------------------------------------------
   // What the student tells us (major, year) and what OpenPapr derives from
   // their courses and notes. Derived JSON is shown to them on Account and can
