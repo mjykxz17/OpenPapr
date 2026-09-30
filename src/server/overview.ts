@@ -2,7 +2,9 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { staleAfterMs } from "../lib/poll-schedule";
 import { variantGroups } from "../lib/variants";
-import { components, items, modules, syncRuns, users } from "../db/schema";
+import { components, items, modules, syncRuns, tasks, users } from "../db/schema";
+import { dayLabel } from "../lib/format-date";
+import { shortModuleName } from "../lib/module-name";
 
 export type ItemRow = typeof items.$inferSelect;
 export type TodoEntry = ItemRow & { seriesCount?: number; variantCount?: number };
@@ -13,7 +15,12 @@ export interface Overview {
   whatsNew: ItemRow[]; // firstSeenAt > lastSeenAt, newest first, cap 20
   todos: TodoEntry[]; // assignment/event/deadline, !dismissed, !submitted; past events + past routine deadlines hidden after 12h grace; recurring event series collapsed to next occurrence; overdue first, then dueAt asc, nulls last
   mail: { important: ItemRow[]; filteredCount: number }; // important = triage in (important,ambiguous,unscored) & !dismissed, newest 20; filteredCount = garbage count
-  modules: { id: number; code: string; name: string; components: ComponentRow[]; latestAnnouncements: ItemRow[]; unaccountedPct: number | null; hidden: boolean }[];
+  modules: {
+    id: number; code: string; name: string; components: ComponentRow[]; latestAnnouncements: ItemRow[]; unaccountedPct: number | null; hidden: boolean;
+    shortName: string;
+    next: { title: string; when: string } | null;   // the next thing due here, a Canvas item or a planned task; when is preformatted
+    newCount: number;                               // updates since the student last looked
+  }[];
   syncStatus: { source: string; lastOkAt: number | null; stale: boolean }[]; // stale = now - lastOkAt > three missed syncs (see poll-schedule)
   graphAuthBroken: boolean; // latest graph sync_run failed with /401|invalid_grant/ — drives the reconnect banner
 }
@@ -148,6 +155,7 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
   const modIds = mods.map((m) => m.id);
   const allComponents = modIds.length ? db.select().from(components).where(inArray(components.moduleId, modIds)).all() : [];
 
+  const openTasks = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.status, "open"))).all();
   const modulesOut = mods.map((m) => {
     const comps = dedupeComponents(allComponents.filter((c) => c.moduleId === m.id));
     const sumWeight = comps.reduce((sum, c) => sum + (c.weightPct ?? 0), 0);
@@ -155,7 +163,15 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
     const latestAnnouncements = allItems
       .filter((i) => i.moduleId === m.id && i.type === "announcement")
       .sort(byNewestFirst);
-    return { id: m.id, code: m.code, name: m.name, components: comps, latestAnnouncements, unaccountedPct, hidden: m.hidden };
+    const itemNext = todos.filter((t) => t.moduleId === m.id && t.dueAt !== null && t.dueAt >= now).sort((a, b) => a.dueAt! - b.dueAt!)[0];
+    const taskNext = openTasks.filter((t) => t.moduleId === m.id && t.dueAt !== null && t.dueAt >= now).sort((a, b) => a.dueAt! - b.dueAt!)[0];
+    const next = taskNext && (!itemNext || taskNext.dueAt! < itemNext.dueAt!)
+      ? { title: taskNext.title, when: `${taskNext.dueConfidence === "estimated" ? "around " : ""}${dayLabel(taskNext.dueAt!)}` }
+      : itemNext ? { title: itemNext.title, when: dayLabel(itemNext.dueAt!) } : null;
+    const newCount = scopedItems.filter((i) => i.moduleId === m.id && i.firstSeenAt > lastSeenAt && !i.dismissed
+      && (i.type === "announcement" || i.type === "discussion" || i.type === "staff_reply")).length;
+    return { id: m.id, code: m.code, name: m.name, components: comps, latestAnnouncements, unaccountedPct, hidden: m.hidden,
+      shortName: shortModuleName(m.code, m.name), next, newCount };
   });
 
   // sync_runs grows about 585 rows/day and this function runs on every render

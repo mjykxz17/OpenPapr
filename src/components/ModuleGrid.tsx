@@ -14,41 +14,67 @@ import { SortableContext, arrayMove, rectSortingStrategy, useSortable } from "@d
 import { CSS } from "@dnd-kit/utilities";
 import type { Overview } from "@/server/overview";
 import { WeightBar, weightSegments } from "@/components/WeightBar";
+import { shortComponentName } from "@/lib/module-name";
 
 type Module = Overview["modules"][number];
 
 const GRID = "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3";
-const CARD = "flex flex-col gap-3.5 rounded-[10px] border border-line bg-panel px-[18px] py-4 no-underline select-none";
+// Every tile is the same size whatever its module holds: the name is one
+// line, the weighting table always takes four rows, and "Next" sits on the
+// bottom edge. A tidy grid beats squeezing in every detail.
+const CARD = "flex h-[258px] flex-col gap-3.5 rounded-[10px] border border-line bg-panel px-[18px] py-4 no-underline select-none";
+const ROWS = 4;
+const ROW_COLORS = ["bg-accent", "bg-seg-2", "bg-seg-3", "bg-seg-4"] as const;
 
-// The tile face: code and name, then the weighting as a bar with a legend
-// beneath it — every component named, none truncated. A module with no
-// known weighting says so and points at the fix.
+// Up to four rows: the biggest components, the rest folded into "Other",
+// and whatever the syllabus leaves unaccounted.
+function weightRows(m: Module) {
+  const segs = weightSegments(m.components).map((s) => ({ name: shortComponentName(s.name), full: s.name, pct: s.pct, warn: false }));
+  const room = m.unaccountedPct != null && m.unaccountedPct > 0 ? ROWS - 1 : ROWS;
+  const rows = segs.length > room
+    ? [...segs.slice(0, room - 1), { name: "Other", full: segs.slice(room - 1).map((s) => s.full).join(", "), pct: segs.slice(room - 1).reduce((n, s) => n + s.pct, 0), warn: false }]
+    : segs;
+  if (room < ROWS) rows.push({ name: "Unaccounted", full: "Not found in the syllabus yet", pct: m.unaccountedPct!, warn: true });
+  return rows;
+}
+
 function TileFace({ m }: { m: Module }) {
-  const segments = weightSegments(m.components);
+  const rows = weightRows(m);
   return (
     <>
-      <div className="flex flex-col gap-0.5">
-        <div className="text-[15px] font-semibold text-ink">{m.code}</div>
-        <div className="line-clamp-2 text-[13px] text-ink-2">{m.name}</div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold text-ink">{m.code}</div>
+          <div className="truncate text-[13px] text-ink-2" title={m.name}>{m.shortName}</div>
+        </div>
+        {m.newCount > 0 && <span className="shrink-0 pt-0.5 text-[12px] font-medium text-accent">{m.newCount} new</span>}
       </div>
-      <div className="flex flex-col gap-2">
-        <WeightBar components={m.components} />
-        {segments.length === 0 ? (
-          <div className="flex gap-3 text-[13px] text-ink-3">
-            <span>Weighting not found yet</span>
-            <span className="font-medium text-accent">Add it</span>
-          </div>
+      <WeightBar components={m.components} />
+      {rows.length === 0 ? (
+        <div className="flex h-[88px] flex-col justify-center gap-1 text-[13px] text-ink-3">
+          <span>Weighting not found yet</span>
+          <span className="font-medium text-accent">Add it on the module page</span>
+        </div>
+      ) : (
+        <ul className="grid h-[88px] content-start gap-y-[5px] text-[13px] tabular-nums">
+          {rows.map((r, i) => (
+            <li key={r.name} className="grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2" title={r.full}>
+              <span className={`h-2 w-2 rounded-[2px] ${r.warn ? "border border-dashed border-warn-ink" : ROW_COLORS[i] ?? "bg-seg-4"}`} />
+              <span className={`truncate ${r.warn ? "text-warn-ink" : "text-ink"}`}>{r.name}</span>
+              <span className={r.warn ? "text-warn-ink" : "text-ink-3"}>{r.pct}%</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-auto flex items-baseline gap-3 border-t border-line pt-2.5 text-[13px]">
+        <span className="shrink-0 text-ink-3">Next</span>
+        {m.next ? (
+          <span className="ml-auto flex min-w-0 items-baseline gap-1" title={`${m.next.title} · ${m.next.when}`}>
+            <span className="truncate font-medium text-ink">{m.next.title}</span>
+            <span className="shrink-0 text-ink-2">· {m.next.when}</span>
+          </span>
         ) : (
-          <div className="flex flex-wrap gap-x-3 gap-y-1 text-[13px] tabular-nums text-ink-2">
-            {segments.map((s) => (
-              <span key={s.name}>
-                {s.name} {s.pct}
-              </span>
-            ))}
-            {m.unaccountedPct != null && m.unaccountedPct > 0 && (
-              <span className="text-warn-ink">Unaccounted {m.unaccountedPct}</span>
-            )}
-          </div>
+          <span className="ml-auto text-ink-3">Nothing due</span>
         )}
       </div>
     </>

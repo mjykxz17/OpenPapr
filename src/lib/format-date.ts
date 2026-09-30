@@ -44,3 +44,8 @@ export function dueLabel(ms: number, now: number): string {
 export function syncedLabel(ms: number, now: number): string {
   return startOfDay(ms) === startOfDay(now) ? shortTime(ms) : relativeDay(ms, now);
 }
+
+/** "Sun 18 Oct" — a day, for "next up" lines. */
+export function dayLabel(ms: number): string {
+  return new Date(ms).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+}
