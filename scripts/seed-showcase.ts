@@ -7,7 +7,7 @@
 // then sign in as  demo / openpapr-demo.  Re-running starts from scratch.
 import { existsSync, rmSync } from "node:fs";
 import { createDb } from "../src/db/client";
-import { components, items, modules, studyGuides, syncRuns, taskPlans, tasks, users, weeklyPlans } from "../src/db/schema";
+import { components, files, items, moduleProfiles, modules, studyGuides, syncRuns, taskPlans, tasks, users, weeklyPlans } from "../src/db/schema";
 import { weekStartSgt } from "../src/db/profiles-repo";
 import { hashPassword } from "../src/server/password";
 
@@ -155,6 +155,29 @@ Charge each cheap operation a little extra and store it as credit; expensive ope
 }).run();
 
 for (const m of [se, algo, net, stats]) db.insert(taskPlans).values({ moduleId: m.id, inputsHash: "showcase", generatedAt: now - 20 * 60_000 }).run();
+
+// A module profile and a shelf of files for CS3230, so its page is full.
+db.insert(moduleProfiles).values({
+  moduleId: algo.id, generatedAt: now - D,
+  lecturersJson: JSON.stringify([{ name: "Dr Lim Wei" }, { name: "Prof Sarah Ong" }]),
+  profileJson: JSON.stringify({
+    oneLine: "How to prove an algorithm correct and fast: asymptotics, divide and conquer, dynamic programming, greedy methods and amortised analysis.",
+    covers: ["Asymptotic analysis", "Divide and conquer", "Dynamic programming", "Greedy algorithms", "Amortised analysis", "NP-completeness"],
+    assessment: "Problem sets 30%, midterm 20%, final 50%",
+    lecturers: [{ name: "Dr Lim Wei", background: "Works on approximation algorithms.", emphasis: ["rigorous proofs", "recurrences"] }, { name: "Prof Sarah Ong", background: null, emphasis: ["dynamic programming"] }],
+    studentsSay: { workload: "Heavy in problem-set weeks", difficulty: "Hard but fair", tips: ["Start problem sets the day they are released", "Practise writing proofs, not just answers"], pitfalls: ["Leaving the master theorem to the week before the midterm"] },
+    fit: { buildsOn: ["CS2040S data structures", "MA1100 proofs"], gaps: ["Induction proofs", "Summations"], relevance: "Core for the algorithms focus area and most technical interviews." },
+    howToStudy: ["Redo tutorial questions without notes", "Keep a one-page sheet of recurrences and their solutions", "Explain each proof out loud before writing it"],
+  }),
+}).run();
+const f = (canvasFileId: number, displayName: string, category: typeof files.$inferInsert.category, ago: number) =>
+  ({ moduleId: algo.id, canvasFileId, displayName, category, categorySource: "rule" as const, discoveredAt: now - ago * D });
+db.insert(files).values([
+  f(901, "L1-asymptotics.pdf", "slides", 40), f(902, "L2-recurrences.pdf", "slides", 33), f(903, "L3-divide-conquer.pdf", "slides", 26),
+  f(904, "L4-master.pdf", "slides", 19), f(905, "L5-dynamic-programming.pdf", "slides", 12), f(906, "L6-amortised.pdf", "slides", 5),
+  f(911, "Tutorial 3.pdf", "tutorial", 20), f(912, "Tutorial 4.pdf", "tutorial", 13), f(921, "Problem Set 3.pdf", "assignment", 6),
+  f(931, "CLRS chapter 4.pdf", "reading", 28), f(941, "Course admin.pdf", "admin", 45),
+]).run();
 
 db.insert(syncRuns).values([
   { userId: u, source: "canvas", startedAt: now - 60_000, finishedAt: now - 5_000, ok: true },

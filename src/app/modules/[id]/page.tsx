@@ -21,15 +21,22 @@ import { loadEnv } from "@/lib/env";
 import { moduleProfileView, weeklyPlanView } from "@/server/profiles";
 import { canGenerateGuides } from "@/server/llm-access";
 import { ModuleProfileCard } from "@/components/profile/ModuleProfileCard";
+import { ModuleTabs } from "@/components/module/ModuleTabs";
+import { AskButton } from "@/components/module/AskButton";
+import { tasksView } from "@/server/tasks";
+import { guideStatus } from "@/server/guide-status";
+import { syncedLabel } from "@/lib/format-date";
 
 export const dynamic = "force-dynamic";
 
 
 
-// The module overview: what it is graded on, what was announced, what files
-// it has. The study guide lives on its own page — it wants the whole viewport
-// for reading, and these facts want to be glanceable, and the two fought for
-// the same screen when stacked.
+// The module page opens on what matters now: four glance tiles (next due,
+// weighting, the guide, what's new), then tabs. Overview holds what is coming
+// up, the latest update and the weighting; Updates, Materials and About (the
+// module profile) wait behind their tabs. The guide has its own page.
+// A Canvas course says so, with its sync time and a link back; a module the
+// student made themselves is marked as theirs and has no Canvas updates.
 export default async function ModulePage({ params }: PageProps<"/modules/[id]">) {
   const { id } = await params;
   const moduleId = Number(id);
@@ -70,9 +77,6 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
   const { title, termCode } = moduleDisplay(mod);
   const now = Date.now();
   const overview = getOverview(db, userId, now, loadEnv().POLL_INTERVAL_MS);
-  const dueSoon = overview.todos.filter(
-    (t) => t.moduleId === mod.id && t.category !== "routine" && t.dueAt !== null && t.dueAt < now + 30 * 86_400_000,
-  ).length;
   const unaccountedPct = overview.modules.find((m) => m.id === mod.id)?.unaccountedPct ?? null;
   // The bar and its legend use the visible (unshadowed) rows only.
   const live = rows.filter((c) => !c.shadowed);
@@ -136,115 +140,238 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
 
   const sectionHeading = "text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-2";
 
+  const env = loadEnv();
+  const isCanvas = mod.canvasCourseId > 0;
+  const lastSync = overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null;
+  const tv = tasksView(db, userId, now);
+  const upcoming = [...tv.soon, ...tv.later].filter((t) => t.moduleId === mod.id)
+    .sort((a, b) => (a.dueAt ?? Number.MAX_SAFE_INTEGER) - (b.dueAt ?? Number.MAX_SAFE_INTEGER));
+  const next = upcoming.find((t) => t.dueAt !== null && t.dueAt >= now) ?? null;
+  const gs = guideStatus(db, mod.id);
+  const weekAgo = now - 7 * 86_400_000;
+  const newThisWeek = announcements.filter((a) => activity(a) >= weekAgo).length;
+  const days = (ms: number) => Math.round((new Date(ms).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 86_400_000);
+
+  const tile = "flex min-h-[112px] flex-col rounded-[10px] border border-line bg-panel px-4 py-3.5 no-underline transition-colors hover:border-line-2";
+  const tileLabel = "text-[11.5px] font-semibold uppercase tracking-[0.06em] text-ink-2";
+  const big = "mt-1.5 text-[24px] font-semibold leading-tight tracking-[-0.01em] tabular-nums text-ink";
+  const small = "mt-auto truncate pt-1 text-[13px] text-ink-2";
+
+  const tiles = (
+    <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <Link href={next ? `/tasks#task-${next.id}` : "/tasks"} className={tile}>
+        <span className={tileLabel}>Next due</span>
+        {next ? (
+          <>
+            <span className={big}>{days(next.dueAt!) <= 0 ? "Today" : days(next.dueAt!) === 1 ? "Tomorrow" : `${days(next.dueAt!)} days`}</span>
+            <span className={small} title={next.title}>{next.title}{next.weightPct != null ? ` · ${next.weightPct}%` : ""}</span>
+          </>
+        ) : <span className={`${small} mt-2`}>Nothing dated coming up</span>}
+      </Link>
+      <a href="#assessment" className={tile}>
+        <span className={tileLabel}>Graded on</span>
+        {live.length ? (
+          <>
+            <div className="mt-3"><WeightBar components={live} height="h-2" /></div>
+            <span className={small} title={live.map((c) => `${c.name} ${c.weightPct ?? "?"}%`).join(" · ")}>{live.map((c) => `${c.name} ${c.weightPct ?? "?"}`).join(" · ")}</span>
+          </>
+        ) : <span className={`${small} mt-2`}>Not found yet · add it</span>}
+      </a>
+      <Link href={`/modules/${mod.id}/guide`} className={tile}>
+        <span className={tileLabel}>Study guide</span>
+        {gs.total > 0 ? (
+          <>
+            <span className={big}>{gs.ready}<span className="text-[15px] font-normal text-ink-3"> / {gs.total}</span></span>
+            <span className={small}>{gs.writing ? `Writing “${gs.writing.title}”` : guide ? `chapters · updated ${shortDate(guide.generatedAt)}` : "chapters"}</span>
+          </>
+        ) : guide ? (
+          <><span className={big}>Ready</span><span className={small}>updated {shortDate(guide.generatedAt)}</span></>
+        ) : <span className={`${small} mt-2`}>Writes itself as slides arrive</span>}
+      </Link>
+      {isCanvas ? (
+        <a href="#updates" className={tile}>
+          <span className={tileLabel}>Updates</span>
+          <span className={big}>{newThisWeek}</span>
+          <span className={small}>new this week{announcements[0] ? ` · latest ${relativeDay(activity(announcements[0]), now)}` : ""}</span>
+        </a>
+      ) : (
+        <a href="#materials" className={tile}>
+          <span className={tileLabel}>Material</span>
+          <span className={big}>{files.length}</span>
+          <span className={small}>{files.length === 1 ? "file" : "files"}</span>
+        </a>
+      )}
+    </div>
+  );
+
+  const comingUp = (
+    <section className="rounded-[10px] border border-line bg-panel px-4 py-3.5">
+      <div className="flex items-baseline justify-between">
+        <h2 className={sectionHeading}>Coming up</h2>
+        <Link href="/tasks" className="text-[13px] text-ink-3 hover:text-accent">All tasks →</Link>
+      </div>
+      {upcoming.length === 0 ? (
+        <p className="pt-3 text-sm text-ink-3">Nothing planned for this module yet.</p>
+      ) : (
+        <ul className="mt-1 divide-y divide-line">
+          {upcoming.slice(0, 5).map((t) => (
+            <li key={t.id}>
+              <Link href={`/tasks#task-${t.id}`} className="flex items-baseline justify-between gap-4 py-2.5 no-underline">
+                <span className="min-w-0 truncate text-[14px] text-ink">
+                  {t.title}
+                  {t.weightPct != null && <span className="text-ink-3"> · {t.weightPct}%</span>}
+                  {t.anticipated && <span className="text-ink-3"> (expected)</span>}
+                </span>
+                <span className={`shrink-0 text-[13px] tabular-nums ${t.overdue ? "text-danger" : "text-ink-2"}`}>{t.dueText}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+
+  const latest = isCanvas && (
+    <section className="rounded-[10px] border border-line bg-panel px-4 py-3.5">
+      <div className="flex items-baseline justify-between">
+        <h2 className={sectionHeading}>Latest updates</h2>
+        {announcements.length > 2 && <a href="#updates" className="text-[13px] text-ink-3 hover:text-accent">All {announcements.length} →</a>}
+      </div>
+      {announcements.length === 0 ? <p className="pt-3 text-sm text-ink-3">Nothing posted yet.</p> : (
+        <ul className="mt-1 divide-y divide-line">
+          {announcements.slice(0, 2).map((a) => (
+            <li key={a.id} className="py-2.5">
+              <a href={`#a-${a.id}`} className="block no-underline">
+                <span className="flex items-baseline justify-between gap-4">
+                  <span className="min-w-0 truncate text-[14px] font-medium text-ink">{a.title}</span>
+                  <span className="shrink-0 text-[13px] tabular-nums text-ink-3">{relativeDay(activity(a), now)}</span>
+                </span>
+                <span className="mt-0.5 line-clamp-2 text-[13px] leading-[1.5] text-ink-2">{htmlToText(a.body)}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+
+  const assessment = (
+    <section id="assessment" className="scroll-mt-20 rounded-[10px] border border-line bg-panel px-4 py-3.5">
+      <h2 className={sectionHeading}>Assessment</h2>
+      <div className="mt-3 flex flex-col gap-3">
+        {rows.length === 0 ? (
+          <p className="text-sm text-ink-3">{isCanvas ? "Weighting not found in Canvas or the syllabus yet. Add it below." : "Add how this module is graded, if it is."}</p>
+        ) : (
+          <>
+            <WeightBar components={live} height="h-2.5" />
+            <table className="w-full border-collapse text-sm tabular-nums">
+              <tbody>
+                {rows.map((c) => (
+                  <tr key={c.id} className={`border-b border-line last:border-0 ${c.shadowed ? "text-ink-3" : ""}`}>
+                    <td className="py-2 pr-2 align-top">
+                      <span className="inline-flex items-center gap-2">
+                        <span aria-hidden className={`h-2.5 w-2.5 rounded-[2px] ${c.shadowed ? "bg-transparent" : (segmentColor.get(c.name) ?? "bg-ink/[0.06]")}`} />
+                        {c.name}
+                        {c.shadowed && <span className="text-xs">(replaced)</span>}
+                      </span>
+                    </td>
+                    <td className={`w-px whitespace-nowrap py-2 pr-3 text-right align-top ${c.shadowed ? "" : "font-medium"}`}>{c.weightPct != null ? `${c.weightPct}%` : "—"}</td>
+                    <td className="w-px whitespace-nowrap py-2 text-right align-top">
+                      <SourceChip source={c.source} evidence={c.evidence} name={c.name} />
+                    </td>
+                  </tr>
+                ))}
+                {unaccountedPct != null && unaccountedPct > 0 && (
+                  <tr className="text-ink-2">
+                    <td className="py-2 pr-2">
+                      <span className="inline-flex items-center gap-2">
+                        <span aria-hidden className="h-2.5 w-2.5 rounded-[2px] bg-ink/[0.06]" />
+                        Unaccounted
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-right">{unaccountedPct}%</td>
+                    <td className="py-2 text-right text-[13px] text-warn-ink">Add below</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </>
+        )}
+        {/* Folded away: entering a weighting by hand is a once-a-semester act. */}
+        <details>
+          <summary className="cursor-pointer select-none text-[13px] font-medium text-accent hover:underline">Add component</summary>
+          <div className="mt-3"><ManualComponentForm moduleId={mod.id} /></div>
+        </details>
+      </div>
+    </section>
+  );
+
+  const tabs = [
+    { id: "overview", label: "Overview" },
+    ...(isCanvas ? [{ id: "updates", label: "Updates", count: announcements.length }] : []),
+    { id: "materials", label: "Materials", count: files.length },
+    { id: "about", label: "About" },
+  ];
+  const panels = {
+    overview: (
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(300px,2fr)] lg:items-start">
+        <div className="flex min-w-0 flex-col gap-4">{comingUp}{latest}</div>
+        {assessment}
+      </div>
+    ),
+    updates: (
+      <section className="flex min-w-0 flex-col gap-3">
+        <p className="text-[13px] tabular-nums text-ink-3">{plural(announcements.length - discussionCount, "announcement")}{discussionCount ? ` · ${plural(discussionCount, "discussion")}` : ""} · newest first</p>
+        {announcements.length === 0 ? <p className="text-sm text-ink-3">Nothing posted yet.</p> : (
+          <div className="rounded-[10px] border border-line bg-panel px-4">
+            <ul className="divide-y divide-line">{announcements.map(announcement)}</ul>
+          </div>
+        )}
+      </section>
+    ),
+    materials: <Materials files={files} moduleId={mod.id} />,
+    about: <ModuleProfileCard moduleId={mod.id} {...profileView} focus={focus} hasModel={canGenerateGuides(db, userId)} />,
+  };
+
   return (
     <AppShell>
-      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
-        <div className="flex flex-col gap-1.5">
-          <BackLink href="/">Home</BackLink>
-          <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">{title}</h1>
-          <p className="text-sm tabular-nums text-ink-2">
-            {mod.code}
-            {termCode && <> · Term {termCode}</>}
-            {dueSoon > 0 && <> · {dueSoon} due this month</>}
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1.5">
-          <Link
-            href={`/modules/${mod.id}/guide`}
-            className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-on-accent no-underline transition-colors hover:bg-accent-strong"
-          >
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-            </svg>
-            {guide ? "Open study guide" : "Study guide"}
-          </Link>
-          <span className="text-[13px] text-ink-3">{guide ? `updated ${shortDate(guide.generatedAt)}` : "writes itself from the slides"}</span>
+      <header className="flex flex-col gap-3">
+        <BackLink href="/">Home</BackLink>
+        <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">{title}</h1>
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] tabular-nums text-ink-2">
+              <span className="font-semibold text-ink">{mod.code}</span>
+              {termCode && <span>· Term {termCode}</span>}
+              {isCanvas ? (
+                <>
+                  <span className="rounded-full bg-[color-mix(in_oklab,#c0392b_10%,transparent)] px-2 py-px text-[11.5px] font-semibold text-[#b03a2e] dark:text-[#f19a8f]">Canvas</span>
+                  {lastSync && <span className="inline-flex items-center gap-1.5"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[#16a34a]" />synced {syncedLabel(lastSync, now)}</span>}
+                  <a href={`${env.CANVAS_BASE_URL.replace(/\/$/, "")}/courses/${mod.canvasCourseId}`} target="_blank" rel="noreferrer" className="text-accent hover:underline">Open in Canvas ↗</a>
+                </>
+              ) : (
+                <span className="rounded-full border border-dashed border-accent/50 bg-accent-soft px-2 py-px text-[11.5px] font-semibold text-accent">Your module</span>
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <AskButton />
+            <Link
+              href={`/modules/${mod.id}/guide`}
+              className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-on-accent no-underline transition-colors hover:bg-accent-strong"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              </svg>
+              {guide ? "Open study guide" : "Study guide"}
+            </Link>
+          </div>
         </div>
       </header>
 
-      <ModuleProfileCard moduleId={mod.id} {...profileView} focus={focus} hasModel={canGenerateGuides(db, userId)} />
-
-      {/* Two short things share the first row; the long list gets the second
-          row at full width. Nothing tall sits beside anything short. */}
-      <div className="mt-8 grid grid-cols-1 gap-x-12 gap-y-8 lg:grid-cols-[minmax(300px,2fr)_minmax(0,3fr)] lg:items-start">
-        <section className="flex flex-col gap-3.5">
-          <div className="flex items-baseline justify-between">
-            <h2 className={sectionHeading}>Assessment</h2>
-          </div>
-          {rows.length === 0 ? (
-            <p className="text-sm text-ink-3">Weighting not found in Canvas or the syllabus yet — add it below.</p>
-          ) : (
-            <>
-              <WeightBar components={live} height="h-2.5" />
-              <table className="w-full border-collapse text-sm tabular-nums">
-                <tbody>
-                  {rows.map((c) => (
-                    <tr key={c.id} className={`border-b border-line ${c.shadowed ? "text-ink-3" : ""}`}>
-                      <td className="py-2 pr-2 align-top">
-                        <span className="inline-flex items-center gap-2">
-                          <span aria-hidden className={`h-2.5 w-2.5 rounded-[2px] ${c.shadowed ? "bg-transparent" : (segmentColor.get(c.name) ?? "bg-ink/[0.06]")}`} />
-                          {c.name}
-                          {c.shadowed && <span className="text-xs">(replaced)</span>}
-                        </span>
-                      </td>
-                      <td className={`w-px whitespace-nowrap py-2 pr-3 text-right align-top ${c.shadowed ? "" : "font-medium"}`}>{c.weightPct != null ? `${c.weightPct}%` : "—"}</td>
-                      <td className="w-px whitespace-nowrap py-2 text-right align-top">
-                        <SourceChip source={c.source} evidence={c.evidence} name={c.name} />
-                      </td>
-                    </tr>
-                  ))}
-                  {unaccountedPct != null && unaccountedPct > 0 && (
-                    <tr className="border-b border-line text-ink-2">
-                      <td className="py-2 pr-2">
-                        <span className="inline-flex items-center gap-2">
-                          <span aria-hidden className="h-2.5 w-2.5 rounded-[2px] bg-ink/[0.06]" />
-                          Unaccounted
-                        </span>
-                      </td>
-                      <td className="py-2 pr-3 text-right">{unaccountedPct}%</td>
-                      <td className="py-2 text-right text-[13px] text-warn-ink">Add below</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </>
-          )}
-
-          {/* Folded away: entering a weightage by hand is a once-a-semester act. */}
-          <details className="mt-1">
-            <summary className="cursor-pointer select-none text-[13px] font-medium text-accent hover:underline">Add component</summary>
-            <div className="mt-3">
-              <ManualComponentForm moduleId={mod.id} />
-            </div>
-          </details>
-        </section>
-
-        <section className="flex min-w-0 flex-col gap-3.5">
-          <div className="flex items-baseline justify-between">
-            <h2 className={sectionHeading}>Updates</h2>
-            {announcements.length > 0 && <span className="text-[13px] tabular-nums text-ink-3">{plural(announcements.length - discussionCount, "announcement")}{discussionCount ? ` · ${plural(discussionCount, "discussion")}` : ""}</span>}
-          </div>
-          {announcements.length === 0 ? (
-            <p className="text-sm text-ink-3">Nothing posted yet.</p>
-          ) : (
-            /* A bounded box that scrolls inside itself: the page keeps its
-               shape however many announcements a module has accumulated, and
-               the ones that matter — the newest — are the ones in view. */
-            <div className="max-h-[32rem] overflow-y-auto overscroll-contain rounded-[10px] border border-line bg-panel px-4 [scrollbar-gutter:stable]">
-              <ul className="divide-y divide-line">{announcements.map(announcement)}</ul>
-            </div>
-          )}
-        </section>
-
-        <section className="flex flex-col gap-3.5 lg:col-span-2">
-          <div className="flex items-baseline justify-between">
-            <h2 className={sectionHeading}>Materials</h2>
-            {files.length > 0 && <span className="text-[13px] text-ink-3">Opens here</span>}
-          </div>
-          <Materials files={files} moduleId={mod.id} />
-        </section>
-      </div>
+      {tiles}
+      <ModuleTabs tabs={tabs} panels={panels} />
     </AppShell>
   );
 }

@@ -63,9 +63,10 @@ test("a session reaches the dashboard, modules, reminders and mail", async ({ pa
   // The manual-weightage form is folded into a disclosure now; assert the
   // control exists rather than the fields, which are collapsed by default.
   await expect(page.getByText(/^Add component$/i)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Materials" })).toBeVisible();
+  await page.getByRole("tab", { name: /^Materials/ }).click();
+  await expect(page.getByRole("tabpanel", { name: /^Materials/ })).toBeVisible();
   // Not getByRole by name: the rail's "Study guides" link matches the same words.
-  await expect(page.locator('main a[href="/modules/2/guide"]')).toContainText(/study guide/i);
+  await expect(page.locator('main a[href="/modules/2/guide"]').first()).toContainText(/study guide/i);
 
   // The guide has its own page and writes itself; the demo module has none
   // yet. Without an AI provider the page says how to turn that on.

@@ -32,7 +32,7 @@ function Bullets({ items }: { items: string[] }) {
 export function ModuleProfileCard(p: Props) {
   const prof = p.profile;
   return (
-    <section aria-labelledby="mod-profile" className="mt-8 rounded-[10px] border border-line bg-panel">
+    <section aria-labelledby="mod-profile" className="rounded-[10px] border border-line bg-panel">
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line px-5 py-3.5">
         <h2 id="mod-profile" className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-2">Module profile</h2>
         {p.hasModel
