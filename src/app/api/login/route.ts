@@ -4,7 +4,7 @@ import { SESSION_TTL_MS, signSession } from "@/server/auth";
 import { hashPassword, normalizeUsername, verifyPassword } from "@/server/password";
 import { pruneRateLimits, rateLimit } from "@/server/rate-limit";
 import { getDb } from "@/server/db";
-import { findByUsername, resolveCanvasUser, setCredentials } from "@/db/repo";
+import { createLocalUser, findByUsername, resolveCanvasUser, setCredentials } from "@/db/repo";
 import { createCanvasClient } from "@/connectors/canvas/client";
 import { loadEnv, sessionSigningKey } from "@/lib/env";
 
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   const password = str(raw.password);
 
   // --- returning visit: username and password, no Canvas token needed ---
-  if (username && password && !str(raw.canvasToken)) {
+  if (username && password && !str(raw.canvasToken) && !str(raw.inviteCode)) {
     const user = findByUsername(db, username);
     // Verify against a dummy hash when the user is unknown, so a wrong
     // username and a wrong password take the same time to answer.
@@ -62,14 +62,23 @@ export async function POST(request: Request) {
     return withSession({ ok: true, name: user.name }, user.id, sessionSigningKey(env));
   }
 
-  // --- first visit, or replacing an expired token: invite code + token ---
+  // --- first visit: the invite code, then a Canvas token and/or a username ---
   const inviteCode = str(raw.inviteCode);
   const canvasToken = str(raw.canvasToken);
-  if (!inviteCode || !canvasToken) {
-    return NextResponse.json({ error: "enter your username and password, or an invite code and Canvas token" }, { status: 400 });
+  if (!inviteCode || (!canvasToken && !(username && password))) {
+    return NextResponse.json({ error: "enter your username and password, or an invite code with a username and password" }, { status: 400 });
   }
   if (!sameSecret(inviteCode, env.APP_PASSWORD)) {
     return NextResponse.json({ error: "that invite code is not valid" }, { status: 401 });
+  }
+
+  // No Canvas yet: an account with just a username and password. Canvas can
+  // be connected later, from the welcome steps or Account.
+  if (!canvasToken) {
+    if (password.length < 8) return NextResponse.json({ error: "choose a password of at least 8 characters" }, { status: 400 });
+    if (findByUsername(db, username)) return NextResponse.json({ error: "that username is already taken" }, { status: 409 });
+    const userId = createLocalUser(db, username, hashPassword(password), Date.now());
+    return withSession({ ok: true, name: username, credentialsSaved: true, created: true }, userId, sessionSigningKey(env));
   }
 
   let self: { id: number; name: string };

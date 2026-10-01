@@ -56,6 +56,8 @@ export async function POST(request: Request) {
     const reply = id === null
       ? "What should I remind you about? Try “remind me to print the tutorial sheet by Friday”."
       : `Added to your tasks: “${q.title}”${dueAt ? `, due ${dayLabel(dueAt)}` : " (no date — say “by Friday” next time and I'll set one)"}. It's on the Tasks page.`;
+    // The demo account is shared by every visitor: nobody's chat is kept for the next one.
+    if (user?.isDemo) return NextResponse.json({ reply, smart: false, sessionId: null, added: id !== null });
     const saved = appendToChat(db, userId, earlierTurns.length ? sessionId : null, question, reply, now);
     return NextResponse.json({ reply, smart: false, sessionId: saved.id, title: saved.title, added: id !== null });
   }
@@ -90,6 +92,7 @@ export async function POST(request: Request) {
       reply = `${fallback()} (My big brain is offline, so that's the short version.)`;
     }
   }
+  if (user?.isDemo) return NextResponse.json({ reply, smart, sources, sessionId: null });
   const saved = appendToChat(db, userId, earlier.length ? sessionId : null, question, reply, now, sources);
   return NextResponse.json({ reply, smart, sources, sessionId: saved.id, title: saved.title });
 }

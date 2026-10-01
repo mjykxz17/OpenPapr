@@ -27,7 +27,7 @@ const DAY = 24 * HOUR;
 const lastSeenAt = now - 3 * DAY;
 const seenFirstSeenAt = now - 5 * DAY;
 
-const user = db.insert(users).values({ name: "Demo Student", lastSeenAt }).returning().get();
+const user = db.insert(users).values({ name: "Demo Student", lastSeenAt, onboardedAt: now }).returning().get();
 
 const cs2103t = db
   .insert(modules)

@@ -71,6 +71,14 @@ export const users = sqliteTable("users", {
   courseHistoryAt: integer("course_history_at"),
   // "Replan" on the Tasks page; the worker clears it as it picks it up.
   tasksRequestedAt: integer("tasks_requested_at"),
+  // When the student finished (or skipped) the welcome steps. Null sends
+  // them to /welcome from Home.
+  onboardedAt: integer("onboarded_at"),
+  // The public demo account: anyone can open it from the sign-in page, it
+  // borrows the owner's AI key with a daily cap, can't change its settings,
+  // and is wiped and re-seeded every night at midnight (Singapore time).
+  isDemo: integer("is_demo", { mode: "boolean" }).notNull().default(false),
+  demoResetAt: integer("demo_reset_at"),
 }, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId), uniqueIndex("users_username").on(t.username)]);
 
 export const modules = sqliteTable("modules", {

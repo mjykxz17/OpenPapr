@@ -37,7 +37,9 @@ export function exportAccount(db: Db, userId: number) {
   };
 }
 
-export function deleteAccount(db: Db, userId: number): void {
+// Every row that belongs to the student, children before parents. The user
+// row itself stays unless `andUser`; the demo reset keeps it.
+export function wipeUserData(db: Db, userId: number, andUser = false): void {
   db.transaction((tx) => {
     const ids = tx.select({ id: modules.id }).from(modules).where(eq(modules.userId, userId)).all().map((m) => m.id);
     if (ids.length) {
@@ -52,6 +54,10 @@ export function deleteAccount(db: Db, userId: number): void {
       tx.delete(t).where(eq(t.userId, userId)).run();
     }
     if (ids.length) tx.delete(modules).where(inArray(modules.id, ids)).run();
-    tx.delete(users).where(eq(users.id, userId)).run();
+    if (andUser) tx.delete(users).where(eq(users.id, userId)).run();
   });
+}
+
+export function deleteAccount(db: Db, userId: number): void {
+  wipeUserData(db, userId, true);
 }

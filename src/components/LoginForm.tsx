@@ -12,6 +12,7 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
   const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
   const [canvasToken, setCanvasToken] = useState("");
+  const [withCanvas, setWithCanvas] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -21,7 +22,7 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
     setError(null);
     const body = mode === "signin"
       ? { username, password }
-      : { inviteCode, canvasToken, username, password };
+      : { inviteCode, canvasToken: withCanvas ? canvasToken : "", username, password };
     let res: Response;
     try {
       res = await fetch("/api/login", {
@@ -36,8 +37,9 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
     }
     setPending(false);
     if (res.ok) {
-      // A new account lands on Account, where the AI key is added.
-      router.push(mode === "setup" ? "/account?welcome=1" : "/");
+      // A new account goes through the welcome steps; Home sends anyone who
+      // has not finished them there too.
+      router.push(mode === "setup" ? "/welcome" : "/");
       router.refresh();
       return;
     }
@@ -73,22 +75,8 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
             <input type="password" autoComplete="off" required value={inviteCode}
               onChange={(e) => setInviteCode(e.target.value)} className={field} />
           </label>
-          <label className={label}>
-            Canvas access token
-            <input type="password" autoComplete="off" required spellCheck={false} value={canvasToken}
-              onChange={(e) => setCanvasToken(e.target.value)} className={field} />
-          </label>
-          <p className="-mt-1 text-[13px] leading-relaxed text-ink-2">
-            Create one in Canvas under{" "}
-            <a href={`${canvasBaseUrl}/profile/settings`} target="_blank" rel="noreferrer"
-               className="text-accent underline underline-offset-2">
-              Account → Settings → New access token
-            </a>
-            . It is stored encrypted, and you only paste it once.
-          </p>
         </>
       )}
-
       <label className={label}>
         Username
         <input
@@ -116,10 +104,32 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
       </label>
 
       {mode === "setup" && (
-        <p className="-mt-1 text-[13px] leading-relaxed text-ink-2">
-          Pick a username and password now — after this you sign in with those alone,
-          and never need the token again.
-        </p>
+        <>
+          <p className="-mt-1 text-[13px] leading-relaxed text-ink-2">
+            Pick a username and password: that is how you sign in from now on.
+          </p>
+          {!withCanvas ? (
+            <button type="button" onClick={() => setWithCanvas(true)} className="self-start text-[13px] text-accent hover:underline">
+              Have a Canvas access token? Add it now (optional)
+            </button>
+          ) : (
+            <>
+              <label className={label}>
+                Canvas access token <span className="text-ink-3">(optional)</span>
+                <input type="password" autoComplete="off" spellCheck={false} value={canvasToken}
+                  onChange={(e) => setCanvasToken(e.target.value)} className={field} />
+              </label>
+              <p className="-mt-1 text-[13px] leading-relaxed text-ink-2">
+                Create one in Canvas under{" "}
+                <a href={`${canvasBaseUrl}/profile/settings`} target="_blank" rel="noreferrer"
+                   className="text-accent underline underline-offset-2">
+                  Account → Settings → New access token
+                </a>
+                . It is stored encrypted. You can also add it later.
+              </p>
+            </>
+          )}
+        </>
       )}
 
       {error && <p role="alert" className="text-sm text-danger">{error}</p>}

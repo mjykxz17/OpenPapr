@@ -4,7 +4,7 @@ import { requireUserId } from "@/server/session";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { modules } from "@/db/schema";
-import { getStudyGuide, listModuleFiles } from "@/db/repo";
+import { getStudyGuide, getUser, listModuleFiles } from "@/db/repo";
 import { AppShell } from "@/components/AppShell";
 import { StudyGuide } from "@/components/StudyGuide";
 import { GuideStatus } from "@/components/GuideStatus";
@@ -53,7 +53,8 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <GuideStatus moduleId={mod.id} initial={guideStatus(db, mod.id)} canGenerate={canGenerateGuides(db, userId)} />
+          {/* The demo's guide is written by hand and reset nightly; nothing to rebuild. */}
+          {!getUser(db, userId)?.isDemo && <GuideStatus moduleId={mod.id} initial={guideStatus(db, mod.id)} canGenerate={canGenerateGuides(db, userId)} />}
         </div>
       </header>
 

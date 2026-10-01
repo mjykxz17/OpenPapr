@@ -25,3 +25,10 @@ export async function requireUserId(): Promise<number> {
   if (id === null) redirect("/login");
   return id;
 }
+
+// The public demo account is shared by everyone who opens it, so its
+// settings stay as they are.
+export function isDemoUser(userId: number): boolean {
+  return Boolean(getDb().select({ d: users.isDemo }).from(users).where(eq(users.id, userId)).get()?.d);
+}
+export const DEMO_LOCKED = "This is the shared demo account, so its settings can't be changed. Create your own account to connect Canvas and an AI key.";

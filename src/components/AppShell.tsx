@@ -6,6 +6,7 @@ import { getUser } from "@/db/repo";
 import { loadEnv } from "@/lib/env";
 import { Papi } from "./pet/Papi";
 import { SearchPalette } from "./SearchPalette";
+import { DemoBanner } from "./DemoBanner";
 
 // `wide` opts a page out of the 1280px cap. Dashboard-style pages read better
 // capped — a grid of tiles stretched across a 27" display looks sparse — but a
@@ -22,12 +23,14 @@ async function mailAvailable(): Promise<boolean> {
 
 export async function AppShell({ children, wide = false, bleed = false }: { children: ReactNode; wide?: boolean; bleed?: boolean }) {
   const showMail = await mailAvailable();
+  const uid = await currentUserId().catch(() => null);
+  const demo = uid !== null && Boolean(getUser(getDb(), uid)?.isDemo);
   return (
     <div className="min-h-svh bg-surface text-ink">
-      <Rail showMail={showMail} />
+      <Rail showMail={showMail && !demo} />
       {/* Room for the tab bar (and Papi above it) on a phone; for the rail beside. */}
       <main className={`sm:pl-14 ${bleed ? "pb-[60px] sm:pb-0" : "pb-24 sm:pb-16"}`}>
-        {bleed ? children : <div className={`mx-auto px-4 py-6 sm:px-10 sm:py-9 ${wide ? "max-w-[1800px]" : "max-w-[1280px]"}`}>{children}</div>}
+        {bleed ? children : <div className={`mx-auto px-4 py-6 sm:px-10 sm:py-9 ${wide ? "max-w-[1800px]" : "max-w-[1280px]"}`}>{demo && <DemoBanner />}{children}</div>}
       </main>
       {/* The study buddy lives on every page except the file viewer, whose
           controls sit where it would. */}

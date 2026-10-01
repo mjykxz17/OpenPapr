@@ -266,6 +266,7 @@ function ProviderForm({ slot, current, onSaved, onRemoved, removeLabel }: {
         <span className="text-[12px] leading-relaxed text-ink-3">
           Stored encrypted and only ever sent to the base URL above.
           {presetRow && <> Get one from <a href={presetRow.keysUrl} target="_blank" rel="noreferrer" className="text-accent underline underline-offset-2">{presetRow.label}</a>.</>}
+          {presetRow?.note && <> {presetRow.note}</>}
         </span>
       </label>
 

@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
+import { users } from "@/db/schema";
 import { accountRequest, str } from "@/server/account-request";
 import { replaceCanvasToken } from "@/db/repo";
 import { createCanvasClient } from "@/connectors/canvas/client";
@@ -28,7 +30,9 @@ export async function PUT(request: Request) {
   const now = Date.now();
   const outcome = replaceCanvasToken(getDb(), req.userId, self, token, env.SECRET_KEY, now);
   if (outcome === "different-account") {
-    return NextResponse.json({ error: "That token belongs to a different Canvas account." }, { status: 409 });
+    return NextResponse.json({ error: "That token belongs to a different Canvas account, or one that already has its own OpenPapr account." }, { status: 409 });
   }
+  // Fetch the courses now rather than at the next scheduled sync.
+  getDb().update(users).set({ syncRequestedAt: now }).where(eq(users.id, req.userId)).run();
   return NextResponse.json({ ok: true, name: self.name, tokenHint: secretHint(token), verifiedAt: now });
 }

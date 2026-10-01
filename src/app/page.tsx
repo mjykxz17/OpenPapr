@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { getDb } from "@/server/db";
 import { requireUserId } from "@/server/session";
 import { getOverview } from "@/server/overview";
@@ -25,6 +26,8 @@ export default async function Home() {
   const now = Date.now();
   const overview = getOverview(getDb(), userId, now, loadEnv().POLL_INTERVAL_MS);
   const user = getUser(getDb(), userId);
+  // New accounts go through the welcome steps first (or skip them).
+  if (user && user.onboardedAt === null && !user.isDemo) redirect("/welcome");
   const canvasTokenBroken = Boolean(user?.canvasTokenFailedAt && (!user.canvasVerifiedAt || user.canvasTokenFailedAt > user.canvasVerifiedAt));
   const db = getDb();
   const week = weeklyPlanView(db, userId, now);
@@ -94,17 +97,24 @@ export default async function Home() {
         </div>
       )}
 
-      <SetupChecklist steps={setup} />
+      {!user?.isDemo && <SetupChecklist steps={setup} />}
+      {overview.modules.length === 0 && !user?.canvasTokenEnc && (
+        <div className="mb-6 rounded-[10px] border border-line bg-panel px-5 py-4">
+          <p className="text-[15px] font-medium text-ink">No modules yet</p>
+          <p className="mt-1 text-[14px] text-ink-2">Connect Canvas and your modules, deadlines and slides arrive within a couple of minutes.</p>
+          <a href="/account#acct-canvas" className="mt-3 inline-flex h-9 items-center rounded-md bg-accent px-3.5 text-[13px] font-medium text-on-accent no-underline hover:bg-accent-strong">Connect Canvas</a>
+        </div>
+      )}
       <HomeBoard
         initial={layout}
         views={views}
         title={
           <div className="flex flex-col gap-1">
             <h1 className="text-2xl font-semibold tracking-[-0.01em] tabular-nums text-ink">{dateLabel}</h1>
-            <SyncStatus syncStatus={overview.syncStatus} now={now} mailConnected={Boolean(user?.msRefreshTokenEnc)} />
+            {user?.canvasTokenEnc && <SyncStatus syncStatus={overview.syncStatus} now={now} mailConnected={Boolean(user?.msRefreshTokenEnc)} />}
           </div>
         }
-        actions={<SyncButton lastSyncedAt={overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null} />}
+        actions={user?.canvasTokenEnc ? <SyncButton lastSyncedAt={overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null} /> : null}
       />
     </AppShell>
   );

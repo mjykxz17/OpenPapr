@@ -24,7 +24,11 @@ test("anonymous visitors are sent to sign in", async ({ page }) => {
 
   await page.getByRole("button", { name: "First time" }).click();
   await expect(page.getByLabel("Invite code")).toBeVisible();
-  await expect(page.getByLabel("Canvas access token")).toBeVisible();
+  // Canvas is optional at sign-up, one click away.
+  await page.getByRole("button", { name: /Canvas access token\? Add it now/ }).click();
+  await expect(page.getByLabel(/Canvas access token/)).toBeVisible();
+  // And there is a way in without signing up at all.
+  await expect(page.getByRole("button", { name: /Try the demo/ })).toBeVisible();
 });
 
 test("a wrong username or password is refused", async ({ page }) => {
@@ -42,7 +46,6 @@ test("a wrong invite code is refused before Canvas is ever contacted", async ({ 
   await page.getByLabel("Username").fill("someone");
   await page.getByLabel("Password").fill("a-password");
   await page.getByLabel("Invite code").fill("not-the-code");
-  await page.getByLabel("Canvas access token").fill("irrelevant");
   await page.locator('button[type="submit"]').click();
   // Not getByRole("alert") — Next renders its own empty route-announcer with
   // that role, and it wins the locator.

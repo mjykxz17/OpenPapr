@@ -123,12 +123,22 @@ export function setCredentials(db: Db, userId: number, username: string, passwor
 // caller has already asked Canvas who the token belongs to; a token for a
 // different Canvas user is refused rather than silently re-pointing this
 // account at someone else's courses.
+// An account with no Canvas behind it yet: signed up with the invite code,
+// a username and a password.
+export function createLocalUser(db: Db, username: string, passwordHash: string, now: number): number {
+  return db.insert(users).values({ name: username, username, passwordHash, createdAt: now, lastSeenAt: now }).returning({ id: users.id }).get().id;
+}
+
 export function replaceCanvasToken(
   db: Db, userId: number, self: { id: number; name: string }, token: string, secretHex: string, now: number,
 ): "ok" | "different-account" {
   const row = db.select().from(users).where(eq(users.id, userId)).get();
   if (!row) return "different-account";
   if (row.canvasUserId !== null && row.canvasUserId !== self.id) return "different-account";
+  // Connecting Canvas to an account made without it: that Canvas account
+  // must not already have its own OpenPapr account.
+  const other = db.select({ id: users.id }).from(users).where(eq(users.canvasUserId, self.id)).get();
+  if (other && other.id !== userId) return "different-account";
   db.update(users).set({
     canvasUserId: self.id, name: self.name, canvasTokenEnc: encrypt(token, secretHex),
     canvasVerifiedAt: now, canvasTokenFailedAt: null,

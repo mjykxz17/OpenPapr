@@ -23,6 +23,12 @@ const EnvSchema = z.object({
   // Embedding model on the shared provider, for "ask your material". Unset:
   // a known default for the host if there is one, else word search alone.
   EMBED_MODEL: z.string().optional(),
+  // The public demo account: on unless set to "0"; whose AI key it borrows
+  // (a user id; that person's own key, else the shared one); and how many AI
+  // calls it may make a day, across every visitor.
+  DEMO_ENABLED: z.string().optional(),
+  DEMO_AI_USER: z.coerce.number().int().positive().default(1),
+  DEMO_DAILY_CALLS: z.coerce.number().int().nonnegative().default(150),
   // AI calls a month each student may make on the shared key before the
   // app asks them for their own. Their own key is never limited.
   SHARED_MONTHLY_CALLS: z.coerce.number().int().nonnegative().default(300),

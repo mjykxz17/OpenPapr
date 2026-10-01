@@ -31,6 +31,7 @@ import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type P
 import { refreshTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
 import { runAutoGuides, type GuideDeps } from "./guides";
 import { indexUser } from "./index-material";
+import { demoDue, demoEnabled, findDemoUser, resetDemo } from "../server/demo";
 import { needsThread, normalizeDiscussion } from "../connectors/canvas/discussions";
 import { applyDiscussions, applyPlanner, discussionMetaFor } from "../db/canvas-extra";
 import { getModuleProfileRow } from "../db/profiles-repo";
@@ -98,6 +99,9 @@ const noModelKit: LlmKit = { compatCfg: null, scorer: null, extractor: null, sup
 setUsageListener((o) => recordLlmCall(db, o.userId, o.shared, Date.now()));
 function kitFor(userId: number): LlmKit {
   const user = db.select().from(users).where(eq(users.id, userId)).get();
+  // The demo account's semester is written by hand and reset nightly: the
+  // worker never spends a model call on it.
+  if (user?.isDemo) return noModelKit;
   const own = user ? userLlmConfig(user, env.SECRET_KEY) : null;
   if (!own) {
     if (!sharedCfg) return sharedKit;
@@ -566,6 +570,15 @@ async function tick(): Promise<void> {
     if (!guideJob) guideJob = runGuideJob()
       .then(() => (Date.now() - lastAutoGuideAt >= AUTO_GUIDE_EVERY ? (lastAutoGuideAt = Date.now(), runAutoGuides(guideDeps)) : undefined))
       .catch((err) => console.error("guide job crashed", err)).finally(() => { guideJob = null; });
+    // The public demo account: made if missing, re-seeded after midnight.
+    if (demoEnabled() && now - lastDemoCheckAt >= 60_000) {
+      lastDemoCheckAt = now;
+      const demo = findDemoUser(db);
+      if (demoDue(demo, now)) {
+        await resetDemo(db, now).then((id) => console.log(`demo account ${id} reset`)).catch((err) => console.error("demo reset failed", err));
+        lastIndexAt = 0;   // index its material straight away
+      }
+    }
     // The "ask your material" index, beside the tick like the guides: new or
     // changed decks re-read, then embeddings for anything new.
     if (!indexJob && now - lastIndexAt >= INDEX_EVERY) {
@@ -583,6 +596,7 @@ async function tick(): Promise<void> {
   setTimeout(tick, TICK_MS);
 }
 
+let lastDemoCheckAt = 0;
 let indexJob: Promise<void> | null = null;
 const INDEX_EVERY = 2 * 60_000;
 let lastIndexAt = 0;
