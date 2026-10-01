@@ -20,6 +20,9 @@ const EnvSchema = z.object({
   OPENAI_COMPAT_MODEL: z.string().default("agnes-2.5-flash"),
   // Requests per minute allowed on the shared key; unset = no cap.
   OPENAI_COMPAT_RPM: z.coerce.number().int().positive().optional(),
+  // AI calls a month each student may make on the shared key before the
+  // app asks them for their own. Their own key is never limited.
+  SHARED_MONTHLY_CALLS: z.coerce.number().int().nonnegative().default(300),
   // Public API key for reading NUSMods review comments from Disqus. Optional:
   // without it module profiles are built without student reviews.
   DISQUS_API_KEY: z.string().optional(),

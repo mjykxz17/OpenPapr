@@ -38,10 +38,12 @@ async function verifySessionEdge(value: string | undefined, secretHex: string): 
 
 export async function middleware(req: NextRequest) {
   if (req.nextUrl.pathname.startsWith("/api/login") || req.nextUrl.pathname === "/login" || req.nextUrl.pathname === "/api/health") return NextResponse.next();
+  // Calendar apps fetch the feed without a session; its URL token is checked by the route.
+  if (req.nextUrl.pathname.startsWith("/api/calendar/feed/")) return NextResponse.next();
   const ok = await verifySessionEdge(req.cookies.get("session")?.value, process.env.SESSION_KEY ?? process.env.SECRET_KEY ?? "");
   if (ok) return NextResponse.next();
   return req.nextUrl.pathname.startsWith("/api")
     ? NextResponse.json({ error: "unauthorized" }, { status: 401 })
     : NextResponse.redirect(new URL("/login", req.url));
 }
-export const config = { matcher: ["/((?!_next|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|brand/).*)"] };
+export const config = { matcher: ["/((?!_next|favicon.ico|icon.svg|apple-icon.png|manifest.webmanifest|sw\\.js|brand/).*)"] };

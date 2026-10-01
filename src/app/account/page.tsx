@@ -10,6 +10,7 @@ import { AppearanceMenu } from "@/components/AppearanceMenu";
 import { SignOutButton } from "@/components/SignOutButton";
 import { userProfileView } from "@/server/profiles";
 import { canGenerateGuides } from "@/server/llm-access";
+import { usageThisMonth } from "@/server/llm-usage";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,8 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         sharedModel={sharedModel}
         signIn={{ username: user.username ?? null, hasPassword: Boolean(user.passwordHash) }}
         about={about}
+        usage={{ ...usageThisMonth(getDb(), userId, Date.now()), limit: env.SHARED_MONTHLY_CALLS }}
+        calendarUrl={user.calendarToken ? `/api/calendar/feed/${user.calendarToken}.ics` : null}
       />
     </AppShell>
   );

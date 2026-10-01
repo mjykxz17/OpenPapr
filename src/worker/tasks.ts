@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { components, fileHints, files, items, modules, taskPlans, tasks, users } from "../db/schema";
+import { components, fileHints, files, items, modules, taskFeedback, taskPlans, tasks, users } from "../db/schema";
 import { getModuleProfileRow, getNusmods } from "../db/profiles-repo";
 import { moduleCodes } from "../connectors/nusmods/client";
 import type { CompatConfig } from "../enrich/openai-compat";
@@ -193,10 +193,14 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   const existing = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.moduleId, mod.id))).all().map((t) => {
     const steps = parseList<TaskStep>(t.stepsJson);
     return {
-      key: t.key, title: t.title, due: t.dueAt === null ? null : sgtLabel(t.dueAt),
-      progress: t.status === "open" ? `${steps.filter((s) => s.done).length}/${steps.length} steps done` : t.status,
+      key: t.key, title: t.title, due: t.dueAt === null ? null : `${sgtLabel(t.dueAt)}${t.dueLocked ? ", set by the student" : ""}`,
+      progress: t.status === "open" ? `${steps.filter((s) => s.done).length}/${steps.length} steps done`
+        : t.status === "dismissed" ? "dismissed by the student" : t.status,
     };
   });
+  const feedback = db.select().from(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, mod.id))).all()
+    .sort((a, b) => b.createdAt - a.createdAt).slice(0, 15)
+    .map((f) => (f.kind === "not_task" ? `"${f.title}" is NOT a real task — do not plan it` : `"${f.title}": wrong date — ${f.note ?? "the student set it"}`));
 
   const d = new Date(now + 8 * H);
   return {
@@ -204,7 +208,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     input: {
       today: `${sgtDate(now)} (${WEEKDAY[d.getUTCDay()]})`,
       module: { code: mod.code, name: mod.name },
-      canvas, past: pastRows, announcements, discussions, notes, fileHints: fileLines, weightage, examDate, studyAdvice, existing,
+      canvas, past: pastRows, announcements, discussions, notes, fileHints: fileLines, weightage, examDate, studyAdvice, existing, feedback,
     },
   };
 }
@@ -217,8 +221,9 @@ function applyPlan(db: Db, userId: number, moduleId: number, planned: Awaited<Re
     .filter((t) => t.moduleId !== moduleId).map((t) => t.key));
   const ops = mergeTasks(
     current.map((t) => ({ id: t.id, key: t.key, status: t.status, touchedAt: t.touchedAt, steps: parseList<TaskStep>(t.stepsJson) })),
-    planned.filter((t) => !elsewhere.has(t.key)),
+    planned.filter((t) => !elsewhere.has(t.key) && !t.key.startsWith("manual-")),
   );
+  const locked = new Set(current.filter((t) => t.dueLocked).map((t) => t.id));
   // A safety-net task goes only once the plan covers its Canvas item.
   const citedNow = new Set(planned.flatMap((t) => t.sources.map((x) => x.itemId).filter((x): x is number => x != null)));
   const byIdNow = new Map(current.map((t) => [t.id, t]));
@@ -238,8 +243,10 @@ function applyPlan(db: Db, userId: number, moduleId: number, planned: Awaited<Re
     }
     for (const u of ops.update) {
       const t = u.task;
+      // A date the student set stays theirs.
+      const date = locked.has(u.id) ? {} : { dueAt: t.dueAt, dueConfidence: t.dueConfidence };
       tx.update(tasks).set({
-        title: t.title, kind: t.kind, dueAt: t.dueAt, dueConfidence: t.dueConfidence, anticipated: t.anticipated,
+        title: t.title, kind: t.kind, ...date, anticipated: t.anticipated,
         weightPct: t.weightPct, why: t.why, sourcesJson: JSON.stringify(t.sources), updatedAt: now,
         ...(u.keepSteps ? {} : { stepsJson: JSON.stringify(t.steps) }),
       }).where(eq(tasks.id, u.id)).run();

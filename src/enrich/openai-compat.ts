@@ -19,7 +19,15 @@ export interface CompatConfig {
   fallback?: CompatConfig | null;
   // Extra request-body fields (provider routing, reasoning effort, …).
   extra?: Record<string, unknown> | null;
+  // Who the call is for and whose key pays, for the usage count.
+  owner?: { userId: number; shared: boolean } | null;
 }
+
+// Told about every successful call that has an owner; the worker and the web
+// server each point it at the database.
+type UsageListener = (owner: { userId: number; shared: boolean }) => void;
+let usageListener: UsageListener | null = null;
+export function setUsageListener(fn: UsageListener | null): void { usageListener = fn; }
 
 const EmailScore = z.object({ important: z.boolean(), score: z.number(), reason: z.string() });
 const WeightageResult = z.object({
@@ -112,6 +120,7 @@ export async function complete(
       const out = await callOnce(p, messages, tokenParams(p.baseUrl, opts.maxTokens, opts.temperature), opts.timeoutMs, fetchFn);
       recordResult(key, true, Date.now());
       served.get(gateKey(cfg))?.add(p.model);
+      if (cfg.owner) { try { usageListener?.(cfg.owner); } catch { /* counting must never fail a call */ } }
       return out;
     } catch (err) {
       recordResult(key, false, Date.now());

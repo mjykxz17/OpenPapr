@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { items, modules, taskPlans, tasks, users } from "@/db/schema";
+import { items, modules, taskFeedback, taskPlans, tasks, users } from "@/db/schema";
 import { sgtDate, type TaskSource, type TaskStep } from "@/enrich/tasks";
 import { dueLabel, shortDate } from "@/lib/format-date";
 
@@ -48,7 +48,7 @@ export function tasksView(db: Db, userId: number, now: number): TasksView {
       dueAt: t.dueAt, dueConfidence: t.dueConfidence, anticipated: t.anticipated, weightPct: t.weightPct, why: t.why,
       sources: parse<TaskSource>(t.sourcesJson).map((s) => link(s, t.moduleId)), steps, status: t.status,
       done: steps.filter((s) => s.done).length, total: steps.length,
-      dueText: t.dueAt === null ? "Date not announced" : t.dueConfidence === "estimated" ? `around ${shortDate(t.dueAt)}` : dueLabel(t.dueAt, now),
+      dueText: t.dueAt === null ? (t.key.startsWith("manual-") ? "No date" : "Date not announced") : t.dueConfidence === "estimated" ? `around ${shortDate(t.dueAt)}` : dueLabel(t.dueAt, now),
       overdue: t.dueAt !== null && t.dueAt < now,
       missing: parse<TaskSource>(t.sourcesJson).some((s) => s.itemId != null && urls.get(s.itemId)?.missing === true),
     };
@@ -89,10 +89,41 @@ export function taskPlanStatus(db: Db, userId: number) {
 
 // The student's changes. Any change marks the task touched, after which a
 // replan refreshes its date and sources but never rewrites its steps.
-export function updateTask(db: Db, userId: number, taskId: number, change: { stepId?: string; done?: boolean; status?: "open" | "done" | "dismissed" }, now: number): boolean {
+//
+// Two of them also teach the planner: "not a real task" and a date the
+// student corrects are written down and shown to it on the next plan.
+export type TaskChange = {
+  stepId?: string; done?: boolean; status?: "open" | "done" | "dismissed";
+  notTask?: boolean;      // dismiss, and tell the planner not to make it again
+  dueDate?: string;       // YYYY-MM-DD the student says it is really due
+};
+
+export const isDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`));
+// The end of that day in Singapore: "due Friday" means by Friday night.
+export const endOfSgtDay = (day: string) => Date.parse(`${day}T23:59:00+08:00`);
+
+export function updateTask(db: Db, userId: number, taskId: number, change: TaskChange, now: number): boolean {
   const t = db.select().from(tasks).where(and(eq(tasks.id, taskId), eq(tasks.userId, userId))).get();
   if (!t) return false;
   const patch: Partial<typeof tasks.$inferInsert> = { touchedAt: now, updatedAt: now };
+  if (change.notTask) {
+    patch.status = "dismissed";
+    db.insert(taskFeedback).values({ userId, moduleId: t.moduleId, kind: "not_task", title: t.title, note: t.why, createdAt: now }).run();
+  }
+  if (change.dueDate !== undefined) {
+    if (!isDay(change.dueDate)) return false;
+    const dueAt = endOfSgtDay(change.dueDate);
+    patch.dueAt = dueAt;
+    patch.dueConfidence = "exact";
+    patch.dueLocked = true;
+    // Steps planned for after the new date move up to it.
+    const steps = parse<TaskStep>(t.stepsJson);
+    if (steps.some((s) => s.doBy > change.dueDate!)) patch.stepsJson = JSON.stringify(steps.map((s) => (s.doBy > change.dueDate! ? { ...s, doBy: change.dueDate! } : s)));
+    const was = t.dueAt === null ? "no date" : `${sgtDate(t.dueAt)}${t.dueConfidence === "estimated" ? " (estimated)" : ""}`;
+    if (!t.key.startsWith("manual-")) {
+      db.insert(taskFeedback).values({ userId, moduleId: t.moduleId, kind: "wrong_date", title: t.title, note: `you said ${was}; really ${change.dueDate}`, createdAt: now }).run();
+    }
+  }
   if (change.stepId !== undefined) {
     const steps = parse<TaskStep>(t.stepsJson);
     const s = steps.find((x) => x.id === change.stepId);
@@ -106,4 +137,26 @@ export function updateTask(db: Db, userId: number, taskId: number, change: { ste
   if (change.status) patch.status = change.status;
   db.update(tasks).set(patch).where(eq(tasks.id, t.id)).run();
   return true;
+}
+
+// Something the student added themselves: from the Tasks page, or by asking
+// Papi to remind them. It is theirs, so the planner never moves or removes it.
+export function createManualTask(db: Db, userId: number, input: { title: string; dueAt: number | null; moduleId: number | null }, now: number): number | null {
+  const title = input.title.replace(/\s+/g, " ").trim().slice(0, 120);
+  if (title.length < 2) return null;
+  let moduleId = input.moduleId;
+  if (moduleId !== null && !db.select({ id: modules.id }).from(modules).where(and(eq(modules.id, moduleId), eq(modules.userId, userId))).get()) moduleId = null;
+  const today = sgtDate(now);
+  // One step, on the day before it is due (or today, if that is sooner).
+  const due = input.dueAt === null ? null : sgtDate(input.dueAt);
+  const dayBefore = due ? sgtDate(Date.parse(`${due}T12:00:00+08:00`) - D) : today;
+  const doBy = !due ? today : dayBefore < today ? (due < today ? today : due) : dayBefore;
+  const row = db.insert(tasks).values({
+    userId, moduleId, key: `manual-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`, title,
+    kind: "admin", dueAt: input.dueAt, dueConfidence: "exact", anticipated: false, weightPct: null, why: null,
+    sourcesJson: JSON.stringify([{ kind: "planner", label: "You added this" }]),
+    stepsJson: JSON.stringify([{ id: "s1", text: title.slice(0, 70), minutes: 30, doBy, done: false }]),
+    status: "open", touchedAt: now, dueLocked: input.dueAt !== null, createdAt: now, updatedAt: now,
+  }).returning({ id: tasks.id }).get();
+  return row?.id ?? null;
 }

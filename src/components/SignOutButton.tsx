@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { clearOfflineCaches } from "@/lib/offline";
 
 function SignOutIcon() {
   return (
@@ -24,6 +25,8 @@ export function SignOutButton() {
       // Even if the request fails the safest thing is still to send the user to
       // the sign-in page; a stale cookie is rejected there anyway.
     }
+    // Saved guides belong to this account; the next person on this device should not see them.
+    await clearOfflineCaches();
     router.push("/login");
     router.refresh();
   }

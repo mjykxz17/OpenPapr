@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { LLM_PRESETS, presetFor } from "@/lib/llm-presets";
 import { relativeDay, shortTime } from "@/lib/format-date";
+import { CalendarSection, DataSection } from "./AccountExtras";
 import { AboutYou } from "./profile/AboutYou";
 import type { ComponentProps } from "react";
 
@@ -16,6 +17,8 @@ type Props = {
   llm: ProviderView | null;
   fallback: ProviderView | null;
   sharedModel: string | null;
+  usage: { calls: number; sharedCalls: number; limit: number };
+  calendarUrl: string | null;
   signIn: { username: string | null; hasPassword: boolean };
   about: ComponentProps<typeof AboutYou>;
 };
@@ -282,7 +285,9 @@ function ProviderForm({ slot, current, onSaved, onRemoved, removeLabel }: {
   );
 }
 
-function LlmSection({ llm, fallback, sharedModel }: Pick<Props, "llm" | "fallback" | "sharedModel">) {
+function LlmSection({ llm, fallback, sharedModel, usage }: Pick<Props, "llm" | "fallback" | "sharedModel" | "usage">) {
+  const onShared = !llm && !fallback && Boolean(sharedModel);
+  const used = Math.min(usage.sharedCalls, usage.limit);
   const [showFallback, setShowFallback] = useState(Boolean(fallback));
   const describe = (p: ProviderView) => (
     <><span className="text-ink">{p.model}</span> · <span className="font-mono text-[13px]">{p.keyHint}</span>{p.rpm ? <> · {p.rpm}/min</> : null}</>
@@ -304,6 +309,22 @@ function LlmSection({ llm, fallback, sharedModel }: Pick<Props, "llm" | "fallbac
               ? <>Right now they use the shared OpenPapr key ({sharedModel}). Add your own to use your quota and pick the model.</>
               : <>Add an API key to switch them on.</>}
       </p>
+      {/* What it has cost this month, and on the shared key how much is left. */}
+      <div className="mt-3 max-w-2xl text-[13px] text-ink-2">
+        <p>This month: <span className="font-medium tabular-nums text-ink">{usage.calls}</span> AI call{usage.calls === 1 ? "" : "s"}{usage.sharedCalls && !onShared ? ` (${usage.sharedCalls} on the shared key)` : ""}.</p>
+        {onShared && (
+          <div className="mt-2">
+            <div className="h-1.5 w-full max-w-sm overflow-hidden rounded-full bg-ink/[0.06]">
+              <div className={`h-full ${used >= usage.limit ? "bg-warn" : "bg-accent"}`} style={{ width: `${usage.limit ? (100 * used) / usage.limit : 100}%` }} />
+            </div>
+            <p className={`mt-1.5 ${used >= usage.limit ? "font-medium text-warn-ink" : "text-ink-3"}`}>
+              {used >= usage.limit
+                ? "You have used this month's shared allowance. AI features pause until next month — or add your own key below to carry on now."
+                : `${usage.limit - used} of ${usage.limit} shared calls left this month. Your own key has no limit.`}
+            </p>
+          </div>
+        )}
+      </div>
 
       <div className="mt-5">
         <ProviderForm slot="primary" current={llm} removeLabel="Remove my key"
@@ -409,8 +430,10 @@ export function AccountSettings(props: Props) {
       )}
       <AboutYou {...props.about} />
       <CanvasSection canvas={props.canvas} canvasBaseUrl={props.canvasBaseUrl} />
-      <LlmSection llm={props.llm} fallback={props.fallback} sharedModel={props.sharedModel} />
+      <LlmSection llm={props.llm} fallback={props.fallback} sharedModel={props.sharedModel} usage={props.usage} />
+      <CalendarSection url={props.calendarUrl} />
       <SignInSection signIn={props.signIn} />
+      <DataSection />
     </div>
   );
 }

@@ -10,6 +10,8 @@ import { parseSlideCitation, deckProxyUrl, parseSlideImage, slideImageUrl, cited
 import { MermaidDiagram } from "@/components/MermaidDiagram";
 import { SlidePanel, type OpenDeck, type PanelMode } from "@/components/SlidePanel";
 import { SlidePanelContext, useSlidePanel, type SlideRef } from "@/components/slide-panel-context";
+import { ChapterQuiz } from "@/components/ChapterQuiz";
+import { OfflineButton } from "@/components/OfflineButton";
 
 // Flattens heading children to plain text so headings can be given stable ids
 // that the outline sidebar links to.
@@ -208,6 +210,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   const preamble = rawPreamble.replace(/^\s*#\s+.*(?:\n|$)/, "").trim();
   const [active, setActive] = useState(0);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
+  const [quizAsk, setQuizAsk] = useState(0);   // bumps when the toolbar's Quiz button is pressed
   const pendingScroll = useRef<string | null>(null); // section to scroll to after a restored chapter renders
   const tabsRef = useRef<HTMLDivElement | null>(null);      // the sticky chapter bar
   const tabsAnchor = useRef<HTMLDivElement | null>(null);   // zero-height marker at the bar's resting position
@@ -217,7 +220,18 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   const spyKey = subs.map((s) => s.slug).join("|");
 
   // Restore the last-read chapter + section for this module (once, on mount).
+  // A link to a section (#slug, from search) wins over where they left off.
   useEffect(() => {
+    const hash = decodeURIComponent(window.location.hash.slice(1));
+    if (hash) {
+      const c = chapters.findIndex((ch) => slugifyHeading(ch.markdown.split("\n")[0]!.replace(/^#+\s*/, "")) === hash || extractSubheadings(ch.markdown).some((h) => h.slug === hash));
+      if (c >= 0) {
+        pendingScroll.current = hash;
+        setActive(c);
+        restored.current = true;
+        return;
+      }
+    }
     try {
       const raw = localStorage.getItem(posKey(moduleId));
       if (raw) {
@@ -440,6 +454,12 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
               </ToggleButton>
             </>
           )}
+          <OfflineButton moduleId={moduleId} markdown={markdown} />
+          {chapters.length > 0 && (
+            <ToggleButton on={false} onClick={() => setQuizAsk((n) => n + 1)} label="Quiz" title="Practice questions on this chapter">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 0 1 4.9.7c0 1.7-2.4 2.3-2.4 3.8M12 17h.01" /></svg>
+            </ToggleButton>
+          )}
           {slidesToggle}
         </div>
       </div>
@@ -646,6 +666,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
           <span className="text-[13px] font-semibold uppercase tracking-[0.06em] text-accent">Chapter {active + 1} of {chapters.length}</span>
         </p>
         <Body markdown={chapters[active].markdown} moduleId={moduleId} />
+        <ChapterQuiz key={`${active}:${chapters[active].label}`} moduleId={moduleId} chapter={active} label={chapters[active].label} start={quizAsk} />
       </div>
 
       <div className={outlineWrap}>{sectionNav}</div>

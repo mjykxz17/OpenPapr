@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { themeBootScript } from "@/lib/theme";
+import { ServiceWorker } from "@/components/ServiceWorker";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,7 +33,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
       </head>
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">{children}<ServiceWorker /></body>
     </html>
   );
 }

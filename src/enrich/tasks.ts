@@ -39,6 +39,8 @@ export type ModuleTaskInput = {
   examDate: string | null;       // NUSMods final exam date for this semester
   studyAdvice: string[];         // from the module profile: how to study, gaps
   existing: { key: string; title: string; due: string | null; progress: string }[];
+  // What the student told us the planner got wrong before.
+  feedback?: string[];
 };
 
 // --- output ------------------------------------------------------------------
@@ -75,6 +77,8 @@ Rules:
 - due: ISO 8601 with +08:00. "exact" only when a source states the date; a week number or pattern gives an "estimated" date; null if you cannot place it.
 - Different dates for different tutorial or lab groups: you do not know the student's group, so make ONE task with the earliest date and name the other date in "why".
 - steps: every task needs 1-6 steps (only a task resting on the weightage alone may have none), each 15-90 minutes, verb first, under 70 characters, specific to this module's material (name the lecture, chapter, question range or topic). A form or registration is one step. Each step has doBy (YYYY-MM-DD) between today and the due date, spread out and finishing a day early where possible. For anticipated tasks more than two weeks away give only the first one or two steps.
+- The student's corrections are final. Never plan again anything they said is not a real task (or the same thing reworded). A date they set is the real date: keep it.
+- Tasks the student added themselves (key starting "manual-") are theirs: do not repeat them as a new task and never reuse their key.
 - key: lowercase slug starting with the module code, e.g. "cs2103t-v1-2-milestone". Reuse the key of an existing task when it is the same obligation.
 - why: under 90 characters — the weight, what it covers, or what the source says.
 - sources: refs exactly as given (e.g. "C12", "A40", "R88", "D5", "P3", "F7p3", "W", "X"), each with the key phrase quoted (under 120 characters).
@@ -97,6 +101,7 @@ export function plannerPrompt(input: ModuleTaskInput): string {
     `[W] Weightage: ${input.weightage.length ? input.weightage.map((c) => `${c.name} ${c.weightPct}%`).join(", ") : "(unknown)"}`,
     `[X] Final exam: ${input.examDate ?? "(no date on NUSMods)"}`,
     `Study advice: ${input.studyAdvice.join("; ") || "(none)"}`,
+    `The student corrected you before:\n${input.feedback?.length ? input.feedback.map((f) => `- ${f}`).join("\n") : "(none)"}`,
     `Already planned:\n${input.existing.map((e) => `- ${e.key}: ${e.title} (due ${e.due ?? "?"}, ${e.progress})`).join("\n") || "(none)"}`,
   ].join("\n\n");
 }

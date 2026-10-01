@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import type { TaskView, TasksView, TodayStep, SourceLink } from "@/server/tasks";
 import type { TaskStep } from "@/enrich/tasks";
 
@@ -53,7 +53,14 @@ function useTick() {
     setFailed(!ok);
     start(() => router.refresh());
   };
-  return { isDone, toggle, setStatus, failed };
+  // Corrections the planner learns from.
+  const correct = async (taskId: number, body: { notTask: true } | { dueDate: string }) => {
+    const ok = await send(taskId, body);
+    setFailed(!ok);
+    start(() => router.refresh());
+    return ok;
+  };
+  return { isDone, toggle, setStatus, correct, failed };
 }
 
 function Check({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
@@ -93,7 +100,7 @@ function TaskCard({ t, today, tick }: { t: TaskView; today: string; tick: Return
   const next = t.steps.find((s) => !tick.isDone(t.id, s));
   const overdue = t.overdue;
   return (
-    <li className="rounded-[10px] border border-line bg-panel">
+    <li id={`task-${t.id}`} className="scroll-mt-6 rounded-[10px] border border-line bg-panel target:border-accent">
       <details className="group">
         <summary className="flex cursor-pointer list-none flex-col gap-1.5 px-4 py-3 [&::-webkit-details-marker]:hidden">
           <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
@@ -135,19 +142,45 @@ function TaskCard({ t, today, tick }: { t: TaskView; today: string; tick: Return
             </ul>
           )}
           {t.sources.length > 0 && <Sources sources={t.sources} />}
-          <div className="flex gap-4 text-[13px]">
-            {t.status === "open" ? (
-              <>
-                <button type="button" onClick={() => tick.setStatus(t.id, "done")} className="font-medium text-accent hover:underline">Mark done</button>
-                <button type="button" onClick={() => tick.setStatus(t.id, "dismissed")} className="text-ink-3 hover:text-ink-2">Not needed</button>
-              </>
-            ) : (
-              <button type="button" onClick={() => tick.setStatus(t.id, "open")} className="text-ink-3 hover:text-ink-2">Reopen</button>
-            )}
-          </div>
+          <TaskActions t={t} tick={tick} />
         </div>
       </details>
     </li>
+  );
+}
+
+// Done / not needed, and the two ways to tell the planner it got this wrong.
+// Those are remembered for this module, so it does not make the same mistake
+// on the next plan.
+function TaskActions({ t, tick }: { t: TaskView; tick: ReturnType<typeof useTick> }) {
+  const [dating, setDating] = useState(false);
+  const [day, setDay] = useState(t.dueAt ? new Date(t.dueAt + 8 * 3_600_000).toISOString().slice(0, 10) : "");
+  const mine = t.sources.some((s) => s.kind === "planner" && s.label === "You added this");
+  if (t.status !== "open") {
+    return <div className="text-[13px]"><button type="button" onClick={() => tick.setStatus(t.id, "open")} className="text-ink-3 hover:text-ink-2">Reopen</button></div>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-x-4 gap-y-2 text-[13px]">
+        <button type="button" onClick={() => tick.setStatus(t.id, "done")} className="font-medium text-accent hover:underline">Mark done</button>
+        <button type="button" onClick={() => tick.setStatus(t.id, "dismissed")} className="text-ink-3 hover:text-ink-2" title="It is real, but you don't need to do it">Not needed</button>
+        <button type="button" onClick={() => setDating((d) => !d)} aria-expanded={dating} className="text-ink-3 hover:text-ink-2">{mine ? "Change date" : "Wrong date?"}</button>
+        {!mine && (
+          <button type="button" onClick={() => tick.correct(t.id, { notTask: true })} className="text-ink-3 hover:text-danger" title="Removes it, and the planner won't suggest it again">
+            Not a real task
+          </button>
+        )}
+      </div>
+      {dating && (
+        <form className="flex flex-wrap items-center gap-2 text-[13px]" onSubmit={async (e) => { e.preventDefault(); if (day && (await tick.correct(t.id, { dueDate: day }))) setDating(false); }}>
+          <label className="text-ink-2" htmlFor={`due-${t.id}`}>Really due</label>
+          <input id={`due-${t.id}`} type="date" value={day} onChange={(e) => setDay(e.target.value)} required
+            className="h-8 rounded-md border border-line-2 bg-surface px-2 text-[13px] text-ink" />
+          <button type="submit" className="h-8 rounded-md bg-accent px-3 font-medium text-on-accent hover:bg-accent-strong">Save</button>
+          {!mine && <span className="text-[12px] text-ink-3">The planner keeps this date from now on.</span>}
+        </form>
+      )}
+    </div>
   );
 }
 
@@ -174,7 +207,7 @@ function TodayList({ steps, minutes, nextDay, today, tick }: { steps: TodayStep[
                   <p className={`text-[14px] leading-snug ${d ? "text-ink-3 line-through" : "text-ink"}`}>{s.text}</p>
                   <p className="mt-0.5 flex flex-wrap gap-x-1.5 text-[12px] text-ink-3">
                     <Code code={s.code} />
-                    <span>for {s.taskTitle}</span>
+                    {s.text !== s.taskTitle && <span>for {s.taskTitle}</span>}
                     {s.late && <span className="text-warn-ink">· carried over</span>}
                   </p>
                 </div>
@@ -190,6 +223,14 @@ function TodayList({ steps, minutes, nextDay, today, tick }: { steps: TodayStep[
 
 export function TaskBoard({ view, today }: { view: TasksView; today: string }) {
   const tick = useTick();
+  // Arriving from search (/tasks#task-12): open that task and bring it into view.
+  useEffect(() => {
+    const el = /^#task-\d+$/.test(window.location.hash) ? document.getElementById(window.location.hash.slice(1)) : null;
+    if (!el) return;
+    const d = el.querySelector("details");
+    if (d) d.open = true;
+    el.scrollIntoView({ block: "center" });
+  }, []);
   const group = (title: string, list: TaskView[], hint?: string) => list.length > 0 && (
     <section className="flex flex-col gap-2.5">
       <div className="flex items-baseline justify-between">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { PapiFace, type Mood } from "./PapiFace";
 
 type Nudges = { reminders: string[]; quips: string[]; smart: boolean };
@@ -10,7 +11,7 @@ type Summary = { id: number; title: string; updatedAt: number; count: number; pr
 const SIZES = { S: 44, M: 56, L: 76, XL: 104 } as const;
 type SizeKey = keyof typeof SIZES;
 const KEYS = { quiet: "papi-quiet", size: "papi-size", pos: "papi-pos", panel: "papi-panel", session: "papi-session" };
-const SUGGESTIONS = ["When's my next quiz?", "What's due this week?", "Is anything missing?", "What did lecturers say recently?"];
+const SUGGESTIONS = ["When's my next quiz?", "What's due this week?", "Is anything missing?", "Remind me to … by Friday"];
 const PET_LINES = ["hehe", "that tickles", "*happy paper noises*", "again!", "I'm crinkling with joy"];
 const DROP_LINES = ["Wheee!", "Nice view from here.", "I like it here.", "Moving day!"];
 const DIZZY_LINES = ["Whoa… the room is spinning.", "Gentle! I'm only paper.", "I think I left my stomach over there."];
@@ -36,6 +37,7 @@ const ago = (ms: number) => {
 // It idles on its own, speaks up with reminders and one-liners, sleeps from
 // 1 to 7am, and opens a chat — with saved conversations — when clicked.
 export function Papi() {
+  const router = useRouter();
   const [ready, setReady] = useState(false);
   const [mood, setMood] = useState<Mood>("idle");
   const [anim, setAnim] = useState<"" | "hop" | "spin" | "bounce">("");
@@ -265,7 +267,8 @@ export function Papi() {
     setMood("think");
     try {
       const res = await fetch("/api/pet/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: q, sessionId }) });
-      const body = (await res.json().catch(() => null)) as { reply?: string; sessionId?: number } | null;
+      const body = (await res.json().catch(() => null)) as { reply?: string; sessionId?: number; added?: boolean } | null;
+      if (body?.added) router.refresh();
       setMessages((m) => [...m, { role: "assistant", content: body?.reply ?? "Hmm, I couldn't reach my notes just now. Try again in a moment?", at: Date.now() }]);
       if (body?.sessionId) { setSessionId(body.sessionId); store.set(KEYS.session, String(body.sessionId)); setSessions(null); }
     } catch {
@@ -437,10 +440,10 @@ export function Papi() {
               <div ref={listRef} className="flex flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-3" aria-live="polite">
                 {messages.length === 0 && (
                   <div className="flex flex-col gap-2">
-                    <p className="text-[14px] leading-[1.5] text-ink-2">Hi! Ask me about dates, quizzes, what&apos;s due, or what a lecturer said. I only know what Canvas told me, so I won&apos;t make things up.</p>
+                    <p className="text-[14px] leading-[1.5] text-ink-2">Hi! Ask me about dates, quizzes, what&apos;s due, or what a lecturer said — or say “remind me to …” and I&apos;ll add a task. I only know what Canvas told me, so I won&apos;t make things up.</p>
                     <div className="flex flex-wrap gap-1.5">
                       {SUGGESTIONS.map((s) => (
-                        <button key={s} type="button" onClick={() => ask(s)} className="rounded-full border border-line px-2.5 py-1 text-[12.5px] text-ink-2 hover:border-ink-3 hover:text-ink">{s}</button>
+                        <button key={s} type="button" onClick={() => (s.includes("…") ? setDraft("Remind me to ") : ask(s))} className="rounded-full border border-line px-2.5 py-1 text-[12.5px] text-ink-2 hover:border-ink-3 hover:text-ink">{s}</button>
                       ))}
                     </div>
                   </div>

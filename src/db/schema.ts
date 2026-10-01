@@ -50,6 +50,9 @@ export const users = sqliteTable("users", {
   llmFallbackExtraJson: text("llm_fallback_extra_json"),
   // Home screen widgets: [{ id, size, hidden }], in order. Null = default layout.
   homeLayoutJson: text("home_layout_json"),
+  // Secret in the student's private calendar feed URL. Null until they ask
+  // for a feed; replaced when they reset it.
+  calendarToken: text("calendar_token"),
   // --- the student profile ---------------------------------------------
   // What the student tells us (major, year) and what OpenPapr derives from
   // their courses and notes. Derived JSON is shown to them on Account and can
@@ -343,9 +346,42 @@ export const tasks = sqliteTable("tasks", {
   // Set once the student ticks a step or changes the task: from then on a
   // rebuild may refresh the date and sources but leaves the steps alone.
   touchedAt: integer("touched_at"),
+  // The student set the date themselves: a rebuild never moves it again.
+  dueLocked: integer("due_locked", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 }, (t) => [uniqueIndex("tasks_user_key").on(t.userId, t.key), index("tasks_user_status").on(t.userId, t.status)]);
+
+// What the student told the planner it got wrong ("not a real task", "wrong
+// date"), shown to it on the next plan for that module so it stops repeating
+// the mistake.
+export const taskFeedback = sqliteTable("task_feedback", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  moduleId: integer("module_id").references(() => modules.id),
+  kind: text("kind", { enum: ["not_task", "wrong_date"] }).notNull(),
+  title: text("title").notNull(),
+  note: text("note"),
+  createdAt: integer("created_at").notNull(),
+}, (t) => [index("task_feedback_module").on(t.userId, t.moduleId)]);
+
+// AI calls per student per month, split by whose key paid: their own or the
+// shared one. Drives the usage line in Account and the shared-key limit.
+export const llmUsage = sqliteTable("llm_usage", {
+  userId: integer("user_id").notNull().references(() => users.id),
+  month: text("month").notNull(),           // "2026-10", Singapore time
+  calls: integer("calls").notNull().default(0),
+  sharedCalls: integer("shared_calls").notNull().default(0),
+}, (t) => [uniqueIndex("llm_usage_user_month").on(t.userId, t.month)]);
+
+// Practice questions for one guide chapter, kept until the chapter changes.
+export const guideQuizzes = sqliteTable("guide_quizzes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  chapterHash: text("chapter_hash").notNull(),
+  questionsJson: text("questions_json").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (t) => [uniqueIndex("guide_quizzes_chapter").on(t.moduleId, t.chapterHash)]);
 
 // Obligation-looking lines found in a file's text ("Quiz 2 in Week 7 covers
 // L1-L5", "read Ch. 4 before the next lecture"), read once per file.

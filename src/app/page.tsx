@@ -15,6 +15,8 @@ import { tasksView } from "@/server/tasks";
 import { HomeBoard, type WidgetViews } from "@/components/home/HomeBoard";
 import { DoneWidget, DueWidget, ModulesWidget, NextWidget, TodayWidget, WeekWidget, type NextUp } from "@/components/home/Widgets";
 import { parseLayout } from "@/lib/home-layout";
+import { SetupChecklist } from "@/components/home/SetupChecklist";
+import { sharedLlmConfig, userLlmConfig } from "@/lib/llm-provider";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +64,15 @@ export default async function Home() {
       F: <ModuleGrid modules={overview.modules} />,
     },
   };
+  const env = loadEnv();
+  const ownAi = Boolean(user && userLlmConfig(user, env.SECRET_KEY));
+  const setup = [
+    { id: "canvas", label: "Link Canvas", hint: "Your modules, deadlines and slides", href: "/account#acct-canvas", done: Boolean(user?.canvasTokenEnc) && !canvasTokenBroken },
+    { id: "password", label: "Set a sign-in password", hint: "So you can sign in without the Canvas token", href: "/account#acct-signin", done: Boolean(user?.passwordHash) },
+    { id: "ai", label: ownAi ? "AI is on (your key)" : sharedLlmConfig(env) ? "AI is on (shared key)" : "Turn on AI", hint: "Guides, task plans and Papi's answers need it", href: "/account#acct-llm", done: ownAi || Boolean(sharedLlmConfig(env)) },
+    { id: "about", label: "Tell OpenPapr about you", hint: "Your major and year shape the advice", href: "/account#acct-about", done: Boolean(user?.major || user?.studyYear || user?.profileJson) },
+    { id: "calendar", label: "Add deadlines to your calendar", hint: "Google or Apple Calendar, kept up to date", href: "/account#acct-calendar", done: Boolean(user?.calendarToken) },
+  ];
   const dateLabel = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" }).format(now);
 
   return (
@@ -83,6 +94,7 @@ export default async function Home() {
         </div>
       )}
 
+      <SetupChecklist steps={setup} />
       <HomeBoard
         initial={layout}
         views={views}

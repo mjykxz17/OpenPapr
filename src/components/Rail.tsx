@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { SignOutButton } from "./SignOutButton";
 import { AppearanceMenu } from "./AppearanceMenu";
 import { PapiMark } from "./brand/PapiMark";
+import { openSearch } from "./SearchPalette";
 
 function HomeIcon() {
   return (
@@ -39,6 +40,15 @@ function StudyIcon() {
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
     </svg>
   );
 }
@@ -84,11 +94,19 @@ export function Rail({ showMail = true }: { showMail?: boolean }) {
           </Link>
         );
       })}
+      <button type="button" onClick={openSearch} className="flex h-[60px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-ink-3">
+        <SearchIcon />
+        <span>Search</span>
+      </button>
     </nav>
     <nav aria-label="Primary" className="fixed inset-y-0 left-0 z-10 hidden w-14 flex-col items-center gap-1 border-r border-line bg-surface py-3 sm:flex">
       <Link href="/" title="OpenPapr" aria-label="OpenPapr home" className="mb-2 flex h-11 w-11 items-center justify-center rounded-md transition-transform hover:-translate-y-0.5">
         <PapiMark size={30} />
       </Link>
+      <button type="button" onClick={openSearch} title="Search (⌘K)" aria-label="Search"
+        className="flex h-11 w-11 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-ink/[0.05] hover:text-ink">
+        <SearchIcon />
+      </button>
       {nav.map(({ href, label, Icon }) => {
         const active = isActive(href);
         return (

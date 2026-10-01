@@ -10,6 +10,7 @@ import { AppShell } from "@/components/AppShell";
 import { TodoList } from "@/components/TodoList";
 import { TaskBoard } from "@/components/tasks/TaskBoard";
 import { RebuildButton } from "@/components/profile/RebuildButton";
+import { AddTask } from "@/components/tasks/AddTask";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,9 @@ export default async function TasksPage() {
       </header>
 
       <div className="flex max-w-3xl flex-col gap-10">
+        <div className="-mt-4 flex">
+          <AddTask modules={overview.modules.filter((m) => !m.hidden).map((m) => ({ id: m.id, code: m.code }))} />
+        </div>
         {empty ? (
           <p className="text-sm text-ink-2">
             {hasModel ? "Your tasks are planned after the next sync — or press Build now." : "With an AI key, OpenPapr reads your announcements and slides, finds what you have to do, and breaks it into steps."}

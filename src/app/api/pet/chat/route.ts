@@ -6,10 +6,13 @@ import { rateLimit } from "@/server/rate-limit";
 import { getUser } from "@/db/repo";
 import { modules } from "@/db/schema";
 import { loadEnv } from "@/lib/env";
-import { sharedLlmConfig, userLlmConfig } from "@/lib/llm-provider";
+import { cfgForUser } from "@/server/llm-config";
 import { complete } from "@/enrich/openai-compat";
 import { PET_SYSTEM, dueList, factSheet, recentlySaid, ruleAnswer } from "@/server/pet";
 import { appendToChat, getChat } from "@/server/pet-chats";
+import { isAddRequest, parseQuickAdd } from "@/server/quick-add";
+import { createManualTask, endOfSgtDay } from "@/server/tasks";
+import { dayLabel } from "@/lib/format-date";
 
 export const dynamic = "force-dynamic";
 
@@ -35,10 +38,25 @@ export async function POST(request: Request) {
   const now = Date.now();
   const env = loadEnv();
   const user = getUser(db, userId);
-  const cfg = (user && userLlmConfig(user, env.SECRET_KEY)) || sharedLlmConfig(env);
-  const codes = db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all().map((m) => m.code);
+  const cfg = cfgForUser(db, userId, now);
+  const mods = db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all();
+  const codes = mods.map((m) => m.code);
+  const earlierTurns = sessionId !== null ? (getChat(db, userId, sessionId)?.messages ?? []) : [];
+
+  // "Remind me to …" becomes a task straight away, no model needed.
+  if (isAddRequest(question)) {
+    const q = parseQuickAdd(question, codes, now);
+    const moduleId = q.moduleCode ? mods.find((m) => m.code === q.moduleCode)?.id ?? null : null;
+    const dueAt = q.day ? endOfSgtDay(q.day) : null;
+    const id = createManualTask(db, userId, { title: q.title, dueAt, moduleId }, now);
+    const reply = id === null
+      ? "What should I remind you about? Try “remind me to print the tutorial sheet by Friday”."
+      : `Added to your tasks: “${q.title}”${dueAt ? `, due ${dayLabel(dueAt)}` : " (no date — say “by Friday” next time and I'll set one)"}. It's on the Tasks page.`;
+    const saved = appendToChat(db, userId, earlierTurns.length ? sessionId : null, question, reply, now);
+    return NextResponse.json({ reply, smart: false, sessionId: saved.id, title: saved.title, added: id !== null });
+  }
   const fallback = () => ruleAnswer(question, dueList(db, userId, now), codes, now, recentlySaid(db, userId, now));
-  const earlier = sessionId !== null ? (getChat(db, userId, sessionId)?.messages ?? []) : [];
+  const earlier = earlierTurns;
 
   let reply: string;
   let smart = false;

@@ -6,7 +6,8 @@ import { updateTask } from "@/server/tasks";
 
 export const dynamic = "force-dynamic";
 
-// Tick a step, or mark a whole task done / not needed / open again.
+// Tick a step, mark a whole task done / not needed / open again, or correct
+// the planner: not a real task, or the real due date.
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -20,7 +21,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   const status = body.status === "open" || body.status === "done" || body.status === "dismissed" ? body.status : undefined;
   const stepId = typeof body.stepId === "string" ? body.stepId : undefined;
-  if (!status && stepId === undefined) return NextResponse.json({ error: "nothing to change" }, { status: 400 });
-  const ok = updateTask(getDb(), userId, Number(id), { stepId, done: body.done === true, status }, Date.now());
+  const notTask = body.notTask === true;
+  const dueDate = typeof body.dueDate === "string" ? body.dueDate : undefined;
+  if (!status && stepId === undefined && !notTask && dueDate === undefined) return NextResponse.json({ error: "nothing to change" }, { status: 400 });
+  const ok = updateTask(getDb(), userId, Number(id), { stepId, done: body.done === true, status, notTask, dueDate }, Date.now());
   return ok ? NextResponse.json({ ok: true }) : NextResponse.json({ error: "not found" }, { status: 404 });
 }

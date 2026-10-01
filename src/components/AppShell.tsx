@@ -5,6 +5,7 @@ import { getDb } from "@/server/db";
 import { getUser } from "@/db/repo";
 import { loadEnv } from "@/lib/env";
 import { Papi } from "./pet/Papi";
+import { SearchPalette } from "./SearchPalette";
 
 // `wide` opts a page out of the 1280px cap. Dashboard-style pages read better
 // capped — a grid of tiles stretched across a 27" display looks sparse — but a
@@ -31,6 +32,7 @@ export async function AppShell({ children, wide = false, bleed = false }: { chil
       {/* The study buddy lives on every page except the file viewer, whose
           controls sit where it would. */}
       {!bleed && <Papi />}
+      <SearchPalette />
     </div>
   );
 }

@@ -23,6 +23,8 @@ import { createCompatDeadlineClassifier } from "../enrich/classify";
 import { createWeightageExtractor, type ExtractedComponent, type WeightageSourceText, type WeightageSourcePdf } from "../enrich/weightage";
 import type { CompatConfig } from "../enrich/openai-compat";
 import { sharedLlmConfig, userLlmConfig } from "../lib/llm-provider";
+import { setUsageListener } from "../enrich/openai-compat";
+import { recordLlmCall, sharedAllowanceLeft } from "../server/llm-usage";
 import { createGuard, runUserSync } from "./sync";
 import { pollIntervalAt } from "../lib/poll-schedule";
 import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type ProfileDeps } from "./profiles";
@@ -91,15 +93,27 @@ if (sharedCfg) console.log(`shared llm provider: openai-compat ${sharedCfg.model
 // Built once per distinct saved config and reused across cycles; a change in
 // Account shows up as a new signature and replaces the entry.
 const userKits = new Map<number, { sig: string; kit: LlmKit }>();
+const noModelKit: LlmKit = { compatCfg: null, scorer: null, extractor: null, supportsPdfSources: false, actionExtractor: null, deadlineClassifier: null, fileCategorizer: null };
+setUsageListener((o) => recordLlmCall(db, o.userId, o.shared, Date.now()));
 function kitFor(userId: number): LlmKit {
   const user = db.select().from(users).where(eq(users.id, userId)).get();
   const own = user ? userLlmConfig(user, env.SECRET_KEY) : null;
-  if (!own) { userKits.delete(userId); return sharedKit; }
+  if (!own) {
+    if (!sharedCfg) return sharedKit;
+    // The shared key, tagged so its calls are counted, until this month's
+    // allowance runs out; then nothing runs until next month or an own key.
+    if (sharedAllowanceLeft(db, userId, Date.now(), env.SHARED_MONTHLY_CALLS) <= 0) return noModelKit;
+    const hit = userKits.get(userId);
+    if (hit && hit.sig === "shared") return hit.kit;
+    const kit = compatKit({ ...sharedCfg, owner: { userId, shared: true } });
+    userKits.set(userId, { sig: "shared", kit });
+    return kit;
+  }
   // Any change in Account — key, model, RPM or fallback — makes a new kit.
   const sig = JSON.stringify([own.baseUrl, own.model, own.rpm, user!.llmKeyEnc, user!.llmExtraJson, own.fallback?.baseUrl, own.fallback?.model, own.fallback?.rpm, user!.llmFallbackKeyEnc, user!.llmFallbackExtraJson]);
   const hit = userKits.get(userId);
   if (hit && hit.sig === sig) return hit.kit;
-  const kit = compatKit(own);
+  const kit = compatKit({ ...own, owner: { userId, shared: false } });
   userKits.set(userId, { sig, kit });
   return kit;
 }

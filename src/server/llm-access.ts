@@ -1,13 +1,9 @@
 import type { Db } from "@/db/client";
-import { getUser } from "@/db/repo";
-import { loadEnv } from "@/lib/env";
-import { sharedLlmConfig, userLlmConfig } from "@/lib/llm-provider";
+import { cfgForUser } from "./llm-config";
 
-// Whether a study guide can be generated for this user: their own provider,
-// or the deployment's shared OpenAI-compatible one. Mirrors the worker's
-// choice so the button is never offered for a run that is certain to fail.
+// Whether the AI features can run for this user right now: their own
+// provider, or the shared one while this month's allowance lasts. Mirrors the
+// worker's choice so a button is never offered for a run certain to fail.
 export function canGenerateGuides(db: Db, userId: number): boolean {
-  const env = loadEnv();
-  const user = getUser(db, userId);
-  return Boolean((user && userLlmConfig(user, env.SECRET_KEY)) || sharedLlmConfig(env));
+  return cfgForUser(db, userId) !== null;
 }
