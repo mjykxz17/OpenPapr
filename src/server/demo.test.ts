@@ -7,6 +7,7 @@ import { createDb } from "../db/client";
 import { files, modules, studyGuides, tasks, users } from "../db/schema";
 import { DEMO_COURSE_BASE, demoDue, findDemoUser, lastMidnightSgt, resetDemo } from "./demo";
 import { deckCachePath } from "./deck";
+import { splitGuideIntoChapters } from "../lib/study-chapters";
 
 describe("demo account", () => {
   it("knows when midnight in Singapore was", () => {
@@ -34,7 +35,9 @@ describe("demo account", () => {
     expect(existsSync(deckCachePath(algo.canvasCourseId, "L3-divide-conquer.pdf", dbPath))).toBe(true);
     const deck = db.select().from(files).where(eq(files.moduleId, algo.id)).all().find((f) => f.displayName === "L3-divide-conquer.pdf")!;
     expect(JSON.parse(deck.textSigJson!).pages).toBe(15);
-    expect(db.select().from(studyGuides).where(eq(studyGuides.moduleId, algo.id)).get()?.markdown).toContain("slide:L3-divide-conquer#11");
+    const md = db.select().from(studyGuides).where(eq(studyGuides.moduleId, algo.id)).get()!.markdown;
+    expect(md).toContain("slide:L3-divide-conquer#11");
+    expect(splitGuideIntoChapters(md).chapters.map((c) => c.label)).toEqual(["1. Asymptotic analysis", "2. Divide and conquer", "3. Amortised analysis"]);
 
     // A visitor makes a mess; the nightly reset puts the semester back.
     db.update(tasks).set({ status: "done" }).where(eq(tasks.userId, id)).run();

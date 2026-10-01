@@ -6,9 +6,9 @@
 
 **Your Canvas semester, planned.**
 
-OpenPapr reads everything your university's Canvas posts and turns it into three things: study guides
-that write themselves from your lecture slides, a to-do list broken into small daily steps, and a
-paper sidekick who knows when everything is due.
+OpenPapr reads everything your university's Canvas posts and turns it into a study library that
+knows what's due: guides that write themselves from your lecture slides, a to-do list broken into
+small daily steps, and a paper sidekick that answers from your own material, with sources.
 
 [![CI](https://github.com/mjykxz17/OpenPapr/actions/workflows/ci.yml/badge.svg)](https://github.com/mjykxz17/OpenPapr/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-0f766e)](LICENSE)
@@ -18,7 +18,9 @@ paper sidekick who knows when everything is due.
 ![PWA](https://img.shields.io/badge/PWA-works_offline-5a0fc8?logo=pwa&logoColor=white)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](#contributing)
 
-[Features](#features) · [Try it locally](#try-it-in-two-minutes) · [Self-host](#self-hosting) · [How it works](#how-it-works) · [Roadmap](#roadmap)
+**[Try the live demo →](https://openpapr.fly.dev/login)** &nbsp;no sign-up, resets every night
+
+[Features](#features) · [Try it](#try-it) · [Self-host](#self-hosting) · [How it works](#how-it-works) · [Roadmap](#roadmap)
 
 <br />
 
@@ -33,7 +35,8 @@ paper sidekick who knows when everything is due.
 > OpenPapr began as one NUS student's answer to a familiar problem: forty Canvas notifications a
 > week, five lecture decks with near-identical names, and a quiz announced in a forum reply you
 > never opened. It now runs for a small group of students. It works with any Canvas instance,
-> though some defaults (NUSMods exam dates, Singapore time) assume NUS.
+> though some defaults (NUSMods exam dates, Singapore time) assume NUS. You can sign up without
+> Canvas and connect it later, or just open the demo.
 
 ## Why OpenPapr
 
@@ -42,7 +45,8 @@ assignments, quizzes, announcements, forum threads and lines buried on slide 47.
 a deck as `L5 v2 (updated).pdf` and the old one stays. Nothing tells you what to do *today*.
 
 OpenPapr sits on top of Canvas and does the reading for you. It is self-hostable, open source, and
-yours: every student brings their own Canvas token and, if they like, their own AI key.
+yours: every student brings their own Canvas token and, if they like, their own AI key. NUS students
+can use the School of Computing's own LLM service, and Agnes 3.0 Flash is free to use at the moment.
 
 ## Features
 
@@ -87,6 +91,30 @@ It also spots patterns: after Quiz 3, it expects Quiz 4.
 Press <kbd>⌘</kbd> <kbd>K</kbd> or <kbd>/</kbd> on any page. One box covers guide sections,
 announcements, lecturers' forum replies, Canvas work, your tasks, files and modules. A guide result
 opens the right chapter scrolled to the right heading.
+
+### 💬 Ask your material, with sources
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/ask-dark.png" />
+  <img src="docs/assets/ask-light.png" alt="Papi answering a question about merge sort with numbered sources, one of them open in the slide panel" width="100%" />
+</picture>
+
+Ask Papi anything about a module. It searches your slides, study guides, notes and announcements,
+answers only from what it finds, and puts a numbered source after each point. Click a number and
+the exact slide opens beside the guide. Search uses meaning when your AI provider offers embeddings,
+and words when it doesn't. Papi also adds tasks for you: *"remind me to print the tutorial sheet
+by Friday"*.
+
+### 🗂 Every module at a glance
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/module-dark.png" />
+  <img src="docs/assets/module-light.png" alt="A module page: next due, weighting, guide progress and updates as tiles, then Overview, Updates, Materials and About tabs" width="100%" />
+</picture>
+
+Each module opens on four tiles (next due, how it's graded, the guide, what's new), then tabs for
+the overview, Canvas updates, materials and the module profile. Canvas courses are marked with
+their sync status and a link back to Canvas.
 
 ### 🧠 Quiz yourself on any chapter
 
@@ -143,8 +171,9 @@ on your workload, your major and your past courses.
 <tr>
 <td valign="top">
 
-**💬 Ask your material.** Papi answers questions from your own slides, guides, notes and
-announcements. Every claim carries a numbered source that opens the exact slide.
+**🐾 Papi.** A small paper buddy who knows your dates, adds reminders, answers from your
+material, and is happy to be dragged around the screen.
+
 </td>
 <td valign="top">
 
@@ -156,9 +185,9 @@ or delete your account and every row with it.
 <tr>
 <td valign="top">
 
-**🤖 Bring your own model.** Works with any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq,
-Ollama, vLLM…) or Anthropic, with an optional fallback provider. A shared key can be offered with
-a monthly allowance per student.
+**🤖 Bring your own model.** One-click setup for the NUS SoC LLM service, Agnes AI, OpenAI and
+Claude, plus any other OpenAI-compatible endpoint (Gemini, OpenRouter, Ollama, vLLM…), with an
+optional fallback provider. A shared key can be offered with a monthly allowance per student.
 
 </td>
 <td valign="top">
@@ -169,10 +198,14 @@ a monthly allowance per student.
 </tr>
 </table>
 
-## Try it in two minutes
+## Try it
 
-You don't need a Canvas account. A fictional semester (four modules, tasks, a weekly plan and a
-study guide) ships with the repo.
+**Online:** open the [sign-in page](https://openpapr.fly.dev/login) and press **Try the demo**.
+You land in a made-up semester: four modules, tasks with daily steps, a weekly plan, a study guide
+with real slide decks, and Papi. It's shared with other visitors and resets every night at
+midnight (Singapore time).
+
+**On your machine:** the same fictional semester ships with the repo.
 
 ```bash
 git clone https://github.com/mjykxz17/OpenPapr.git && cd OpenPapr
@@ -197,7 +230,7 @@ Open <http://localhost:3000> and sign in as **`demo`** / **`openpapr-demo`**.
 ### Requirements
 
 - **Node.js 22** (≥ 20 should work)
-- A **Canvas** instance that allows personal access tokens
+- A **Canvas** instance that allows personal access tokens (students can also start without one)
 - *Optional:* an **LLM API key**, from any OpenAI-compatible provider or Anthropic
 - *Optional:* **LibreOffice**, if your courses post `.pptx` decks; they are converted to PDF so slide
   citations work. The Docker image includes it.
@@ -212,8 +245,9 @@ npm run worker                # in a second terminal: Canvas sync, guides, plann
 ```
 
 Migrations run automatically on startup. To sign up, a student opens the site and enters the
-**invite code** (`APP_PASSWORD`) and their own **Canvas access token**. After that they can set a
-username and password.
+**invite code** (`APP_PASSWORD`) with a username and password. A short welcome flow then offers
+three optional steps: connect **Canvas** (a personal access token), pick an **AI model**, and say
+what they study. Any of them can be skipped and done later on the Account page.
 
 ### Docker
 
@@ -264,6 +298,9 @@ fly deploy
 | `DISQUS_API_KEY` | | — | Adds NUSMods student reviews to module profiles. |
 | `MS_CLIENT_ID` | | — | Microsoft Entra app id for the optional Outlook mail view. The Mail tab is hidden without it. |
 | `POLL_INTERVAL_MS` | | `300000` | How often the worker syncs. |
+| `DEMO_ENABLED` | | on | Set to `0` to remove the public demo account and its "Try the demo" button. |
+| `DEMO_AI_USER` | | `1` | The user whose AI key the demo borrows (their own key, else the shared one). The demo never sees that user's content. |
+| `DEMO_DAILY_CALLS` | | `150` | AI calls the demo may make per day, across all visitors. |
 
 Students can also add their own key, and a fallback provider, on the **Account** page. Both are
 encrypted and only ever sent to the endpoint they entered.
@@ -296,6 +333,12 @@ flowchart LR
   staff replies, planner notes, obligation lines from slides, weighting, the exam date and the
   student's corrections) and merges the result into existing tasks without touching steps the
   student has started.
+- **Ask your material** (`src/server/passages.ts`, `src/server/retrieve.ts`). Every slide page, guide
+  section, note and announcement becomes a passage. A question is matched with BM25 and, when the
+  provider has an embedding model, by meaning too; the best passages go to the model numbered, and
+  the numbers it cites come back as links.
+- **Demo** (`src/server/demo.ts`, `src/demo`). A made-up semester with real PDF decks, re-seeded by the
+  worker every night at midnight Singapore time.
 - **Web** (`src/app`). Server components render everything, dates are formatted once in Singapore
   time, and a service worker (`public/sw.js`) keeps guides and slides readable offline.
 
@@ -324,6 +367,8 @@ e2e/              Playwright smoke tests
   can see.
 - Canvas tokens, AI keys and Outlook refresh tokens are **encrypted at rest** (AES-256-GCM).
   Passwords are hashed with scrypt.
+- The **demo account** borrows the owner's AI key with a daily cap, but none of their content, can't
+  change any settings, keeps no chat history, and is wiped every night.
 - Calendar feeds use an **unguessable per-student link** that can be reset or turned off.
 - **Download my data** gives a full JSON export with every secret removed. **Delete my account**
   removes every row.
@@ -337,12 +382,16 @@ rules.
 ## Roadmap
 
 - [x] Canvas sync: assignments, quizzes, announcements, discussions, planner notes, files
-- [x] Multi-student accounts (invite code and Canvas token, then username and password)
+- [x] Multi-student accounts; sign up without Canvas and connect it later; a welcome flow
+- [x] Ask your material: answers from your slides, guides and announcements, with sources
+- [x] A public demo account that resets every night
 - [x] Automatic study guides with deck version detection and slide citations
 - [x] Smart tasks with daily steps, quiz-series anticipation and planner feedback
 - [x] Search, calendar feed, practice quizzes, offline guides, PWA
-- [ ] **Course libraries**: share a generated guide with classmates in the same Canvas course, so
-      a cohort pays for generation once
+- [ ] **Your own modules**: create a module without Canvas and fill it with PDFs, slides, notes and
+      links; guides, quizzes and Ask work on whatever you add
+- [ ] **Deadlines without an LMS**: import a calendar feed or pull dates out of an uploaded syllabus
+- [ ] **More LMSs**: Moodle and Google Classroom adapters next to Canvas
 - [ ] **Grade planner**: "what do I need on the final?" from the weighting and known scores
 - [ ] **Beyond NUS**: make the NUSMods and timezone assumptions configurable per institution
 - [ ] **Local models**: a first-class Ollama setup guide and smaller prompts tuned for 8B models

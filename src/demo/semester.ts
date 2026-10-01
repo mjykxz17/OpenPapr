@@ -95,58 +95,58 @@ export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { 
     moduleId: algo.id, generatedAt: now - 5 * H, sourceNote: "6 decks, 214 slides",
     markdown: `# CS3230 — Study guide
 
-  How to analyse an algorithm's running time, and three ways to design one that is fast.
+How to analyse an algorithm's running time, and three ways to design one that is fast.
 
-  ## 1. Asymptotic analysis
+## 1. Asymptotic analysis
 
-  Big-O, Ω and Θ describe how running time grows, ignoring constant factors. [L1 p12](slide:L1-asymptotics#12)
+Big-O, Ω and Θ describe how running time grows, ignoring constant factors. [L1 p12](slide:L1-asymptotics#12)
 
-  ### The three bounds
+### The three bounds
 
-  | Notation | Means | Example |
-  | --- | --- | --- |
-  | O(g) | grows no faster than g | 3n² + n is O(n²) |
-  | Ω(g) | grows at least as fast as g | n log n is Ω(n) |
-  | Θ(g) | both at once | 5n + 2 is Θ(n) |
+| Notation | Means | Example |
+| --- | --- | --- |
+| O(g) | grows no faster than g | 3n² + n is O(n²) |
+| Ω(g) | grows at least as fast as g | n log n is Ω(n) |
+| Θ(g) | both at once | 5n + 2 is Θ(n) |
 
-  > **Exam tip.** Θ is a claim about *both* bounds. Proving only the upper bound gives you O, not Θ.
+> **Exam tip.** Θ is a claim about *both* bounds. Proving only the upper bound gives you O, not Θ.
 
-  ### Comparing growth rates
+### Comparing growth rates
 
-  Take the limit of f(n)/g(n). If it is 0, f is o(g); a positive constant means Θ; infinity means ω. [L1 p20](slide:L1-asymptotics#18)
+Take the limit of f(n)/g(n). If it is 0, f is o(g); a positive constant means Θ; infinity means ω. [L1 p20](slide:L1-asymptotics#18)
 
-  ## 2. Divide and conquer
+## 2. Divide and conquer
 
-  Split the problem, solve the parts recursively, combine the answers. [L3 p4](slide:L3-divide-conquer#4)
+Split the problem, solve the parts recursively, combine the answers. [L3 p4](slide:L3-divide-conquer#4)
 
-  ### Merge sort as a recurrence
+### Merge sort as a recurrence
 
-  \`\`\`mermaid
-  flowchart TD
-    A["sort(A[1..n])"] --> B["sort left half"]
-    A --> C["sort right half"]
-    B --> D["merge: Θ(n)"]
-    C --> D
-  \`\`\`
+\`\`\`mermaid
+flowchart TD
+  A["sort(A[1..n])"] --> B["sort left half"]
+  A --> C["sort right half"]
+  B --> D["merge: Θ(n)"]
+  C --> D
+\`\`\`
 
-  The running time satisfies T(n) = 2T(n/2) + Θ(n), which solves to Θ(n log n). [L3 p11](slide:L3-divide-conquer#11)
+The running time satisfies T(n) = 2T(n/2) + Θ(n), which solves to Θ(n log n). [L3 p11](slide:L3-divide-conquer#11)
 
-  ### The master theorem
+### The master theorem
 
-  For T(n) = aT(n/b) + f(n), compare f(n) with n^(log_b a):
+For T(n) = aT(n/b) + f(n), compare f(n) with n^(log_b a):
 
-  - **Case 1:** f is polynomially smaller, so T(n) = Θ(n^(log_b a)).
-  - **Case 2:** they match, so T(n) = Θ(n^(log_b a) · log n).
-  - **Case 3:** f is polynomially larger (and regular), so T(n) = Θ(f(n)). [L4 p7](slide:L4-master#7)
+- **Case 1:** f is polynomially smaller, so T(n) = Θ(n^(log_b a)).
+- **Case 2:** they match, so T(n) = Θ(n^(log_b a) · log n).
+- **Case 3:** f is polynomially larger (and regular), so T(n) = Θ(f(n)). [L4 p7](slide:L4-master#7)
 
-  ## 3. Amortised analysis
+## 3. Amortised analysis
 
-  The average cost per operation over a worst-case sequence, even when single operations are expensive. [L6 p3](slide:L6-amortised#3)
+The average cost per operation over a worst-case sequence, even when single operations are expensive. [L6 p3](slide:L6-amortised#3)
 
-  ### The accounting method
+### The accounting method
 
-  Charge each cheap operation a little extra and store it as credit; expensive operations spend the credit. A dynamic array that doubles costs O(1) amortised per append. [L6 p15](slide:L6-amortised#15)
-  `,
+Charge each cheap operation a little extra and store it as credit; expensive operations spend the credit. A dynamic array that doubles costs O(1) amortised per append. [L6 p15](slide:L6-amortised#15)
+`,
   }).run();
 
   for (const m of [se, algo, net, stats]) db.insert(taskPlans).values({ moduleId: m.id, inputsHash: "showcase", generatedAt: now - 20 * 60_000 }).run();
