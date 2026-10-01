@@ -41,11 +41,18 @@ export function GuideStatus({ moduleId, initial, canGenerate }: { moduleId: numb
   }
 
   let line: string;
-  if (!canGenerate) line = "Add an AI key in Account and the guide will write itself.";
-  else if (s.writing) line = `Writing “${s.writing.title}”${s.writing.stage ? ` — ${s.writing.stage}` : ""}`;
+  if (s.writing) line = `Writing “${s.writing.title}”${s.writing.stage ? ` — ${s.writing.stage}` : ""}`;
   else if (!s.planned) line = s.planError ? "Could not plan the guide yet; will retry." : "Reading the slides…";
   else if (s.queued > 0) line = `${s.ready} of ${s.total} chapters up to date · ${s.queued} waiting`;
   else line = `Up to date · ${s.total} chapter${s.total === 1 ? "" : "s"}`;
+
+  if (!canGenerate) {
+    return (
+      <p className="text-[13px] text-ink-3">
+        <a href="/account" className="font-medium text-accent hover:underline">Add an AI key</a> and the guide will write itself.
+      </p>
+    );
+  }
 
   return (
     <div className="relative flex items-center gap-2">

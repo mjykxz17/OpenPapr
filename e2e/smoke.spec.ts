@@ -67,12 +67,12 @@ test("a session reaches the dashboard, modules, reminders and mail", async ({ pa
   // Not getByRole by name: the rail's "Study guides" link matches the same words.
   await expect(page.locator('main a[href="/modules/2/guide"]')).toContainText(/study guide/i);
 
-  // The guide has its own page; the demo module has none yet, so it offers
-  // to generate one and links back to the overview.
+  // The guide has its own page and writes itself; the demo module has none
+  // yet. Without an AI provider the page says how to turn that on.
   await page.goto("/modules/2/guide");
-  // Without an AI provider the button is replaced by a link to add a key.
-  await expect(page.getByRole("button", { name: /generate study guide/i })
-    .or(page.getByRole("link", { name: /add an ai key/i }))).toBeVisible();
+  await expect(page.getByText(/writes itself/i).first()).toBeVisible();
+  await expect(page.getByRole("link", { name: /add an ai key/i })
+    .or(page.getByRole("button", { name: /guide options/i }))).toBeVisible();
   await expect(page.getByRole("link", { name: /overview/i })).toHaveAttribute("href", "/modules/2");
 
   // Reminders became Tasks; the old address still works.
