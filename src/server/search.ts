@@ -27,6 +27,7 @@ export function plainMarkdown(md: string): string {
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/\[([^\]]*)\]\((?:slide|slide-img):[^)]*\)/g, " ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "")
     .replace(/[*_`>#|]/g, " ")
     .replace(/\s+/g, " ")
     .trim();

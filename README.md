@@ -1,295 +1,393 @@
+<div align="center">
+
+<img src="public/brand/papi.svg" alt="Papi, the OpenPapr mascot" width="104" />
+
 # OpenPapr
 
-Turn your own university course material into chaptered study guides, and share them with your cohort.
+**Your Canvas semester, planned.**
 
-> **Status: early, single-user.** What runs today is a working self-hosted dashboard for one
-> person, used by its author. Multi-tenant accounts, the shared Library, publishing and forking
-> are designed but not built. Study-guide generation is currently a semi-manual pipeline, not an
-> in-app job. Details are in [Status and limits](#status-and-limits) — read that before you plan
-> anything around this.
+OpenPapr reads everything your university's Canvas posts and turns it into three things: study guides
+that write themselves from your lecture slides, a to-do list broken into small daily steps, and a
+paper sidekick who knows when everything is due.
 
-## What it does
+[![CI](https://github.com/mjykxz17/OpenPapr/actions/workflows/ci.yml/badge.svg)](https://github.com/mjykxz17/OpenPapr/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-0f766e)](LICENSE)
+![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-single_file-003b57?logo=sqlite&logoColor=white)
+![PWA](https://img.shields.io/badge/PWA-works_offline-5a0fc8?logo=pwa&logoColor=white)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen)](#contributing)
 
-You connect your Canvas LMS account. A background worker polls Canvas and pulls your courses,
-assignment groups, announcements and calendar events into a local SQLite database, and an LLM
-extracts assessment weightings from syllabus pages and prelim slide decks when Canvas does not
-expose them as structured `group_weight` values. The result is a per-module dashboard: what the
-module is graded on, what is due, what was announced. Optionally it also pulls your Outlook
-mailbox through the Microsoft Graph API and triages it against your enrolled module codes.
+[Features](#features) · [Try it locally](#try-it-in-two-minutes) · [Self-host](#self-hosting) · [How it works](#how-it-works) · [Roadmap](#roadmap)
 
-On top of that sits the part the project is actually about: study guides generated from your own
-lecture slides, rendered chapter-by-chapter with the source slide one click away.
+<br />
 
-Three things are meant to be distinctive about it.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/home-dark.png" />
+  <img src="docs/assets/home-light.png" alt="The OpenPapr home screen: this week's summary, today's steps, the next deadline and every module's assessment weighting" width="100%" />
+</picture>
 
-**Guides are generated from your own source material, with per-claim slide citations.** Guide
-markdown uses two custom link schemes that the renderer understands: `[slide 62](slide:U0-prelim#62)`
-renders as a small chip that opens that deck's PDF at page 62, and
-`![what a stack frame looks like](slide-img:C-part2-pointers#15)` embeds a PNG of that actual slide,
-rendered on demand from the deck. Diagrams the slides only describe in prose are recreated as
-```` ```mermaid ```` blocks and drawn client-side. So every claim in a guide is traceable back to
-the exact slide it came from, and figures are the professor's own rather than reconstructions.
-This part is built and working.
+</div>
 
-**Same-deck dedupe, so a cohort generates once.** Two students in the same module have the same
-decks. Generation is expensive; doing it once per deck rather than once per student is the whole
-economic argument for making this shareable. *Designed, not built* — there is no content-hash
-column and no shared generation cache in the schema today.
+> [!NOTE]
+> OpenPapr began as one NUS student's answer to a familiar problem: forty Canvas notifications a
+> week, five lecture decks with near-identical names, and a quiz announced in a forum reply you
+> never opened. It now runs for a small group of students. It works with any Canvas instance,
+> though some defaults (NUSMods exam dates, Singapore time) assume NUS.
 
-**Canvas enrolment is the sharing boundary.** The unit of sharing is intended to be a course
-Library that you can see because Canvas says you are enrolled in that course — not an invite link,
-not a public feed. Notes stay private by default; publishing to the Library and forking a
-classmate's guide are opt-in actions. *Designed, not built* — see the roadmap.
+## Why OpenPapr
 
-## Screenshot
+Canvas is where your course *lives*, but it is not where you *study*. Deadlines are split across
+assignments, quizzes, announcements, forum threads and lines buried on slide 47. Lecturers re-upload
+a deck as `L5 v2 (updated).pdf` and the old one stays. Nothing tells you what to do *today*.
 
-<!-- TODO: add docs/screenshot.png (module page with the study-guide tab open, a slide chip and an
-     embedded slide figure visible) and replace this comment with the image. -->
+OpenPapr sits on top of Canvas and does the reading for you. It is self-hostable, open source, and
+yours: every student brings their own Canvas token and, if they like, their own AI key.
 
-_Placeholder._
+## Features
 
-## Quick start
+### 📖 Study guides that write themselves
 
-### Prerequisites
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/guide-dark.png" />
+  <img src="docs/assets/guide-light.png" alt="A study guide chapter with a diagram and slide citation chips" width="100%" />
+</picture>
 
-- Node.js 22 (the container image is `node:22-alpine`; anything ≥20 should work)
-- A Canvas account at an institution that allows personal access tokens
-- **LibreOffice** — only if your courses distribute `.pptx`/`.ppt` decks rather than PDFs. It is
-  called headlessly to convert decks to PDF so slide citations and slide images work. Not needed
-  for PDF-only courses, and not bundled or shipped with this project.
-- An LLM API key — either an Anthropic key or any OpenAI-compatible chat-completions endpoint.
-  Without one the app still runs; weightage extraction, mail triage and deadline extraction are
-  skipped and the rules-only path is used.
+As each lecture deck lands on Canvas, OpenPapr groups it with earlier versions of the same deck,
+works out which topics it covers, and writes (or rewrites) only those chapters. Every claim carries
+a **slide chip** that opens the exact slide beside the text. Figures are the lecturer's own slides,
+diagrams the slides only describe in words are redrawn with Mermaid, and the model names each guide
+by what it teaches rather than by its file name. Topics tied to a graded quiz or assignment are
+written first.
 
-`better-sqlite3` is compiled from source on musl; on glibc Linux and macOS a prebuilt binary is
-used and `npm install` needs no toolchain.
+### ✅ Tasks, broken into steps you can do today
 
-### Environment
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/tasks-dark.png" />
+  <img src="docs/assets/tasks-light.png" alt="The Tasks page: today's steps, and each task with progress and dated steps" width="100%" />
+</picture>
+
+One task per obligation, wherever it was posted: a Canvas quiz, a line in an announcement, a
+lecturer's reply in a discussion, a "submit before Week 6" on a slide. Each becomes 15–90 minute
+steps scheduled back from the due date, and steps you miss roll forward instead of piling up.
+It also spots patterns: after Quiz 3, it expects Quiz 4.
+
+- **Teach the planner.** Mark something *Not a real task* or correct a *Wrong date*. Both are
+  remembered and shown to the planner next time, and a date you set is never moved again.
+- **Quick add.** Use *+ Add task*, or tell Papi *"remind me to print the tutorial sheet by Friday"*.
+- **Per-group forms collapsed.** Eight copies of "Tutorial 3 (Group A…H)" become one task: yours.
+
+### 🔎 Search everything, from anywhere
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/search-dark.png" />
+  <img src="docs/assets/search-light.png" alt="The ⌘K search palette finding a guide section, a task and an announcement" width="100%" />
+</picture>
+
+Press <kbd>⌘</kbd> <kbd>K</kbd> or <kbd>/</kbd> on any page. One box covers guide sections,
+announcements, lecturers' forum replies, Canvas work, your tasks, files and modules. A guide result
+opens the right chapter scrolled to the right heading.
+
+### 🧠 Quiz yourself on any chapter
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/quiz-dark.png" />
+  <img src="docs/assets/quiz-light.png" alt="Practice questions at the end of a guide chapter, answered, with explanations and slide references" width="100%" />
+</picture>
+
+Each chapter ends with practice questions written from that chapter only. Every question comes
+with the reason behind the answer and the slide it is from. A set is kept until the chapter
+changes, so asking again costs nothing.
+
+### 📱 Made for your phone, readable on the train
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/phone-dark.png" />
+  <img src="docs/assets/phone-light.png" alt="OpenPapr on a phone: home, tasks and a study guide" width="100%" />
+</picture>
+
+Install it to your home screen like an app. **Save offline** keeps a guide and every slide it
+shows, so it opens with no signal.
+
+### And the rest
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**🗓 Calendar sync.** A private feed for Google Calendar, Apple Calendar or Outlook, with
+deadlines, quiz windows, expected quizzes and, if you want them, daily study steps.
+
+</td>
+<td width="50%" valign="top">
+
+**🧩 A home screen made of widgets.** Drag, resize (S / W / L / Full) and hide widgets, just like
+the home screen on a phone.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**📊 Assessment weighting.** Read from Canvas, or pulled out of the syllabus and the admin slides
+with the quoted sentence as evidence. You can always override it.
+
+</td>
+<td valign="top">
+
+**🗒 A weekly plan.** A short read on the week ahead and what to prioritise in each module, based
+on your workload, your major and your past courses.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**🐾 Papi.** A small paper buddy who answers *"when's my next quiz?"* from your own data, adds
+reminders, and is happy to be dragged around the screen.
+
+</td>
+<td valign="top">
+
+**🔐 Your data, your call.** Tokens and keys are encrypted at rest. Download everything as JSON,
+or delete your account and every row with it.
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**🤖 Bring your own model.** Works with any OpenAI-compatible endpoint (OpenAI, OpenRouter, Groq,
+Ollama, vLLM…) or Anthropic, with an optional fallback provider. A shared key can be offered with
+a monthly allowance per student.
+
+</td>
+<td valign="top">
+
+**🌗 Light, dark and six accents.** Text meets WCAG AA contrast, and buttons are at least 44px for fingers.
+
+</td>
+</tr>
+</table>
+
+## Try it in two minutes
+
+You don't need a Canvas account. A fictional semester (four modules, tasks, a weekly plan and a
+study guide) ships with the repo.
 
 ```bash
-cp .env.example .env
+git clone https://github.com/mjykxz17/OpenPapr.git && cd OpenPapr
+npm install
+npm run demo:seed                     # writes data/showcase.db
+
+DATABASE_PATH=data/showcase.db \
+SECRET_KEY=$(openssl rand -hex 32) \
+APP_PASSWORD=change-me-please \
+npm run dev
 ```
 
-Fill in at least `SECRET_KEY` and `APP_PASSWORD`. The full set, as validated by
-[`src/lib/env.ts`](src/lib/env.ts):
+Open <http://localhost:3000> and sign in as **`demo`** / **`openpapr-demo`**.
+
+> [!TIP]
+> Without an AI key the app still runs. Canvas sync, tasks from Canvas, search, the calendar feed
+> and Papi's date answers all work without one. Add a key on the **Account** page (or in `.env`) to
+> switch on guides, the planner, quizzes and the weekly plan.
+
+## Self-hosting
+
+### Requirements
+
+- **Node.js 22** (≥ 20 should work)
+- A **Canvas** instance that allows personal access tokens
+- *Optional:* an **LLM API key**, from any OpenAI-compatible provider or Anthropic
+- *Optional:* **LibreOffice**, if your courses post `.pptx` decks; they are converted to PDF so slide
+  citations work. The Docker image includes it.
+
+### Run it yourself
+
+```bash
+cp .env.example .env          # fill in SECRET_KEY and APP_PASSWORD at minimum
+npm install
+npm run build && npm start    # web on :3000
+npm run worker                # in a second terminal: Canvas sync, guides, planner
+```
+
+Migrations run automatically on startup. To sign up, a student opens the site and enters the
+**invite code** (`APP_PASSWORD`) and their own **Canvas access token**. After that they can set a
+username and password.
+
+### Docker
+
+```bash
+docker build -t openpapr .
+docker run -d -p 3000:3000 -v openpapr:/data \
+  -e DATABASE_PATH=/data/openpapr.db \
+  -e SECRET_KEY=$(openssl rand -hex 32) \
+  -e SESSION_KEY=$(openssl rand -hex 32) \
+  -e APP_PASSWORD=your-invite-code \
+  -e CANVAS_BASE_URL=https://canvas.your-uni.edu \
+  openpapr
+```
+
+One container runs both the web server and the worker, and restarts the worker if it ever dies.
+
+### Fly.io
+
+`fly.toml` is ready to use: one machine, one volume, a health check.
+
+```bash
+fly launch --copy-config --no-deploy
+fly volumes create openpapr_data --size 1
+fly secrets set SECRET_KEY=$(openssl rand -hex 32) SESSION_KEY=$(openssl rand -hex 32) APP_PASSWORD=your-invite-code
+fly deploy
+```
+
+<details>
+<summary><b>All environment variables</b></summary>
+
+<br />
 
 | Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `SECRET_KEY` | yes | — | 64 hex chars (`openssl rand -hex 32`). Encrypts stored Canvas and Microsoft tokens at rest. |
-| `APP_PASSWORD` | yes | — | Minimum 8 characters. A single shared password gates the whole app; there is no per-user login. |
-| `DATABASE_PATH` | no | `data/openpapr.db` | SQLite file. Everything lives here. |
-| `CANVAS_BASE_URL` | no | your institution's Canvas host | e.g. `https://canvas.example.edu`. |
-| `MS_CLIENT_ID` | no | — | Microsoft Entra ID app client id, for the optional Outlook mail sync. |
-| `ANTHROPIC_API_KEY` | no | — | Enables the Anthropic LLM path. |
-| `ANTHROPIC_MODEL` | no | `claude-haiku-4-5` | Model used on the Anthropic path. |
-| `OPENAI_COMPAT_BASE_URL` | no | — | Any OpenAI-compatible `/v1` endpoint. Takes precedence over Anthropic when set together with the key below. |
-| `OPENAI_COMPAT_API_KEY` | no | — | Key for that endpoint. |
-| `OPENAI_COMPAT_MODEL` | no | — | Model id for that endpoint. |
-| `POLL_INTERVAL_MS` | no | `300000` | How often the worker polls Canvas and Outlook. |
+| --- | :---: | --- | --- |
+| `SECRET_KEY` | ✅ | — | 64 hex chars (`openssl rand -hex 32`). Encrypts stored tokens and keys. **Never rotate it**, or every stored credential becomes unreadable. |
+| `APP_PASSWORD` | ✅ | — | The invite code new students enter with their Canvas token. Minimum 8 characters. |
+| `SESSION_KEY` | recommended | `SECRET_KEY` | Signs session cookies. Rotating it signs everyone out and leaves credentials intact. |
+| `DATABASE_PATH` | | `data/openpapr.db` | The SQLite file. All data lives here. |
+| `CANVAS_BASE_URL` | | `https://canvas.nus.edu.sg` | Your institution's Canvas. |
+| `OPENAI_COMPAT_BASE_URL` | | — | Any OpenAI-compatible `/v1` endpoint, used as the shared model. |
+| `OPENAI_COMPAT_API_KEY` | | — | Key for that endpoint. |
+| `OPENAI_COMPAT_MODEL` | | — | Model id on that endpoint. |
+| `OPENAI_COMPAT_RPM` | | unlimited | Requests per minute allowed on the shared key. Extra requests wait in a queue instead of failing. |
+| `SHARED_MONTHLY_CALLS` | | `300` | AI calls each student may make on the shared key per month. Their own key is never limited. |
+| `ANTHROPIC_API_KEY` | | — | Alternative shared provider. |
+| `ANTHROPIC_MODEL` | | `claude-haiku-4-5` | Model on the Anthropic path. |
+| `DISQUS_API_KEY` | | — | Adds NUSMods student reviews to module profiles. |
+| `MS_CLIENT_ID` | | — | Microsoft Entra app id for the optional Outlook mail view. The Mail tab is hidden without it. |
+| `POLL_INTERVAL_MS` | | `300000` | How often the worker syncs. |
 
-The OpenAI-compatible path does not support PDF document inputs, so when it is selected the worker
-extracts text from candidate PDFs locally instead of sending the file. The Anthropic path sends
-the PDF.
+Students can also add their own key, and a fallback provider, on the **Account** page. Both are
+encrypted and only ever sent to the endpoint they entered.
 
-### Install and run
+</details>
 
-```bash
-npm install
-npm run dev      # web, http://localhost:3000
-npm run worker   # in a second terminal: Canvas/Outlook pollers and LLM enrichment
+## How it works
+
+```mermaid
+flowchart LR
+  subgraph Sources
+    C[Canvas API]
+    N[NUSMods]
+    O[Outlook<br/><i>optional</i>]
+  end
+  subgraph OpenPapr
+    W["Worker<br/>sync · guides · planner"]
+    DB[(SQLite)]
+    Web["Next.js app<br/>pages · API · ICS feed"]
+  end
+  L{{"LLM<br/>yours or shared"}}
+  C --> W
+  N --> W
+  O --> W
+  W <--> DB
+  Web <--> DB
+  W <--> L
+  Web <--> L
+  Web --> B["Browser / phone<br/>PWA, offline guides"]
+  Web --> K[Calendar apps]
 ```
 
-There is no separate migration step. `createDb()` runs the Drizzle migrations in `drizzle/` on
-startup and creates the database file and its parent directory if missing. If you change
-`src/db/schema.ts`, generate a new migration with `npx drizzle-kit generate` and commit it.
+- **Worker** (`src/worker`). Every few minutes it syncs each student's Canvas, then works through
+  the AI jobs in order of urgency: weighting extraction, deadline extraction, task planning, guide
+  planning and writing, and the weekly plan. Every job is fail-open: if the model is down, the
+  rules-only path still produces tasks and dates.
+- **Guides** (`src/worker/guides.ts`, `src/enrich/guide-plan.ts`). Decks are fingerprinted by their
+  text, so `L5.pdf` and `L5 (updated).pdf` count as one deck. A plan maps decks to topics, and each
+  topic is rebuilt only when its inputs change.
+- **Planner** (`src/worker/tasks.ts`). It reads every signal for a module (Canvas work, announcements,
+  staff replies, planner notes, obligation lines from slides, weighting, the exam date and the
+  student's corrections) and merges the result into existing tasks without touching steps the
+  student has started.
+- **Web** (`src/app`). Server components render everything, dates are formatted once in Singapore
+  time, and a service worker (`public/sw.js`) keeps guides and slides readable offline.
 
-To look at the UI without connecting anything real:
-
-```bash
-npx tsx scripts/seed-demo.ts   # writes a synthetic fixture to data/demo.db
-DATABASE_PATH=data/demo.db npm run dev
-```
-
-### Connecting Canvas
-
-Generate a personal access token in Canvas under Account → Settings → New Access Token. There is
-no UI or CLI for storing it yet — you insert the `users` row and the encrypted token yourself, for
-example with a short `npx tsx -e` script that uses `encrypt()` from
-[`src/lib/crypto.ts`](src/lib/crypto.ts) and `createDb()` from [`src/db/client.ts`](src/db/client.ts).
-Institutions commonly cap token lifetime (90 days is typical), so expect to rotate it.
-
-### Connecting Outlook (optional)
-
-```bash
-npx tsx scripts/connect-microsoft.ts --user 1
-```
-
-It prints a device code and a URL. Sign in in any browser and grant `Mail.Read` and
-`offline_access`. The refresh token is stored encrypted and refreshed by the worker on every poll.
-This requires `MS_CLIENT_ID` and a tenant that permits the consent; if your institution blocks it,
-skip this — the Canvas side works on its own.
-
-The worker only touches a source once its token is present, so it is safe to start before either
-connection exists.
-
-### Tests
-
-```bash
-npm test                  # vitest, unit tests under src/**/*.test.ts
-npx playwright install    # once
-npx playwright test       # e2e: seeds the demo fixture, builds, drives a real browser on :3777
-```
-
-The Playwright config builds the app and serves it on port 3777 against `data/demo.db` with a
-throwaway `SECRET_KEY` and password, so it does not touch your real database.
-
-## How study-guide generation works today
-
-Honestly: it is a pipeline you drive by hand, not a button in the app. The rendering half is fully
-built; the authoring half is not yet a job.
-
-1. **Cache the decks.** For PowerPoint courses, download and convert every deck to PDF:
-
-   ```bash
-   npx tsx scripts/cache-decks.ts CS1010 --user 1
-   ```
-
-   This pulls `.pptx`/`.ppt` files from the Canvas course, converts each with headless LibreOffice,
-   and writes them to `data/deck-cache/<canvasCourseId>/<stem>.pdf`. Set `SOFFICE_BIN` if your
-   LibreOffice binary is not at the macOS default path. PDF-native courses need no caching — decks
-   are fetched from Canvas on demand.
-
-2. **Generate the guide.** This step happens outside the app: the deck PDFs are fed to a model that
-   writes one Markdown file per module, chaptered with `## ` headings, citing slides with
-   `[…](slide:<deck-stem>#<page>)` and embedding figures with `![…](slide-img:<deck-stem>#<page>)`.
-   There is no in-app job, no queue and no prompt checked into this repo yet — that is the single
-   biggest gap between what the project is and what it does. See the roadmap.
-
-3. **Import it.**
-
-   ```bash
-   npx tsx scripts/import-study-guides.ts --dir ./guides --user 1
-   ```
-
-   Files are matched to modules by the code that prefixes the filename
-   (`CS1010-software-security.md` → module `CS1010`). Import is idempotent: re-running replaces
-   each guide in place. The first italic line of the file (`*Prepared from 8 decks, 351 slides.*`)
-   is stored as the provenance note shown under the guide.
-
-4. **Read it.** The guide appears on the module page and in `/study`.
-   [`src/lib/study-chapters.ts`](src/lib/study-chapters.ts) splits it into a preamble plus one tab
-   per `## ` chapter and builds an outline from the `### ` subheadings;
-   [`src/components/StudyGuide.tsx`](src/components/StudyGuide.tsx) renders it, turning `slide:`
-   links into citation chips (`/api/modules/:id/deck` proxies the PDF with a `#page=N` fragment),
-   `slide-img:` images into server-rendered PNGs (`/api/modules/:id/slide` renders the page with
-   `pdf-parse`), and ```` ```mermaid ```` blocks into diagrams. Both routes resolve the cached
-   converted PDF first and fall back to fetching the PDF from Canvas.
-
-Both deck routes check that the module belongs to the requesting user before serving bytes.
-
-## Project layout
+<details>
+<summary><b>Project layout</b></summary>
 
 ```
-src/app/            Next.js App Router pages (/, /modules/[id], /study, /mail, /login) and API routes
-src/components/     React components; StudyGuide.tsx and MermaidDiagram.tsx are the guide renderer
-src/connectors/     canvas/ and graph/ — HTTP clients plus pure normalizers, tested separately
-src/enrich/         LLM-backed enrichment: mail scoring, weightage extraction, deadline extraction
-src/db/             Drizzle schema, migration-applying client, repository functions
-src/server/         Server-only helpers: auth, overview assembly, deck resolution
-src/lib/            Pure utilities: env schema, crypto, PDF text/render, slide citations, chapters
-src/worker/         The background poller (npm run worker)
-drizzle/            Generated SQL migrations, applied automatically on startup
-scripts/            One-off operator scripts: cache-decks, import-study-guides, connect-microsoft, seed-demo
-e2e/                Playwright smoke test
-docs/               Design spec, implementation plan, feasibility spike notes
+src/app/          Pages and API routes (App Router)
+src/components/   UI: home widgets, StudyGuide, SlidePanel, tasks, Papi, search
+src/connectors/   Canvas, Microsoft Graph and NUSMods clients plus pure normalisers
+src/enrich/       LLM jobs: planner, guide planning and writing, weighting, profiles
+src/worker/       The background loop
+src/server/       Server-only logic: sessions, tasks, search, calendar, quizzes, usage
+src/db/           Drizzle schema and repositories
+src/lib/          Pure utilities: env, crypto, ICS, slide citations, dates
+drizzle/          SQL migrations, applied on startup
+scripts/          Operator scripts: demo seeds, set-password, deck cache, Outlook connect
+e2e/              Playwright smoke tests
 ```
 
-Data model, in one line each: `users` holds encrypted per-person tokens; `modules` is one Canvas
-course; `components` is one graded item with a weight and a provenance `source`; `items` is the
-unified feed of announcements, assignments, emails, events and deadlines; `study_guides` holds one
-Markdown document per module; `sync_runs` records every poll for the staleness badge.
+</details>
 
-## Status and limits
+## Privacy and security
 
-What works: Canvas sync, LLM weightage extraction with quoted evidence, the module dashboard,
-deadline extraction and classification, optional Outlook triage, the study-guide reader with slide
-citations, embedded slide figures and Mermaid diagrams, and deck conversion for PowerPoint courses.
+- Each student signs in with **their own Canvas token**. OpenPapr only ever sees what that student
+  can see.
+- Canvas tokens, AI keys and Outlook refresh tokens are **encrypted at rest** (AES-256-GCM).
+  Passwords are hashed with scrypt.
+- Calendar feeds use an **unguessable per-student link** that can be reset or turned off.
+- **Download my data** gives a full JSON export with every secret removed. **Delete my account**
+  removes every row.
+- When AI is on, slide text, announcements and syllabus content are sent to the model provider the
+  student or host configured. That trade-off is intended, and the app tells students about it.
 
-What does not:
-
-- **One user.** The schema threads `userId` through every table, but every web page and API route
-  hardcodes user `1` (grep for `TODO(phase-3)`). Authentication is one shared `APP_PASSWORD`, not
-  accounts.
-- **No Library.** There is no publish action, no fork, no cross-user read path, and no notion of a
-  course-scoped collection. Guides are rows in your own database.
-- **No dedupe.** Nothing hashes a deck or reuses another student's generation.
-- **Generation is out-of-band.** Step 2 above is manual. Getting it into the worker as a real job,
-  with the prompt in this repo, is the next substantial piece of work.
-- **Canvas-shaped assumptions.** Module codes are parsed from Canvas course names, and weightage
-  heuristics look for prelim/admin-looking decks. Both were tuned against one institution's Canvas
-  and will need adjusting elsewhere.
-- **Your material goes to an LLM.** Syllabus text, email bodies and slide content are sent to
-  whichever provider you configure. That is a deliberate, disclosed trade; there is no local-model
-  path today.
-
-This is self-hosted software with no institutional affiliation or endorsement. You are responsible
-for whether your use of your own course material complies with your institution's rules.
+OpenPapr is an independent project, not affiliated with or endorsed by any university or by
+Instructure. Check that your use of your own course material complies with your institution's
+rules.
 
 ## Roadmap
 
-The milestones are ordered by what unblocks what, not by size.
+- [x] Canvas sync: assignments, quizzes, announcements, discussions, planner notes, files
+- [x] Multi-student accounts (invite code and Canvas token, then username and password)
+- [x] Automatic study guides with deck version detection and slide citations
+- [x] Smart tasks with daily steps, quiz-series anticipation and planner feedback
+- [x] Search, calendar feed, practice quizzes, offline guides, PWA
+- [ ] **Course libraries**: share a generated guide with classmates in the same Canvas course, so
+      a cohort pays for generation once
+- [ ] **Grade planner**: "what do I need on the final?" from the weighting and known scores
+- [ ] **Beyond NUS**: make the NUSMods and timezone assumptions configurable per institution
+- [ ] **Local models**: a first-class Ollama setup guide and smaller prompts tuned for 8B models
 
-1. **In-app generation.** Move guide authoring into the worker as a queued job: deck discovery,
-   conversion, prompting, citation validation (every `slide:` target must resolve to a real page),
-   and write-through to `study_guides`. Removes the manual step and makes everything after it
-   possible.
-2. **Accounts.** Replace the shared password with real sessions, resolve `userId` from the session
-   instead of the hardcoded `1`, and add a Canvas connect flow in the UI so onboarding is not a
-   `tsx -e` script.
-3. **Deck identity and dedupe.** Content-hash each deck, key generated guides on the set of deck
-   hashes rather than on the module row, and reuse an existing generation when a second student in
-   the same course presents the same decks.
-4. **The Library.** Per-course collections gated on Canvas enrolment, an explicit publish action,
-   read access for classmates, and forking a published guide into your own editable copy with
-   attribution preserved.
-5. **Grade planner.** A what-if view over `components` and known scores — already sketched in the
-   design spec, deferred behind the above.
-
-Design documents live in [`docs/`](docs/): the spec describes the data model and the fail-open
-enrichment contract, and the plan is a task-by-task TDD breakdown of the phases that are built.
-They predate the OpenPapr framing and still use the project's earlier name in places.
+Have an idea? [Open an issue](https://github.com/mjykxz17/OpenPapr/issues).
 
 ## Contributing
 
-Issues and pull requests are welcome, with the caveat that the project is early enough that
-interfaces change without ceremony.
+Pull requests are welcome. The project moves quickly, so for anything large please open an issue
+first.
 
-- Tests come first. Unit tests sit next to the module they cover (`foo.ts` / `foo.test.ts`) and run
-  under Vitest; the connectors are split into an HTTP client and a pure normalizer so the
-  normalizer can be tested without a network.
-- Both gates must pass before a pull request: `npm test` and `npx playwright test`.
-- **Never commit real data.** Fixtures must be hand-authored and synthetic —
-  [`scripts/seed-demo.ts`](scripts/seed-demo.ts) is the model to follow. Do not capture live API
-  responses into `tests/fixtures/`: real Canvas payloads carry course UUIDs and calendar-feed URLs
-  that are unauthenticated capability tokens, other people's names, and instructor-authored course
-  material. Use `example.edu` addresses and invented names.
-- `data/`, `.env*` and any token file are gitignored. Keep it that way.
-- Do not put provider hostnames, model ids from private endpoints, or anything about where a key
-  came from into committed files, including documentation.
+```bash
+npm test                                 # Vitest: 500+ unit tests next to the code they cover
+npx playwright test                      # e2e: seeds a fixture, builds, drives a real browser
+npx tsc --noEmit                         # strict types
+```
 
-## Licence
+- **Tests first.** `foo.ts` sits next to `foo.test.ts`. Connectors are split into an HTTP client
+  and a pure normaliser, so the normaliser can be tested without a network.
+- **Never commit real data.** Fixtures are hand-written and fictional (see
+  [`scripts/seed-showcase.ts`](scripts/seed-showcase.ts)). Real Canvas payloads contain capability
+  URLs, other people's names and lecturers' material.
+- **Schema changes:** edit `src/db/schema.ts`, run `npx drizzle-kit generate`, and commit the
+  migration.
 
-Licensed under the GNU Affero General Public License, version 3 or later. The full text is in
-[`LICENSE`](LICENSE).
+## License
 
-<!-- TODO before first public release:
-     - set the copyright holder line
-     - add THIRD-PARTY-NOTICES.md: caniuse-lite (CC-BY-4.0, attribution is a licence condition),
-       sharp's optional platform binaries bundling libvips (LGPL-3.0-or-later), and a pointer to
-       package-lock.json for full dependency resolution.
-     - confirm AGPL vs a permissive licence while sole copyright holder; requires a contributor
-       licence agreement from the first external pull request if the option is to stay open.
--->
+[GNU AGPL v3.0 or later](LICENSE). If you run a modified OpenPapr for other people, you must share
+your changes with them. LibreOffice is called as an external program and is not distributed with
+this project.
 
-LibreOffice is invoked as an external program and is neither vendored nor distributed by this
-project; install it yourself if you need PowerPoint conversion.
+<div align="center">
+<br />
+<img src="public/brand/papi.svg" alt="" width="40" />
+<br />
+<sub>Made by students who were tired of finding out about quizzes the night before.</sub>
+</div>

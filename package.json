@@ -11,7 +11,8 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
-    "worker": "tsx src/worker/index.ts"
+    "worker": "tsx src/worker/index.ts",
+    "demo:seed": "tsx scripts/seed-showcase.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
