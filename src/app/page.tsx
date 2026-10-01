@@ -27,7 +27,11 @@ export default async function Home() {
   const db = getDb();
   const week = weeklyPlanView(db, userId, now);
   const tv = tasksView(db, userId, now);
-  const todaySteps = { count: tv.today.length, minutes: tv.todayMinutes };
+  const layout = parseLayout(user?.homeLayoutJson);
+  // Today's steps are said once: by the Today widget when it is on the home
+  // screen, otherwise by the This week card.
+  const todayShown = layout.some((s) => s.id === "today" && !s.hidden);
+  const todaySteps = todayShown ? null : { count: tv.today.length, minutes: tv.todayMinutes };
   const moduleIdByCode = Object.fromEntries(overview.modules.map((m) => [m.code.toUpperCase(), m.id]));
   const codeOf = (id: number | null) => overview.modules.find((m) => m.id === id)?.code ?? null;
   // Next up: dated Canvas work and the quizzes the planner expects, soonest first.
@@ -80,7 +84,7 @@ export default async function Home() {
       )}
 
       <HomeBoard
-        initial={parseLayout(user?.homeLayoutJson)}
+        initial={layout}
         views={views}
         title={
           <div className="flex flex-col gap-1">

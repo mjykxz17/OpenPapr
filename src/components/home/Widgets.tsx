@@ -39,8 +39,8 @@ function inDays(ms: number, now: number): string {
 }
 
 // --- This week ---------------------------------------------------------------
-export function WeekWidget({ plan, today, size }: { plan: WeeklyPlan | null; today: { count: number; minutes: number }; size: "W" | "L" }) {
-  const todayLine = today.count ? `Today: ${today.count} step${today.count === 1 ? "" : "s"} · ${fmtMinutes(today.minutes)}` : "Nothing scheduled today";
+export function WeekWidget({ plan, today, size }: { plan: WeeklyPlan | null; today: { count: number; minutes: number } | null; size: "W" | "L" }) {
+  const todayLine = !today ? null : today.count ? `Today: ${today.count} step${today.count === 1 ? "" : "s"} · ${fmtMinutes(today.minutes)}` : "Nothing scheduled today";
   return (
     <WidgetCard title="This week" href="/tasks">
       {plan ? (
@@ -58,7 +58,7 @@ export function WeekWidget({ plan, today, size }: { plan: WeeklyPlan | null; tod
           ))}
         </ul>
       )}
-      <p className="mt-auto pt-2 text-[13px] text-ink-2">{todayLine}</p>
+      {todayLine && <p className="mt-auto pt-2 text-[13px] text-ink-2">{todayLine}</p>}
     </WidgetCard>
   );
 }

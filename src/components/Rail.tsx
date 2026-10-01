@@ -62,7 +62,8 @@ const NAV = [
 // The rail is the only persistent chrome, so it also says where you are:
 // the current section's icon sits on an accent tint and carries
 // aria-current. Targets are 44px — the minimum a finger can hit.
-export function Rail() {
+export function Rail({ showMail = true }: { showMail?: boolean }) {
+  const nav = NAV.filter((n) => showMail || n.href !== "/mail");
   const pathname = usePathname();
   // A module's guide belongs to Guides; the rest of a module page to Home.
   const inGuide = /^\/modules\/[^/]+\/guide/.test(pathname);
@@ -73,7 +74,7 @@ export function Rail() {
     {/* On a phone the rail becomes a tab bar along the bottom, where a thumb
         reaches. Appearance and sign-out move to the Account tab. */}
     <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
-      {[...NAV, { href: "/account", label: "Account", Icon: AccountIcon }].map(({ href, label, Icon }) => {
+      {[...nav, { href: "/account", label: "Account", Icon: AccountIcon }].map(({ href, label, Icon }) => {
         const active = isActive(href);
         return (
           <Link key={href} href={href} aria-current={active ? "page" : undefined}
@@ -88,7 +89,7 @@ export function Rail() {
       <Link href="/" title="OpenPapr" aria-label="OpenPapr home" className="mb-2 flex h-11 w-11 items-center justify-center rounded-md transition-transform hover:-translate-y-0.5">
         <PapiMark size={30} />
       </Link>
-      {NAV.map(({ href, label, Icon }) => {
+      {nav.map(({ href, label, Icon }) => {
         const active = isActive(href);
         return (
           <Link

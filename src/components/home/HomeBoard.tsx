@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { DndContext, PointerSensor, KeyboardSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -12,8 +13,8 @@ import { DEFAULT_LAYOUT, SIZE_CLASS, SIZE_NAMES, WIDGETS, type Size, type Slot, 
 // every widget; this only decides which one shows where.
 export type WidgetViews = Record<WidgetId, Partial<Record<Size, ReactNode>>>;
 
-function save(layout: Slot[]) {
-  void fetch("/api/home-layout", {
+function save(layout: Slot[]): Promise<unknown> {
+  return fetch("/api/home-layout", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ layout }),
   }).catch(() => {});
 }
@@ -58,7 +59,11 @@ export function HomeBoard({ initial, views, title, actions }: { initial: Slot[];
   const visible = layout.filter((s) => !s.hidden);
   const hidden = layout.filter((s) => s.hidden);
 
-  const update = (next: Slot[]) => { setLayout(next); save(next); };
+  // Widgets say different things depending on what else is on screen (the
+  // week card drops its "Today" line when the Today widget is there), so the
+  // server re-renders them once the layout is saved.
+  const router = useRouter();
+  const update = (next: Slot[]) => { setLayout(next); void save(next).then(() => router.refresh()); };
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     if (!over || active.id === over.id) return;
     const from = layout.findIndex((s) => s.id === active.id);
@@ -66,7 +71,7 @@ export function HomeBoard({ initial, views, title, actions }: { initial: Slot[];
     update(arrayMove(layout, from, to));
   };
   const patch = (id: WidgetId, change: Partial<Slot>) => update(layout.map((s) => (s.id === id ? { ...s, ...change } : s)));
-  const reset = () => { setLayout(DEFAULT_LAYOUT.map((s) => ({ ...s }))); void fetch("/api/home-layout", { method: "DELETE" }).catch(() => {}); };
+  const reset = () => { setLayout(DEFAULT_LAYOUT.map((s) => ({ ...s }))); void fetch("/api/home-layout", { method: "DELETE" }).then(() => router.refresh()).catch(() => {}); };
 
   return (
     <div className="flex flex-col gap-3">

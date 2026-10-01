@@ -30,7 +30,8 @@ export function fmtMinutes(total: number): string {
 // steps, which live on the Tasks page.
 export function WeekPlan({ plan, status, moduleIdByCode, hasModel, todaySteps }: {
   plan: WeeklyPlan | null; status: Status; moduleIdByCode: Record<string, number>; hasModel: boolean;
-  todaySteps: { count: number; minutes: number };
+  // null when the Today widget is on the home screen and says it already.
+  todaySteps: { count: number; minutes: number } | null;
 }) {
   const code = (c: string) => {
     const id = moduleIdByCode[c.toUpperCase()];
@@ -64,13 +65,13 @@ export function WeekPlan({ plan, status, moduleIdByCode, hasModel, todaySteps }:
             ))}
           </div>
         )}
-        <Link href="/tasks" className="group inline-flex items-baseline gap-1.5 self-start text-[13px] text-ink-2 hover:text-accent">
+        {todaySteps && <Link href="/tasks" className="group inline-flex items-baseline gap-1.5 self-start text-[13px] text-ink-2 hover:text-accent">
           {todaySteps.count
             ? <span>Today: <span className="font-medium text-ink group-hover:text-accent">{todaySteps.count} step{todaySteps.count > 1 ? "s" : ""}</span> · {fmtMinutes(todaySteps.minutes)}</span>
             : <span>Nothing scheduled for today</span>}
           <span aria-hidden>→</span>
           <span className="text-ink-3 group-hover:text-accent">Tasks</span>
-        </Link>
+        </Link>}
       </div>
     </section>
   );
