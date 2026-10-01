@@ -143,9 +143,8 @@ on your workload, your major and your past courses.
 <tr>
 <td valign="top">
 
-**🐾 Papi.** A small paper buddy who answers *"when's my next quiz?"* from your own data, adds
-reminders, and is happy to be dragged around the screen.
-
+**💬 Ask your material.** Papi answers questions from your own slides, guides, notes and
+announcements. Every claim carries a numbered source that opens the exact slide.
 </td>
 <td valign="top">
 
@@ -258,6 +257,7 @@ fly deploy
 | `OPENAI_COMPAT_API_KEY` | | — | Key for that endpoint. |
 | `OPENAI_COMPAT_MODEL` | | — | Model id on that endpoint. |
 | `OPENAI_COMPAT_RPM` | | unlimited | Requests per minute allowed on the shared key. Extra requests wait in a queue instead of failing. |
+| `EMBED_MODEL` | | host default | Embedding model on the shared provider, used to search your material by meaning. Without one, Papi falls back to word search. |
 | `SHARED_MONTHLY_CALLS` | | `300` | AI calls each student may make on the shared key per month. Their own key is never limited. |
 | `ANTHROPIC_API_KEY` | | — | Alternative shared provider. |
 | `ANTHROPIC_MODEL` | | `claude-haiku-4-5` | Model on the Anthropic path. |

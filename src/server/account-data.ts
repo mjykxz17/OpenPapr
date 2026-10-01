@@ -2,7 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import {
   components, courseHistory, fileHints, files, guidePlans, guideQuizzes, guideRuns, guideTopics, items, llmUsage,
-  moduleProfiles, modules, petChats, slideNotes, studyGuides, syncRuns, taskFeedback, taskPlans, tasks, users, weeklyPlans,
+  moduleProfiles, modules, passages, petChats, slideNotes, studyGuides, syncRuns, taskFeedback, taskPlans, tasks, users, weeklyPlans,
 } from "@/db/schema";
 
 // The student's data, theirs to take or to remove. Export leaves out every
@@ -48,7 +48,7 @@ export function deleteAccount(db: Db, userId: number): void {
       }
       tx.delete(files).where(inArray(files.moduleId, ids)).run();
     }
-    for (const t of [taskFeedback, tasks, items, guideRuns, slideNotes, weeklyPlans, courseHistory, petChats, llmUsage, syncRuns] as const) {
+    for (const t of [passages, taskFeedback, tasks, items, guideRuns, slideNotes, weeklyPlans, courseHistory, petChats, llmUsage, syncRuns] as const) {
       tx.delete(t).where(eq(t.userId, userId)).run();
     }
     if (ids.length) tx.delete(modules).where(inArray(modules.id, ids)).run();

@@ -1,11 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { PapiFace, type Mood } from "./PapiFace";
 
 type Nudges = { reminders: string[]; quips: string[]; smart: boolean };
-type Msg = { role: "user" | "assistant"; content: string; at?: number };
+type Source = { n: number; kind: string; title: string; code: string; moduleId: number; href: string; slide: { deck: string; page: number } | null };
+type Msg = { role: "user" | "assistant"; content: string; at?: number; sources?: Source[] };
+
+// Anything can open Papi on a question: the guide's "Ask" button sends this.
+export const OPEN_ASK = "openpapr:ask";
+// Asks the page to show a slide in its slide panel; the guide sets `handled`.
+export const SHOW_SLIDE = "openpapr:slide";
+export type ShowSlideDetail = { moduleId: number; deck: string; page: number; handled: boolean };
 type Summary = { id: number; title: string; updatedAt: number; count: number; preview: string };
 
 const SIZES = { S: 44, M: 56, L: 76, XL: 104 } as const;
@@ -38,6 +45,11 @@ const ago = (ms: number) => {
 // 1 to 7am, and opens a chat — with saved conversations — when clicked.
 export function Papi() {
   const router = useRouter();
+  const pathname = usePathname();
+  // On a module's pages Papi searches that module's material, unless told to search everything.
+  const pageModule = Number(/^\/modules\/(\d+)/.exec(pathname ?? "")?.[1] ?? 0) || null;
+  const [everything, setEverything] = useState(false);
+  const scope = everything ? null : pageModule;
   const [ready, setReady] = useState(false);
   const [mood, setMood] = useState<Mood>("idle");
   const [anim, setAnim] = useState<"" | "hop" | "spin" | "bounce">("");
@@ -256,6 +268,29 @@ export function Papi() {
     setOpen((o) => !o);
   }
 
+  // A cited source: a slide opens in the guide's slide panel when the guide
+  // is on screen, otherwise the guide opens at that slide.
+  const openSource = useCallback((src: Source) => {
+    if (src.slide) {
+      const detail: ShowSlideDetail = { moduleId: src.moduleId, deck: src.slide.deck, page: src.slide.page, handled: false };
+      window.dispatchEvent(new CustomEvent(SHOW_SLIDE, { detail }));
+      if (detail.handled) return;
+    }
+    router.push(src.href);
+  }, [router]);
+
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      const d = (e as CustomEvent<{ prompt?: string } | undefined>).detail;
+      setEverything(false);
+      setOpen(true);
+      setView("chat");
+      if (d?.prompt) setDraft(d.prompt);
+    };
+    window.addEventListener(OPEN_ASK, onAsk);
+    return () => window.removeEventListener(OPEN_ASK, onAsk);
+  }, []);
+
   // --- chat and sessions ------------------------------------------------------
   async function ask(text: string) {
     const q = text.trim();
@@ -266,10 +301,10 @@ export function Papi() {
     setBusy(true);
     setMood("think");
     try {
-      const res = await fetch("/api/pet/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: q, sessionId }) });
-      const body = (await res.json().catch(() => null)) as { reply?: string; sessionId?: number; added?: boolean } | null;
+      const res = await fetch("/api/pet/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: q, sessionId, moduleId: scope }) });
+      const body = (await res.json().catch(() => null)) as { reply?: string; sessionId?: number; added?: boolean; sources?: Source[] } | null;
       if (body?.added) router.refresh();
-      setMessages((m) => [...m, { role: "assistant", content: body?.reply ?? "Hmm, I couldn't reach my notes just now. Try again in a moment?", at: Date.now() }]);
+      setMessages((m) => [...m, { role: "assistant", content: body?.reply ?? "Hmm, I couldn't reach my notes just now. Try again in a moment?", at: Date.now(), sources: body?.sources }]);
       if (body?.sessionId) { setSessionId(body.sessionId); store.set(KEYS.session, String(body.sessionId)); setSessions(null); }
     } catch {
       setMessages((m) => [...m, { role: "assistant", content: "I lost the connection for a second there. Try again?" }]);
@@ -369,7 +404,7 @@ export function Papi() {
                 {view === "history" ? "Past chats" : view === "settings" ? "Papi settings" : "Papi"}
               </p>
               {view === "chat" && (
-                <p className="truncate text-[11.5px] text-ink-3">{nudges?.smart === false ? "Basic mode · add an AI key for smarter answers" : "Answers from your Canvas, tasks and courses"}</p>
+                <p className="truncate text-[11.5px] text-ink-3">{nudges?.smart === false ? "Basic mode · add an AI key for smarter answers" : "Answers from your own material, with sources"}</p>
               )}
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
@@ -440,7 +475,7 @@ export function Papi() {
               <div ref={listRef} className="flex flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-3" aria-live="polite">
                 {messages.length === 0 && (
                   <div className="flex flex-col gap-2">
-                    <p className="text-[14px] leading-[1.5] text-ink-2">Hi! Ask me about dates, quizzes, what&apos;s due, or what a lecturer said — or say “remind me to …” and I&apos;ll add a task. I only know what Canvas told me, so I won&apos;t make things up.</p>
+                    <p className="text-[14px] leading-[1.5] text-ink-2">Hi! Ask me what&apos;s due, or anything about your slides, guides and announcements. I answer from your own material and show where each answer came from. Say “remind me to …” and I&apos;ll add a task.</p>
                     <div className="flex flex-wrap gap-1.5">
                       {SUGGESTIONS.map((s) => (
                         <button key={s} type="button" onClick={() => (s.includes("…") ? setDraft("Remind me to ") : ask(s))} className="rounded-full border border-line px-2.5 py-1 text-[12.5px] text-ink-2 hover:border-ink-3 hover:text-ink">{s}</button>
@@ -450,13 +485,34 @@ export function Papi() {
                 )}
                 {messages.map((m, i) => (
                   <div key={i} className={m.role === "user" ? "max-w-[85%] self-end rounded-[12px] rounded-br-[4px] bg-ink px-3 py-2 text-[14px] leading-[1.45] text-panel" : "max-w-[92%] self-start whitespace-pre-line text-[14px] leading-[1.55] text-ink"}>
-                    {m.content}
+                    {m.role === "assistant" && m.sources?.length ? <Cited text={m.content} sources={m.sources} onOpen={openSource} /> : m.content}
+                    {m.role === "assistant" && m.sources && m.sources.length > 0 && (
+                      <ol className="mt-2 flex flex-col gap-1 border-t border-line pt-2 text-[12.5px] leading-snug">
+                        {m.sources.map((src) => (
+                          <li key={src.n}>
+                            <button type="button" onClick={() => openSource(src)} className="flex w-full items-baseline gap-1.5 text-left text-ink-2 hover:text-accent">
+                              <span className="shrink-0 rounded bg-accent-soft px-1 text-[11px] font-semibold tabular-nums text-accent">{src.n}</span>
+                              <span className="min-w-0 truncate">{src.code ? `${src.code} · ` : ""}{src.title}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
                   </div>
                 ))}
                 {busy && <div className="self-start text-[13px] text-ink-3"><span className="papi-dots">Checking my notes</span></div>}
               </div>
-              <form className="flex items-center gap-2 border-t border-line px-3 py-2.5" onSubmit={(e) => { e.preventDefault(); void ask(draft); }}>
-                <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={500} placeholder="When is the next quiz for 4238?"
+              {pageModule && (
+                <div className="flex items-center gap-2 border-t border-line px-3 pt-2 text-[12px] text-ink-3">
+                  <span>Searching</span>
+                  <div role="group" aria-label="Which material to search" className="flex rounded-full border border-line p-0.5">
+                    <button type="button" aria-pressed={!everything} onClick={() => setEverything(false)} className={`rounded-full px-2 py-0.5 ${!everything ? "bg-ink text-panel" : "hover:text-ink"}`}>this module</button>
+                    <button type="button" aria-pressed={everything} onClick={() => setEverything(true)} className={`rounded-full px-2 py-0.5 ${everything ? "bg-ink text-panel" : "hover:text-ink"}`}>everything</button>
+                  </div>
+                </div>
+              )}
+              <form className={`flex items-center gap-2 px-3 py-2.5 ${pageModule ? "" : "border-t border-line"}`} onSubmit={(e) => { e.preventDefault(); void ask(draft); }}>
+                <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)} maxLength={500} placeholder={pageModule && !everything ? "Ask about this module…" : "When is the next quiz for 4238?"}
                   className="h-9 min-w-0 flex-1 rounded-md border border-line-2 bg-surface px-3 text-[14px] text-ink outline-none placeholder:text-ink-3 focus:border-ink-3" />
                 <button type="submit" disabled={busy || !draft.trim()} className="h-9 rounded-md bg-ink px-3 text-[13px] font-medium text-panel disabled:opacity-40">Ask</button>
               </form>
@@ -473,7 +529,8 @@ export function Papi() {
         </button>
       )}
 
-      <button ref={petRef} type="button"
+      {/* On a phone the chat is a sheet over the page; the pet would sit on its Ask button. */}
+      {!(phone && open) && <button ref={petRef} type="button"
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
         onPointerCancel={() => { drag.current = null; setDragging(false); setTilt(0); }}
         onPointerEnter={onEnter} onPointerLeave={onLeave} onKeyDown={onKey}
@@ -486,7 +543,28 @@ export function Papi() {
           <PapiFace mood={open && mood === "sleep" ? "idle" : mood} size={px} gaze={dragging ? null : gaze} blush={blush} />
         </span>
         {asleep && !open && !dragging && <span aria-hidden className="papi-z absolute -top-2 right-0 text-[13px] font-semibold text-ink-3">z<span className="text-[10px]">z</span></span>}
-      </button>
+      </button>}
     </div>
+  );
+}
+
+// An answer with its [n] citations turned into small buttons that open the source.
+function Cited({ text, sources, onOpen }: { text: string; sources: Source[]; onOpen: (s: Source) => void }) {
+  const byN = new Map(sources.map((s) => [s.n, s]));
+  const parts = text.split(/(\[\d+\])/g);
+  return (
+    <>
+      {parts.map((p, i) => {
+        const m = /^\[(\d+)\]$/.exec(p);
+        const src = m ? byN.get(Number(m[1])) : undefined;
+        if (!src) return <span key={i}>{p}</span>;
+        return (
+          <button key={i} type="button" onClick={() => onOpen(src)} title={`${src.code ? `${src.code} · ` : ""}${src.title}`}
+            className="mx-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded bg-accent-soft px-1 align-[1px] text-[11px] font-semibold tabular-nums text-accent hover:bg-accent hover:text-on-accent">
+            {src.n}
+          </button>
+        );
+      })}
+    </>
   );
 }

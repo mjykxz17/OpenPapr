@@ -99,11 +99,11 @@ export function userLlmSlot(user: UserLlmColumns, slot: "primary" | "fallback", 
     : provider(user.llmFallbackBaseUrl, user.llmFallbackModel, user.llmFallbackKeyEnc, user.llmFallbackRpm, secretHex, user.llmFallbackExtraJson);
 }
 
-type SharedLlmEnv = { OPENAI_COMPAT_BASE_URL?: string; OPENAI_COMPAT_API_KEY?: string; OPENAI_COMPAT_MODEL: string; OPENAI_COMPAT_RPM?: number };
+type SharedLlmEnv = { OPENAI_COMPAT_BASE_URL?: string; OPENAI_COMPAT_API_KEY?: string; OPENAI_COMPAT_MODEL: string; OPENAI_COMPAT_RPM?: number; EMBED_MODEL?: string };
 
 export function sharedLlmConfig(env: SharedLlmEnv): CompatConfig | null {
   return env.OPENAI_COMPAT_BASE_URL && env.OPENAI_COMPAT_API_KEY
-    ? { baseUrl: env.OPENAI_COMPAT_BASE_URL, apiKey: env.OPENAI_COMPAT_API_KEY, model: env.OPENAI_COMPAT_MODEL, rpm: env.OPENAI_COMPAT_RPM ?? null }
+    ? { baseUrl: env.OPENAI_COMPAT_BASE_URL, apiKey: env.OPENAI_COMPAT_API_KEY, model: env.OPENAI_COMPAT_MODEL, rpm: env.OPENAI_COMPAT_RPM ?? null, embedModel: env.EMBED_MODEL ?? null }
     : null;
 }
 

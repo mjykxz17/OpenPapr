@@ -1,4 +1,4 @@
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { blob, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -410,3 +410,28 @@ export const petChats = sqliteTable("pet_chats", {
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 }, (t) => [index("pet_chats_user").on(t.userId, t.updatedAt)]);
+
+// The student's material cut into passages for "ask your material": one slide
+// page, one guide section, one note, one announcement each. `version` says
+// which copy of the source it was cut from, so a deck is only re-read when it
+// changes. The embedding is a Float32 vector from `embedModel`; a passage
+// without one is still found by word search.
+export const passages = sqliteTable("passages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  kind: text("kind", { enum: ["slide", "guide", "note", "announcement"] }).notNull(),
+  sourceKey: text("source_key").notNull(),     // "slide:<fileId>:<page>", "guide:<slug>", "note:<deck>:<page>", "ann:<itemId>"
+  version: text("version"),
+  fileId: integer("file_id"),
+  deck: text("deck"),
+  page: integer("page"),
+  itemId: integer("item_id"),
+  anchor: text("anchor"),                       // guide heading slug
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  hash: text("hash").notNull(),
+  embedding: blob("embedding", { mode: "buffer" }),
+  embedModel: text("embed_model"),
+  updatedAt: integer("updated_at").notNull(),
+}, (t) => [uniqueIndex("passages_source").on(t.moduleId, t.sourceKey), index("passages_user").on(t.userId, t.moduleId)]);

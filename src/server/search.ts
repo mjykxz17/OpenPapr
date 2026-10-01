@@ -35,15 +35,15 @@ export function plainMarkdown(md: string): string {
 
 // A guide as sections: each ## chapter and each ### inside it, with the text
 // under that heading up to the next one.
-export function guideSections(markdown: string): { heading: string; slug: string; text: string }[] {
-  const out: { heading: string; slug: string; text: string }[] = [];
-  let cur: { heading: string; slug: string; lines: string[] } | null = null;
+export function guideSections(markdown: string): { heading: string; slug: string; text: string; level: 2 | 3 }[] {
+  const out: { heading: string; slug: string; text: string; level: 2 | 3 }[] = [];
+  let cur: { heading: string; slug: string; lines: string[]; level: 2 | 3 } | null = null;
   let fence = false;
-  const flush = () => { if (cur) out.push({ heading: cur.heading, slug: cur.slug, text: plainMarkdown(cur.lines.join("\n")) }); };
+  const flush = () => { if (cur) out.push({ heading: cur.heading, slug: cur.slug, text: plainMarkdown(cur.lines.join("\n")), level: cur.level }); };
   for (const line of markdown.split("\n")) {
     if (/^```/.test(line)) fence = !fence;
     const m = !fence ? /^(##|###) (?!#)(.+)$/.exec(line) : null;
-    if (m) { flush(); const h = m[2]!.trim(); cur = { heading: h.replace(/\*\*/g, ""), slug: slugifyHeading(h), lines: [] }; continue; }
+    if (m) { flush(); const h = m[2]!.trim(); cur = { heading: h.replace(/\*\*/g, ""), slug: slugifyHeading(h), lines: [], level: m[1] === "##" ? 2 : 3 }; continue; }
     cur?.lines.push(line);
   }
   flush();

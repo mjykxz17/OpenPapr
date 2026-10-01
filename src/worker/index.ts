@@ -30,6 +30,7 @@ import { pollIntervalAt } from "../lib/poll-schedule";
 import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type ProfileDeps } from "./profiles";
 import { refreshTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
 import { runAutoGuides, type GuideDeps } from "./guides";
+import { indexUser } from "./index-material";
 import { needsThread, normalizeDiscussion } from "../connectors/canvas/discussions";
 import { applyDiscussions, applyPlanner, discussionMetaFor } from "../db/canvas-extra";
 import { getModuleProfileRow } from "../db/profiles-repo";
@@ -565,6 +566,12 @@ async function tick(): Promise<void> {
     if (!guideJob) guideJob = runGuideJob()
       .then(() => (Date.now() - lastAutoGuideAt >= AUTO_GUIDE_EVERY ? (lastAutoGuideAt = Date.now(), runAutoGuides(guideDeps)) : undefined))
       .catch((err) => console.error("guide job crashed", err)).finally(() => { guideJob = null; });
+    // The "ask your material" index, beside the tick like the guides: new or
+    // changed decks re-read, then embeddings for anything new.
+    if (!indexJob && now - lastIndexAt >= INDEX_EVERY) {
+      lastIndexAt = now;
+      indexJob = runIndex().catch((err) => console.error("index job crashed", err)).finally(() => { indexJob = null; });
+    }
     if (now - lastMaintenanceAt >= MAINTENANCE_MS) {
       lastMaintenanceAt = now;
       maintenance();
@@ -574,6 +581,18 @@ async function tick(): Promise<void> {
   }
   beat();
   setTimeout(tick, TICK_MS);
+}
+
+let indexJob: Promise<void> | null = null;
+const INDEX_EVERY = 2 * 60_000;
+let lastIndexAt = 0;
+async function runIndex(): Promise<void> {
+  const ids = [...new Set(db.select({ userId: modules.userId }).from(modules).where(eq(modules.active, true)).all().map((m) => m.userId))];
+  for (const userId of ids) {
+    beat();
+    const r = await indexUser({ db, now: Date.now, cfgFor: (id) => kitFor(id).compatCfg, fileText: (u, f, m) => taskDeps.fileText(u, f, m) }, userId);
+    if (r.changed || r.embedded) console.log(`index for user ${userId}: ${r.changed} passage(s) changed, ${r.embedded} embedded`);
+  }
 }
 
 let guideJob: Promise<void> | null = null;

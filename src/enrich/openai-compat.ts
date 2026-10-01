@@ -19,6 +19,9 @@ export interface CompatConfig {
   fallback?: CompatConfig | null;
   // Extra request-body fields (provider routing, reasoning effort, …).
   extra?: Record<string, unknown> | null;
+  // The embedding model on this provider, for "ask your material"; when
+  // unset, a known default for the host is used, or word search alone.
+  embedModel?: string | null;
   // Who the call is for and whose key pays, for the usage count.
   owner?: { userId: number; shared: boolean } | null;
 }

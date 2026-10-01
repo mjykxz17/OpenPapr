@@ -19,14 +19,24 @@ const Outline = z.object({
 });
 export type GuideOutline = z.infer<typeof Outline>;
 
-// Splits extracted deck text on its "-- N of M --" page markers.
+// Splits extracted deck text into pages. pdf-parse writes each page's text
+// FOLLOWED by its "-- N of M --" marker, so the text before marker N is page N.
 export function slidePages(deckText: string): { page: number; text: string }[] {
   const parts = deckText.split(/--\s*(\d+)\s*of\s*\d+\s*--/);
   const out: { page: number; text: string }[] = [];
   for (let i = 1; i < parts.length; i += 2) {
-    out.push({ page: Number(parts[i]), text: (parts[i + 1] ?? "").trim() });
+    out.push({ page: Number(parts[i]), text: (parts[i - 1] ?? "").trim() });
   }
   return out;
+}
+
+// The deck text as the model should read it: each page under a "[Slide N]"
+// header. A trailing marker reads like the start of the next page, which put
+// citations one slide off.
+export function labelPages(deckText: string): string {
+  const pages = slidePages(deckText);
+  if (!pages.length) return deckText;
+  return pages.map((p) => `[Slide ${p.page}]\n${p.text}`).join("\n\n");
 }
 
 // The model reads text, so it cannot see which slides carry a diagram worth
@@ -57,7 +67,7 @@ Non-negotiable style:
 - Plain academic prose. No emoji. No marketing language. Explain jargon on first use.
 - Include real commands, code or output from the slides in fenced blocks and walk through them line by line.
 - Recreate structural concepts as mermaid diagrams in \`\`\`mermaid fences. Put a BLANK LINE before the opening fence and after the closing fence. Keep node labels short and free of parentheses and quotes.
-- Cite the slide a claim comes from as [slide N](slide:${deckName}#N). The deck text below is marked with "-- N of ${pageCount} --" page markers; use those numbers, and never cite a number above ${pageCount}.
+- Cite the slide a claim comes from as [slide N](slide:${deckName}#N). The deck text below is split into "[Slide N]" blocks; cite the N of the block the claim comes from, and never a number above ${pageCount}.
 - These slides are mostly picture, so they carry a diagram, screenshot or figure: ${figures.length ? figures.join(", ") : "(none detected)"}. When your section covers one of them, EMBED IT on its own line as ![short caption](slide-img:${deckName}#N). Embed at least one where any of those slides falls in your range — a reader who cannot see the figure cannot follow the point it makes.
 - Never invent content that is not in the slides. If the deck is thin on a point, say less rather than filling.
 - Start with the "### " heading you are given and write nothing above it. Do not write a chapter title.${reader ? `
@@ -115,7 +125,7 @@ export function createGuideGenerator(cfg: CompatConfig, reader: string | null = 
     async outline(deckName: string, deckText: string, pageCount: number): Promise<GuideOutline | null> {
       const raw = await chatJson(
         cfg, fetch, OUTLINE_SYSTEM,
-        `Deck: ${deckName} (${pageCount} slides)\n\n=== DECK TEXT ===\n${deckText}`,
+        `Deck: ${deckName} (${pageCount} slides)\n\n=== DECK TEXT ===\n${labelPages(deckText)}`,
         4000,
       );
       const parsed = Outline.safeParse(raw);
@@ -141,7 +151,7 @@ What it must teach: ${covers}
 It draws mainly on slides ${slides}, but read the whole deck for context.
 
 === DECK TEXT (${deckName}, ${pageCount} slides) ===
-${deckText}`,
+${labelPages(deckText)}`,
         { maxTokens: 8000, temperature: 0.3 },
       ));
       return repairMermaidBlocks(normalizeFences(body.trim()));
@@ -160,7 +170,7 @@ Heading (use it verbatim as your first line): ### ${heading}
 For each task or question on the sheet: say in one line what it asks, name the idea from this topic it exercises, and give a short approach — where to start, what to watch out for. Do NOT give final answers or full solutions. Skip "Explain like I'm a beginner" here; keep it brisk. Cite the sheet's pages as [p. N](slide:${sheetName}#N).
 
 === SHEET TEXT (${sheetName}, ${pageCount} pages) ===
-${sheetText}`,
+${labelPages(sheetText)}`,
         { maxTokens: 5000, temperature: 0.3 },
       ));
       return repairMermaidBlocks(normalizeFences(body.trim()));

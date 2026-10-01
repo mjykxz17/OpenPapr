@@ -12,6 +12,7 @@ import { SlidePanel, type OpenDeck, type PanelMode } from "@/components/SlidePan
 import { SlidePanelContext, useSlidePanel, type SlideRef } from "@/components/slide-panel-context";
 import { ChapterQuiz } from "@/components/ChapterQuiz";
 import { OfflineButton } from "@/components/OfflineButton";
+import { OPEN_ASK, SHOW_SLIDE, type ShowSlideDetail } from "@/components/pet/Papi";
 
 // Flattens heading children to plain text so headings can be given stable ids
 // that the outline sidebar links to.
@@ -307,6 +308,20 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
       return { ...p, open: true, tabs, active: ref.deck };
     });
   }, []);
+  // A slide Papi cited, or a link to one (/guide?slide=L3&page=4), opens here.
+  useEffect(() => {
+    const onShow = (e: Event) => {
+      const d = (e as CustomEvent<ShowSlideDetail>).detail;
+      if (d.moduleId !== moduleId) return;
+      d.handled = true;
+      showSlide({ deck: d.deck, page: d.page });
+    };
+    window.addEventListener(SHOW_SLIDE, onShow);
+    const q = new URLSearchParams(window.location.search);
+    const deck = q.get("slide"), page = Number(q.get("page"));
+    if (deck && page > 0) showSlide({ deck, page });
+    return () => window.removeEventListener(SHOW_SLIDE, onShow);
+  }, [moduleId, showSlide]);
   const activeTab = panel.open ? panel.tabs.find((t) => t.deck === panel.active) ?? null : null;
   const panelApi = useMemo(
     () => ({ show: showSlide, current: activeTab ? { deck: activeTab.deck, page: activeTab.page } : null }),
@@ -454,6 +469,9 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
               </ToggleButton>
             </>
           )}
+          <ToggleButton on={false} onClick={() => window.dispatchEvent(new CustomEvent(OPEN_ASK, { detail: {} }))} label="Ask" title="Ask Papi about this module's material, with sources">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z" /></svg>
+          </ToggleButton>
           <OfflineButton moduleId={moduleId} markdown={markdown} />
           {chapters.length > 0 && (
             <ToggleButton on={false} onClick={() => setQuizAsk((n) => n + 1)} label="Quiz" title="Practice questions on this chapter">

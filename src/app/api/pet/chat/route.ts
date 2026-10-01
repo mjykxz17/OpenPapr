@@ -13,6 +13,8 @@ import { appendToChat, getChat } from "@/server/pet-chats";
 import { isAddRequest, parseQuickAdd } from "@/server/quick-add";
 import { createManualTask, endOfSgtDay } from "@/server/tasks";
 import { dayLabel } from "@/lib/format-date";
+import { retrieve } from "@/server/retrieve";
+import { SOURCES_RULES, citedSources, sourcesBlock, type SourceRef } from "@/server/ask";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +30,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "expected a JSON body" }, { status: 415 });
   }
   if (!rateLimit(`pet:${userId}`, 40, 10 * 60_000)) return NextResponse.json({ reply: "I need a little breather — too many questions at once. Try again in a few minutes?" });
-  let body: { message?: unknown; sessionId?: unknown };
+  let body: { message?: unknown; sessionId?: unknown; moduleId?: unknown };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: "invalid body" }, { status: 400 }); }
   const question = typeof body.message === "string" ? body.message.trim().slice(0, 1000) : "";
   if (!question) return NextResponse.json({ error: "nothing to answer" }, { status: 400 });
   const sessionId = typeof body.sessionId === "number" && Number.isInteger(body.sessionId) ? body.sessionId : null;
+  // Which module's material to search: the page the student is on, or all.
+  const scope = typeof body.moduleId === "number" && Number.isInteger(body.moduleId) ? body.moduleId : null;
 
   const db = getDb();
   const now = Date.now();
@@ -60,21 +64,32 @@ export async function POST(request: Request) {
 
   let reply: string;
   let smart = false;
+  let sources: SourceRef[] = [];
   if (!cfg) reply = fallback();
   else {
     try {
+      // The student's own material that bears on the question, numbered.
+      const ownsScope = scope !== null && mods.some((m) => m.id === scope);
+      const found = await retrieve(db, userId, question, { moduleId: ownsScope ? scope : null, cfg, k: 8 }).catch(() => null);
+      const hits = found?.hits ?? [];
+      const system = hits.length
+        ? `${PET_SYSTEM}\n\n${SOURCES_RULES}\n\nFACTS\n${factSheet(db, userId, now)}\n\nSOURCES\n${sourcesBlock(hits)}`
+        : `${PET_SYSTEM}\n\nFACTS\n${factSheet(db, userId, now)}`;
       const out = await complete(cfg, [
-        { role: "system", content: `${PET_SYSTEM}\n\nFACTS\n${factSheet(db, userId, now)}` },
+        { role: "system", content: system },
         ...earlier.slice(-8).map((m) => ({ role: m.role, content: m.content })),
         { role: "user", content: question },
-      ], { maxTokens: 400, temperature: 0.6, timeoutMs: 45_000 });
-      reply = out.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#+\s*/gm, "").trim() || fallback();
+      ], { maxTokens: hits.length ? 700 : 400, temperature: hits.length ? 0.3 : 0.6, timeoutMs: 60_000 });
+      const clean = out.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#+\s*/gm, "").trim();
+      const cited = citedSources(clean, hits);
+      reply = cited.text || fallback();
+      sources = cited.sources;
       smart = true;
     } catch {
       // The model is down or out of credit: the rules still know the dates.
       reply = `${fallback()} (My big brain is offline, so that's the short version.)`;
     }
   }
-  const saved = appendToChat(db, userId, earlier.length ? sessionId : null, question, reply, now);
-  return NextResponse.json({ reply, smart, sessionId: saved.id, title: saved.title });
+  const saved = appendToChat(db, userId, earlier.length ? sessionId : null, question, reply, now, sources);
+  return NextResponse.json({ reply, smart, sources, sessionId: saved.id, title: saved.title });
 }

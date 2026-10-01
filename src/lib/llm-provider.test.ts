@@ -64,7 +64,7 @@ describe("sharedLlmConfig", () => {
   it("needs both the URL and the key", () => {
     expect(sharedLlmConfig({ OPENAI_COMPAT_MODEL: "m", OPENAI_COMPAT_BASE_URL: "https://x.dev" })).toBeNull();
     expect(sharedLlmConfig({ OPENAI_COMPAT_MODEL: "m", OPENAI_COMPAT_BASE_URL: "https://x.dev", OPENAI_COMPAT_API_KEY: "k" }))
-      .toEqual({ baseUrl: "https://x.dev", apiKey: "k", model: "m", rpm: null });
+      .toEqual({ baseUrl: "https://x.dev", apiKey: "k", model: "m", rpm: null, embedModel: null });
   });
 });
 

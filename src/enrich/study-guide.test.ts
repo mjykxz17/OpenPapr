@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { figureSlides, normalizeFences, preferColourDeck, slidePages, validateChapter } from "./study-guide";
+import { figureSlides, labelPages, normalizeFences, preferColourDeck, slidePages, validateChapter } from "./study-guide";
 
 describe("preferColourDeck", () => {
   it("keeps the colour deck and drops its printable twin", () => {
@@ -104,15 +104,20 @@ describe("slidePages / figureSlides", () => {
   // Lengths mirror the real distribution measured on IFS4103-Lect-1: text
   // slides run 288-1370 characters, figure slides 34-42, with a clean gap
   // between. The default 180 threshold sits in that gap.
+  // As pdf-parse writes it: each page's text, then its marker.
   const deck = [
-    "-- 1 of 4 --", "a".repeat(520),
-    "-- 2 of 4 --", "Fig 1",
-    "-- 3 of 4 --", "b".repeat(870),
-    "-- 4 of 4 --", "",
+    "a".repeat(520), "-- 1 of 4 --",
+    "Fig 1", "-- 2 of 4 --",
+    "b".repeat(870), "-- 3 of 4 --",
+    "", "-- 4 of 4 --",
   ].join("\n");
 
   it("splits the deck on its page markers", () => {
     expect(slidePages(deck).map((p) => p.page)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("labels each page with the slide it really is", () => {
+    expect(labelPages(deck).split("\n\n")[1]).toBe("[Slide 2]\nFig 1");
   });
 
   it("treats a page with little text as carrying a figure", () => {
