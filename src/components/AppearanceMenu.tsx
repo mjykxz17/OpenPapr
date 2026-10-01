@@ -15,7 +15,7 @@ const THEMES: { value: ThemePref; label: string; icon: React.ReactNode }[] = [
 // Appearance lives in the rail, above sign-out — one fixed place on every
 // page. A popover with the theme (light / dark / follow the system) and six
 // accent swatches. Choices apply instantly and are remembered per browser.
-export function AppearanceMenu() {
+export function AppearanceMenu({ placement = "rail" }: { placement?: "rail" | "below" }) {
   const [open, setOpen] = useState(false);
   const [theme, setTheme] = useState<ThemePref>("system");
   const [accent, setAccent] = useState<AccentName>(DEFAULT_ACCENT);
@@ -80,7 +80,7 @@ export function AppearanceMenu() {
       </button>
 
       {open && (
-        <div role="dialog" aria-label="Appearance" className="absolute bottom-0 left-[52px] z-40 w-64 rounded-[10px] border border-line bg-panel p-3.5 shadow-xl">
+        <div role="dialog" aria-label="Appearance" className={`absolute z-40 w-64 rounded-[10px] border border-line bg-panel p-3.5 shadow-xl ${placement === "rail" ? "bottom-0 left-[52px]" : "right-0 top-12"}`}>
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.06em] text-ink-2">Theme</p>
           <div role="radiogroup" aria-label="Theme" className="mb-4 grid grid-cols-3 gap-1 rounded-md bg-sunken p-1">
             {THEMES.map((t) => {

@@ -79,18 +79,17 @@ export default async function Home() {
         </div>
       )}
 
-      <header className="mb-9 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-[-0.01em] tabular-nums text-ink">{dateLabel}</h1>
-          <p className="text-sm text-ink-2">AY26/27</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <SyncStatus syncStatus={overview.syncStatus} now={now} />
-          <SyncButton lastSyncedAt={overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null} />
-        </div>
-      </header>
-
-      <HomeBoard initial={parseLayout(user?.homeLayoutJson)} views={views} />
+      <HomeBoard
+        initial={parseLayout(user?.homeLayoutJson)}
+        views={views}
+        title={
+          <div className="flex flex-col gap-1">
+            <h1 className="text-2xl font-semibold tracking-[-0.01em] tabular-nums text-ink">{dateLabel}</h1>
+            <SyncStatus syncStatus={overview.syncStatus} now={now} mailConnected={Boolean(user?.msRefreshTokenEnc)} />
+          </div>
+        }
+        actions={<SyncButton lastSyncedAt={overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null} />}
+      />
     </AppShell>
   );
 }

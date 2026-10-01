@@ -146,6 +146,9 @@ function Body({ markdown, moduleId }: { markdown: string; moduleId: number }) {
 
 // Collapsed-outline bar length, scaled to the heading it stands for and
 // clamped so the rail stays a tidy ragged edge rather than a jagged one.
+// Chapter labels carry their number ("1. Basics"); the nav adds its own.
+const bare = (label: string) => label.replace(/^\d+\.\s*/, "");
+
 const barWidth = (label: string, min = 14, max = 30) =>
   `${Math.round(min + Math.min(1, label.length / 46) * (max - min))}px`;
 const posKey = (moduleId: number) => `sg-pos:${moduleId}`;
@@ -407,7 +410,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
               className="h-8 min-w-0 max-w-[18rem] rounded-md border border-line-2 bg-panel px-2 text-[13px] text-ink"
             >
               {chapters.map((c, i) => (
-                <option key={c.label} value={i}>{i + 1}. {c.label}</option>
+                <option key={c.label} value={i}>{i + 1}. {bare(c.label)}</option>
               ))}
             </select>
           </label>
@@ -576,7 +579,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
               }`}
             >
               <span className={`shrink-0 tabular-nums ${i === active ? "text-accent" : "text-ink-3"}`}>{i + 1}</span>
-              <span>{c.label}</span>
+              <span>{bare(c.label)}</span>
             </button>
           </li>
         ))}

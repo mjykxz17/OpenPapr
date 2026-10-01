@@ -64,9 +64,27 @@ const NAV = [
 // aria-current. Targets are 44px — the minimum a finger can hit.
 export function Rail() {
   const pathname = usePathname();
-  const isActive = (href: string) => (href === "/" ? pathname === "/" || pathname.startsWith("/modules") : pathname.startsWith(href));
+  // A module's guide belongs to Guides; the rest of a module page to Home.
+  const inGuide = /^\/modules\/[^/]+\/guide/.test(pathname);
+  const isActive = (href: string) => (href === "/" ? pathname === "/" || (pathname.startsWith("/modules") && !inGuide)
+    : href === "/study" ? pathname.startsWith("/study") || inGuide : pathname.startsWith(href));
   return (
-    <nav aria-label="Primary" className="fixed inset-y-0 left-0 z-10 flex w-14 flex-col items-center gap-1 border-r border-line bg-surface py-3">
+    <>
+    {/* On a phone the rail becomes a tab bar along the bottom, where a thumb
+        reaches. Appearance and sign-out move to the Account tab. */}
+    <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
+      {[...NAV, { href: "/account", label: "Account", Icon: AccountIcon }].map(({ href, label, Icon }) => {
+        const active = isActive(href);
+        return (
+          <Link key={href} href={href} aria-current={active ? "page" : undefined}
+            className={`flex h-[60px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium ${active ? "text-accent" : "text-ink-3"}`}>
+            <Icon />
+            <span>{label === "Study guides" ? "Guides" : label}</span>
+          </Link>
+        );
+      })}
+    </nav>
+    <nav aria-label="Primary" className="fixed inset-y-0 left-0 z-10 hidden w-14 flex-col items-center gap-1 border-r border-line bg-surface py-3 sm:flex">
       <Link href="/" title="OpenPapr" aria-label="OpenPapr home" className="mb-2 flex h-11 w-11 items-center justify-center rounded-md transition-transform hover:-translate-y-0.5">
         <PapiMark size={30} />
       </Link>
@@ -103,5 +121,6 @@ export function Rail() {
         <SignOutButton />
       </div>
     </nav>
+    </>
   );
 }

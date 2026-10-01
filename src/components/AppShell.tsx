@@ -11,8 +11,9 @@ export function AppShell({ children, wide = false, bleed = false }: { children: 
   return (
     <div className="min-h-svh bg-surface text-ink">
       <Rail />
-      <main className="pl-14">
-        {bleed ? children : <div className={`mx-auto px-10 py-9 ${wide ? "max-w-[1800px]" : "max-w-[1280px]"}`}>{children}</div>}
+      {/* Room for the tab bar (and Papi above it) on a phone; for the rail beside. */}
+      <main className={`sm:pl-14 ${bleed ? "pb-[60px] sm:pb-0" : "pb-24 sm:pb-16"}`}>
+        {bleed ? children : <div className={`mx-auto px-4 py-6 sm:px-10 sm:py-9 ${wide ? "max-w-[1800px]" : "max-w-[1280px]"}`}>{children}</div>}
       </main>
       {/* The study buddy lives on every page except the file viewer, whose
           controls sit where it would. */}

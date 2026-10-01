@@ -49,9 +49,11 @@ export function parseLayout(json: string | null | undefined): Slot[] {
 
 // Grid placement per size: four columns on a wide screen, two on a phone;
 // rows are a fixed height, except Full, which grows with what it holds.
+// Rows size to their content: Small and Wide are one fixed-height row,
+// Large two (plus the gap between them), and Full exactly as tall as it is.
 export const SIZE_CLASS: Record<Size, string> = {
-  S: "col-span-1 row-span-1",
-  W: "col-span-2 row-span-1",
-  L: "col-span-2 row-span-2",
+  S: "col-span-1 row-span-1 h-[168px]",
+  W: "col-span-2 row-span-1 h-[168px]",
+  L: "col-span-2 row-span-2 h-[352px]",
   F: "col-span-2 md:col-span-4",
 };

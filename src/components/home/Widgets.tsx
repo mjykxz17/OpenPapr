@@ -127,9 +127,9 @@ export function DoneWidget({ view, size }: { view: TasksView; size: "S" | "W" })
   const n = view.done.length;
   return (
     <WidgetCard title="Completed" href="/tasks">
-      <Big n={n} unit={n === 1 ? "task this week" : "tasks this week"} />
-      {size === "W" && n > 0 && <p className="mt-2 truncate text-[13px] text-ink-2">Latest: {view.done[0].title}</p>}
-      {n === 0 && <p className="mt-auto text-[13px] text-ink-3">Tick a step on Tasks to start.</p>}
+      <Big n={n} unit={n === 1 ? "task" : "tasks"} />
+      <p className="mt-1 text-[13px] text-ink-2">this week</p>
+      {size === "W" && n > 0 && <p className="mt-auto truncate text-[13px] text-ink-3">Latest: {view.done[0].title}</p>}
     </WidgetCard>
   );
 }

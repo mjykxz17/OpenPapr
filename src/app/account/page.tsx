@@ -6,6 +6,8 @@ import { decrypt } from "@/lib/crypto";
 import { secretHint, sharedLlmConfig, userLlmSlot } from "@/lib/llm-provider";
 import { AppShell } from "@/components/AppShell";
 import { AccountSettings } from "@/components/AccountSettings";
+import { AppearanceMenu } from "@/components/AppearanceMenu";
+import { SignOutButton } from "@/components/SignOutButton";
 import { userProfileView } from "@/server/profiles";
 import { canGenerateGuides } from "@/server/llm-access";
 
@@ -35,7 +37,11 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
     <AppShell>
       <header className="mb-8 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line pb-4">
         <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">Account</h1>
-        <span className="text-[13px] text-ink-2">{user.name}</span>
+        <span className="flex items-center gap-1 text-[13px] text-ink-2">
+          {user.name}
+          {/* The rail holds these on a wide screen; a phone's tab bar has no room. */}
+          <span className="ml-2 flex items-center sm:hidden"><AppearanceMenu placement="below" /><SignOutButton /></span>
+        </span>
       </header>
       <AccountSettings
         welcome={welcome === "1"}

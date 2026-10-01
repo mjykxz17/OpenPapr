@@ -188,8 +188,8 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
                           {c.shadowed && <span className="text-xs">(replaced)</span>}
                         </span>
                       </td>
-                      <td className={`py-2 pr-3 text-right align-top ${c.shadowed ? "" : "font-medium"}`}>{c.weightPct != null ? `${c.weightPct}%` : "—"}</td>
-                      <td className="py-2 text-right align-top">
+                      <td className={`w-px whitespace-nowrap py-2 pr-3 text-right align-top ${c.shadowed ? "" : "font-medium"}`}>{c.weightPct != null ? `${c.weightPct}%` : "—"}</td>
+                      <td className="w-px whitespace-nowrap py-2 text-right align-top">
                         <SourceChip source={c.source} evidence={c.evidence} name={c.name} />
                       </td>
                     </tr>

@@ -80,6 +80,7 @@ export function Papi() {
     setQuiet(store.get(KEYS.quiet) === "1");
     const s = store.get(KEYS.size) as SizeKey | null;
     if (s && s in SIZES) setSize(s);
+    else if (window.innerWidth < 640) setSize("S");   // a phone has little room to share
     try { const p = JSON.parse(store.get(KEYS.pos) ?? "null"); if (p && typeof p.right === "number") setPos(p); } catch { /* default */ }
     try { const p = JSON.parse(store.get(KEYS.panel) ?? "null"); if (p && typeof p.w === "number") setPanel(p); } catch { /* default */ }
     const sid = Number(store.get(KEYS.session));
@@ -99,8 +100,11 @@ export function Papi() {
     return () => { clearInterval(t); window.removeEventListener("resize", onResize); };
   }, []);
 
-  // Keep the pet on screen whatever the window does.
-  const safePos = { right: clamp(pos.right, 4, Math.max(4, vw.w - px - 12)), bottom: clamp(pos.bottom, 4, Math.max(4, vw.h - petH - 4)) };
+  // Keep the pet on screen whatever the window does — and, on a phone, above
+  // the tab bar.
+  const phone = vw.w < 640;
+  const floor = phone ? 76 : 4;
+  const safePos = { right: clamp(pos.right, 4, Math.max(4, vw.w - px - 12)), bottom: clamp(pos.bottom, floor, Math.max(floor, vw.h - petH - 4)) };
 
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" }); }, [messages, busy, open, view]);
   useEffect(() => { if (open && view === "chat") setTimeout(() => inputRef.current?.focus(), 50); }, [open, view]);
@@ -309,11 +313,13 @@ export function Papi() {
   // high; aligned to whichever side has room.
   const petLeft = vw.w - safePos.right - px - 8;
   const petTop = vw.h - safePos.bottom - petH;
-  const pw = Math.min(panel.w, vw.w - 16), ph = Math.min(panel.h, vw.h - 24);
+  // On a phone the chat is a sheet across the bottom, above the tab bar.
+  const pw = phone ? vw.w - 16 : Math.min(panel.w, vw.w - 16);
+  const ph = phone ? Math.round(Math.min(vw.h * 0.78, vw.h - 96)) : Math.min(panel.h, vw.h - 24);
   const above = petTop > vw.h / 2;
   const alignRight = petLeft + px / 2 > vw.w / 2;
-  const panelLeft = clamp(alignRight ? petLeft + px + 8 - pw : petLeft, 8, vw.w - pw - 8);
-  const panelTop = clamp(above ? petTop - ph - 10 : petTop + petH + 10, 8, vw.h - ph - 8);
+  const panelLeft = phone ? 8 : clamp(alignRight ? petLeft + px + 8 - pw : petLeft, 8, vw.w - pw - 8);
+  const panelTop = phone ? vw.h - ph - 72 : clamp(above ? petTop - ph - 10 : petTop + petH + 10, 8, vw.h - ph - 8);
   const bubbleStyle: React.CSSProperties = above
     ? { bottom: vw.h - petTop + 6, ...(alignRight ? { right: vw.w - (petLeft + px + 8) } : { left: petLeft }) }
     : { top: petTop + petH + 6, ...(alignRight ? { right: vw.w - (petLeft + px + 8) } : { left: petLeft }) };
@@ -347,13 +353,13 @@ export function Papi() {
           style={{ left: panelLeft, top: panelTop, width: pw, height: ph }}
           className="fixed z-40 flex flex-col overflow-hidden rounded-[14px] border border-line bg-panel shadow-[0_12px_40px_-12px_rgba(0,0,0,0.28)]">
           {/* resize grip, on the corner away from Papi */}
-          <div aria-hidden onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp}
+          {!phone && <div aria-hidden onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp}
             style={{ [above ? "top" : "bottom"]: 0, [alignRight ? "left" : "right"]: 0, cursor: (above === alignRight) ? "nwse-resize" : "nesw-resize", touchAction: "none" }}
             className="absolute z-10 h-4 w-4">
             <svg viewBox="0 0 10 10" width="10" height="10" className="m-[3px] text-ink-3" style={{ transform: `rotate(${above ? (alignRight ? 180 : 270) : (alignRight ? 90 : 0)}deg)` }}>
               <path d="M9 3 L3 9 M9 6 L6 9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
             </svg>
-          </div>
+          </div>}
           <header className="flex items-center justify-between gap-2 border-b border-line px-3 py-2">
             <div className="min-w-0 pl-1">
               <p className="truncate text-[14px] font-semibold text-ink">

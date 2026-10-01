@@ -1,6 +1,13 @@
 import type { ItemRow } from "@/server/overview";
 import { DismissButton } from "./DismissButton";
 
+// "Prof Damith <damith@comp.nus.edu.sg>" → "Prof Damith"; a bare address stays.
+function senderName(sender: string | null): string {
+  if (!sender) return "Unknown sender";
+  const m = sender.match(/^\s*"?([^"<]+?)"?\s*<[^>]+>\s*$/);
+  return m ? m[1] : sender;
+}
+
 export function MailList({
   items,
   emptyLabel = "No mail yet.",
@@ -17,15 +24,15 @@ export function MailList({
   return (
     <ul className="divide-y divide-line">
       {items.map((item) => (
-        <li key={item.id} className={`flex items-start justify-between gap-4 py-3 ${greyed ? "text-ink-3" : ""}`}>
-          <div className="min-w-0">
-            <div className="flex items-baseline gap-2">
-              <span className={`font-semibold ${greyed ? "text-ink-3" : "text-ink"}`}>{item.sender ?? "Unknown sender"}</span>
-              <span className={`truncate text-sm ${greyed ? "text-ink-3" : "text-ink-2"}`}>{item.title}</span>
-            </div>
+        <li key={item.id} className={`flex items-start justify-between gap-3 py-3 ${greyed ? "text-ink-3" : ""}`}>
+          {/* Sender, then subject, then why it is here — stacked, so a long
+              address never runs under the button on a phone. */}
+          <div className="min-w-0 flex-1">
+            <p className={`truncate font-semibold ${greyed ? "text-ink-3" : "text-ink"}`} title={item.sender ?? undefined}>{senderName(item.sender)}</p>
+            <p className={`mt-0.5 truncate text-sm ${greyed ? "text-ink-3" : "text-ink-2"}`} title={item.title}>{item.title}</p>
             {item.importanceReason && <p className="mt-0.5 text-xs text-ink-3">{item.importanceReason}</p>}
           </div>
-          {dismissible && <DismissButton itemId={item.id} />}
+          {dismissible && <div className="shrink-0"><DismissButton itemId={item.id} /></div>}
         </li>
       ))}
     </ul>

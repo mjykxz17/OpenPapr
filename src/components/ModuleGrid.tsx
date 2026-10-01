@@ -170,7 +170,7 @@ export function ModuleGrid({ modules }: { modules: Module[] }) {
               editing ? "border-accent bg-accent-soft text-accent" : "border-line-2 bg-panel text-ink hover:border-ink-3"
             }`}
           >
-            {editing ? "Done" : "Edit layout"}
+            {editing ? "Done" : "Arrange modules"}
           </button>
         )}
       </div>

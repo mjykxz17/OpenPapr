@@ -34,7 +34,7 @@ function Tile({ slot, view, editing, onSize, onHide }: {
           <button type="button" onClick={onHide} aria-label={`Remove ${w.title}`} title="Remove from home"
             className="absolute -left-2.5 -top-2.5 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-line bg-panel text-sm leading-none text-ink-2 shadow-sm hover:border-danger hover:text-danger">×</button>
           <div className="absolute bottom-2.5 left-1/2 z-10 flex -translate-x-1/2 items-center gap-0.5 rounded-full border border-line bg-panel p-0.5 shadow-sm" role="group" aria-label={`${w.title} size`}>
-            <span className="px-2 text-[12px] font-medium text-ink-2">{w.title}</span>
+            {slot.size !== "S" && <span className="px-2 text-[12px] font-medium text-ink-2">{w.title}</span>}
             {w.sizes.map((s) => (
               <button key={s} type="button" onClick={() => onSize(s)} title={SIZE_NAMES[s]} aria-pressed={slot.size === s}
                 className={`h-6 min-w-6 rounded-full px-1.5 text-[12px] font-medium tabular-nums ${slot.size === s ? "bg-ink text-panel" : "text-ink-2 hover:bg-ink/[0.06]"}`}>
@@ -48,7 +48,7 @@ function Tile({ slot, view, editing, onSize, onHide }: {
   );
 }
 
-export function HomeBoard({ initial, views }: { initial: Slot[]; views: WidgetViews }) {
+export function HomeBoard({ initial, views, title, actions }: { initial: Slot[]; views: WidgetViews; title: ReactNode; actions: ReactNode }) {
   const [layout, setLayout] = useState<Slot[]>(initial);
   const [editing, setEditing] = useState(false);
   const sensors = useSensors(
@@ -70,7 +70,19 @@ export function HomeBoard({ initial, views }: { initial: Slot[]; views: WidgetVi
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex min-h-8 flex-wrap items-center justify-end gap-2">
+      {/* The page header: the date and sync on the left, the two things you
+          can do to the whole page on the right. */}
+      <header className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-3 sm:mb-6">
+        {title}
+        <div className="flex items-center gap-2">
+          {actions}
+          <button type="button" onClick={() => setEditing((e) => !e)} aria-pressed={editing}
+            className={`h-9 rounded-md border px-3 text-[13px] font-medium transition-colors ${editing ? "border-accent bg-accent-soft text-accent" : "border-line-2 bg-panel text-ink hover:border-ink-3"}`}>
+            {editing ? "Done" : "Edit home"}
+          </button>
+        </div>
+      </header>
+      <div className={`flex-wrap items-center justify-end gap-2 ${editing ? "flex" : "hidden"}`}>
         {editing && (
           <>
             <span className="mr-auto text-[13px] text-ink-3">Drag to move · pick a size · × to remove</span>
@@ -83,15 +95,11 @@ export function HomeBoard({ initial, views }: { initial: Slot[]; views: WidgetVi
             <button type="button" onClick={reset} className="h-8 rounded-md px-2 text-[13px] text-ink-3 hover:text-ink">Reset</button>
           </>
         )}
-        <button type="button" onClick={() => setEditing((e) => !e)} aria-pressed={editing}
-          className={`h-8 rounded-md border px-3 text-[13px] font-medium transition-colors ${editing ? "border-accent bg-accent-soft text-accent" : "border-line-2 bg-panel text-ink hover:border-ink-3"}`}>
-          {editing ? "Done" : "Edit home"}
-        </button>
       </div>
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={visible.map((s) => s.id)} strategy={rectSortingStrategy}>
-          <div className="grid grid-flow-row-dense auto-rows-[minmax(168px,auto)] grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="grid grid-flow-row-dense grid-cols-2 gap-x-3 gap-y-4 md:grid-cols-4">
             {visible.map((s) => (
               <Tile key={s.id} slot={s} view={views[s.id][s.size]} editing={editing}
                 onSize={(size) => patch(s.id, { size })} onHide={() => patch(s.id, { hidden: true })} />
