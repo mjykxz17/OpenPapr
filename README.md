@@ -274,25 +274,14 @@ encrypted and only ever sent to the endpoint they entered.
 
 ```mermaid
 flowchart LR
-  subgraph Sources
-    C[Canvas API]
-    N[NUSMods]
-    O[Outlook<br/><i>optional</i>]
-  end
-  subgraph OpenPapr
-    W["Worker<br/>sync · guides · planner"]
-    DB[(SQLite)]
-    Web["Next.js app<br/>pages · API · ICS feed"]
-  end
-  L{{"LLM<br/>yours or shared"}}
-  C --> W
-  N --> W
-  O --> W
-  W <--> DB
-  Web <--> DB
-  W <--> L
-  Web <--> L
-  Web --> B["Browser / phone<br/>PWA, offline guides"]
+  C[Canvas] --> W
+  N[NUSMods] --> W
+  O["Outlook (optional)"] --> W
+  W["Worker<br/>sync · guides · planner"] --> DB[(SQLite)]
+  DB --> Web["Next.js app<br/>pages · API · ICS feed"]
+  W -. prompts .-> L{{"LLM<br/>yours or shared"}}
+  Web -. Papi · quizzes .-> L
+  Web --> B["Browser and phone<br/>PWA · offline guides"]
   Web --> K[Calendar apps]
 ```
 
