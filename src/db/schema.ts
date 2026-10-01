@@ -111,6 +111,9 @@ export const files = sqliteTable("files", {
   // file's category when its name says nothing ("intro.pdf", "image002.jpg").
   linkedFrom: text("linked_from"),
   linkContext: text("link_context"),
+  // What the file says, fingerprinted (DeckSig) so copies of one deck can be
+  // told apart from new decks. {"failed":true,"at":ms} when it could not be read.
+  textSigJson: text("text_sig_json"),
 }, (t) => [uniqueIndex("files_module_canvas_file").on(t.moduleId, t.canvasFileId)]);
 
 export const components = sqliteTable("components", {
@@ -157,6 +160,41 @@ export const items = sqliteTable("items", {
   missing: integer("missing", { mode: "boolean" }).notNull().default(false),
   canvasDone: integer("canvas_done", { mode: "boolean" }).notNull().default(false),
 }, (t) => [uniqueIndex("items_user_source").on(t.userId, t.source, t.sourceId)]);
+
+// The automatic guide's plan for one module: how its slides fall into
+// topics, and the title the model suggested. inputHash says what the plan was
+// made from, so it is only redone when the slides or assessments change.
+export const guidePlans = sqliteTable("guide_plans", {
+  moduleId: integer("module_id").primaryKey().references(() => modules.id),
+  title: text("title"),
+  inputHash: text("input_hash"),
+  plannedAt: integer("planned_at"),
+  error: text("error"),
+  errorAt: integer("error_at"),
+});
+
+// One chapter of an automatic guide: a topic, the lecture decks (newest copy
+// of each) and practice sheets it is written from, and the quizzes,
+// assignments and lecturer notes linked to it. The chapter body is rewritten
+// only when inputHash (the decks' content) moves past builtHash.
+export const guideTopics = sqliteTable("guide_topics", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  key: text("key").notNull(),
+  title: text("title").notNull(),
+  ord: integer("ord").notNull(),
+  lectureIdsJson: text("lecture_ids_json").notNull().default("[]"),
+  practiceIdsJson: text("practice_ids_json").notNull().default("[]"),
+  itemIdsJson: text("item_ids_json").notNull().default("[]"),   // linked quizzes and assignments
+  noteIdsJson: text("note_ids_json").notNull().default("[]"),   // announcements and staff replies about it
+  inputHash: text("input_hash").notNull(),
+  builtHash: text("built_hash"),
+  body: text("body"),
+  builtAt: integer("built_at"),
+  stage: text("stage"),                   // while being written: "Writing 2 of 5 sections"
+  error: text("error"),
+  errorAt: integer("error_at"),
+}, (t) => [uniqueIndex("guide_topics_module_key").on(t.moduleId, t.key)]);
 
 export const studyGuides = sqliteTable("study_guides", {
   id: integer("id").primaryKey({ autoIncrement: true }),

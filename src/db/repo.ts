@@ -1,6 +1,6 @@
 import { and, asc, eq, desc, inArray, isNotNull, isNull, lt, lte, sql } from "drizzle-orm";
 import type { Db } from "./client";
-import { components, files, guideRuns, items, modules, slideNotes, studyGuides, users, type FileCategory, type FileCategorySource } from "./schema";
+import { guidePlans, components, files, guideRuns, items, modules, slideNotes, studyGuides, users, type FileCategory, type FileCategorySource } from "./schema";
 import type { NormalizedCanvasSync } from "../connectors/canvas/normalize";
 import type { MailItem } from "../connectors/graph/normalize";
 import { decrypt, encrypt } from "../lib/crypto";
@@ -103,6 +103,8 @@ export function findModuleFileByStem(db: Db, moduleId: number, name: string) {
   const want = stemOf(name);
   const rows = db.select().from(files).where(eq(files.moduleId, moduleId)).all()
     .filter((r) => stemOf(r.displayName) === want);
+  // A deck re-uploaded under the same name: the newest upload is the deck.
+  rows.sort((a, b) => b.discoveredAt - a.discoveredAt || b.id - a.id);
   return rows.find((r) => !r.hidden) ?? rows[0];
 }
 
@@ -449,7 +451,7 @@ export function getStudyGuide(db: Db, moduleId: number) {
   return db.select().from(studyGuides).where(eq(studyGuides.moduleId, moduleId)).get();
 }
 
-export type StudyGuideSummary = { moduleId: number; code: string; name: string; sourceNote: string | null; generatedAt: number };
+export type StudyGuideSummary = { moduleId: number; code: string; name: string; sourceNote: string | null; generatedAt: number; title: string | null };
 
 // Index rows for the Study page: guides owned by this user, newest first.
 export function listStudyGuides(db: Db, userId: number): StudyGuideSummary[] {
@@ -460,9 +462,11 @@ export function listStudyGuides(db: Db, userId: number): StudyGuideSummary[] {
       name: modules.name,
       sourceNote: studyGuides.sourceNote,
       generatedAt: studyGuides.generatedAt,
+      title: guidePlans.title,
     })
     .from(studyGuides)
     .innerJoin(modules, eq(modules.id, studyGuides.moduleId))
+    .leftJoin(guidePlans, eq(guidePlans.moduleId, studyGuides.moduleId))
     .where(eq(modules.userId, userId))
     .orderBy(desc(studyGuides.generatedAt))
     .all();

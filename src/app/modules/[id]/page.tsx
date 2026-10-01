@@ -159,7 +159,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
             </svg>
             {guide ? "Open study guide" : "Study guide"}
           </Link>
-          <span className="text-[13px] text-ink-3">{guide ? `generated ${shortDate(guide.generatedAt)}` : "not generated yet"}</span>
+          <span className="text-[13px] text-ink-3">{guide ? `updated ${shortDate(guide.generatedAt)}` : "writes itself from the slides"}</span>
         </div>
       </header>
 

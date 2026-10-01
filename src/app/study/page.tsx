@@ -3,6 +3,8 @@ import { requireUserId } from "@/server/session";
 import { getDb } from "@/server/db";
 import { listStudyGuides } from "@/db/repo";
 import { AppShell } from "@/components/AppShell";
+import { shortModuleName } from "@/lib/module-name";
+import { shortDate } from "@/lib/format-date";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +16,7 @@ export default async function StudyIndex() {
     <AppShell>
       <header className="mb-8 border-b border-line pb-4">
         <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">Study guides</h1>
-        <p className="mt-1 text-sm text-ink-2">Pre-study notes generated from each module&rsquo;s Canvas slides.</p>
+        <p className="mt-1 text-sm text-ink-2">Written from each module&rsquo;s newest lecture slides, and kept up to date on their own.</p>
       </header>
 
       {guides.length === 0 ? (
@@ -28,9 +30,9 @@ export default async function StudyIndex() {
                 className="group flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-4"
               >
                 <span className="text-[15px] font-medium text-ink group-hover:text-accent">
-                  {g.code} <span className="font-normal text-ink-2">{g.name}</span>
+                  {g.title ?? shortModuleName(g.code, g.name)} <span className="font-normal text-ink-2">· {g.code}</span>
                 </span>
-                <span className="text-[13px] text-ink-3">{g.sourceNote ?? ""}</span>
+                <span className="text-[13px] text-ink-3">{g.sourceNote?.startsWith("auto") ? `${g.sourceNote.replace(/^auto · /, "")} · updated ${shortDate(g.generatedAt)}` : (g.sourceNote ?? "")}</span>
               </Link>
             </li>
           ))}

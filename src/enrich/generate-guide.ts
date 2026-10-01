@@ -157,3 +157,58 @@ export async function generateModuleGuide(opts: {
     decks: used,
   };
 }
+
+// --- one topic of the automatic guide ----------------------------------------
+// A topic is written from one or more lecture decks (newest copy of each),
+// plus practice sheets. The body starts at the first "### 1.N" section; the
+// chapter heading, the links to quizzes and lecturer notes are added when the
+// guide is assembled, so they can change without rewriting anything.
+export type TopicSource = { name: string; text: string };
+
+export async function generateTopicChapter(opts: {
+  cfg: CompatConfig;
+  reader?: string | null;
+  title: string;
+  lectures: TopicSource[];
+  practice: TopicSource[];
+  onStage?: (stage: string) => void;
+}): Promise<{ body: string; problems: string[] }> {
+  const gen = createGuideGenerator(opts.cfg, opts.reader ?? null);
+  const problems: string[] = [];
+  const parts: string[] = [];
+  let n = 0;
+  const pagesOf = (text: string) => Number(text.match(/--\s*\d+\s*of\s*(\d+)\s*--/)?.[1] ?? 0);
+
+  for (const deck of opts.lectures) {
+    const pageCount = pagesOf(deck.text);
+    if (!pageCount || !deck.text.trim()) { problems.push(`${deck.name}: no extractable text`); continue; }
+    opts.onStage?.(`Planning from ${deck.name}`);
+    const outline = await gen.outline(deck.name, deck.text, pageCount);
+    if (!outline) { problems.push(`${deck.name}: outline failed`); continue; }
+    const figures = figureSlides(deck.text);
+    let done = 0;
+    const start = n;
+    n += outline.sections.length;
+    const bodies = await Promise.all(outline.sections.map((s, k) =>
+      gen.section(citeDeck(deck.name), deck.text, pageCount, `1.${start + k + 1} ${s.heading}`, s.covers, s.slides, figures)
+        .then((b) => { done++; opts.onStage?.(`Writing from ${deck.name}: ${done} of ${outline.sections.length} sections`); return b; })
+        .catch((e) => { problems.push(`${deck.name} section ${k + 1}: ${String(e).slice(0, 80)}`); return ""; })));
+    const written = bodies.filter(Boolean).join("\n\n");
+    problems.push(...validateChapter(written, citeDeck(deck.name), pageCount).map((p) => `${deck.name}: ${p}`));
+    if (written) parts.push(written);
+  }
+  if (!parts.length) throw new Error(problems[0] ?? "nothing could be written from these slides");
+
+  for (const sheet of opts.practice) {
+    const pageCount = pagesOf(sheet.text);
+    if (!pageCount || !sheet.text.trim()) continue;
+    opts.onStage?.(`Practice: ${sheet.name}`);
+    n++;
+    try {
+      parts.push(await gen.practice(citeDeck(sheet.name), sheet.text, pageCount, `1.${n} Practice: ${sheet.name}`, opts.title));
+    } catch (e) {
+      problems.push(`${sheet.name}: ${String(e).slice(0, 80)}`);
+    }
+  }
+  return { body: parts.join("\n\n"), problems };
+}

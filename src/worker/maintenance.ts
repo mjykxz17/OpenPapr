@@ -32,7 +32,7 @@ export function evictCaches(roots: string[], maxBytes: number, now = Date.now())
   const keep: Entry[] = [];
   for (const e of all) {
     // Compression markers are bookkeeping, removed with their PDF below.
-    if (e.path.endsWith(".pdf.opt")) continue;
+    if (e.path.endsWith(".pdf.opt") || e.path.endsWith(".pdf.src")) continue;
     if (e.path.endsWith(".part") && now - e.used > 3_600_000) {
       try { rmSync(e.path, { force: true }); removed++; freed += e.size; } catch { /* in use */ }
     } else keep.push(e);

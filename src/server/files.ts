@@ -3,7 +3,7 @@ import { copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, rea
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { files, modules, users } from "@/db/schema";
 import { loadEnv } from "@/lib/env";
@@ -12,7 +12,7 @@ import { createCanvasClient } from "@/connectors/canvas/client";
 import { fileKind } from "@/lib/file-kind";
 import { deckCachePath } from "./deck";
 import { onceMap, TooLargeError, touch, writeAtomic } from "./io";
-import { optimizePdf } from "./pdf-optimize";
+import { markerPath, optimizePdf } from "./pdf-optimize";
 
 // Every file a student opens is fetched from Canvas once and then served from
 // the volume. PDFs share the deck cache the study guide already uses, so a
@@ -66,16 +66,54 @@ async function download(db: Db, userId: number, row: Row, target: string): Promi
   }
 }
 
+// --- versions ------------------------------------------------------------------
+// Lecturers re-upload a corrected deck under the same name, and decks are
+// cached (and cited) by name. So a name always means its newest upload, and a
+// sidecar "<file>.src" records which upload the cached copy came from; when a
+// newer one appears the cache is refreshed instead of serving the old slides.
+export function newestOfName(db: Db, row: Row): Row {
+  const latest = db.select().from(files)
+    .where(and(eq(files.moduleId, row.file.moduleId), eq(files.displayName, row.file.displayName)))
+    .orderBy(desc(files.discoveredAt), desc(files.id)).limit(1).get();
+  return latest && latest.id !== row.file.id ? { ...row, file: latest } : row;
+}
+const srcPath = (target: string) => `${target}.src`;
+function cacheIsCurrent(db: Db, target: string, row: Row): boolean {
+  if (!existsSync(target)) return false;
+  let src: string | null = null;
+  try { src = readFileSync(srcPath(target), "utf8").trim(); } catch { /* cached before versions were tracked */ }
+  if (src !== null) return src === String(row.file.canvasFileId);
+  // No record: only a name that several uploads share is in doubt.
+  const same = db.select({ id: files.id }).from(files)
+    .where(and(eq(files.moduleId, row.file.moduleId), eq(files.displayName, row.file.displayName))).all().length;
+  return same <= 1;
+}
+function recordSource(target: string, row: Row) {
+  try { writeFileSync(srcPath(target), String(row.file.canvasFileId)); } catch { /* best effort */ }
+}
+function dropStale(target: string) {
+  rmSync(markerPath(target), { force: true });
+  // Slide images rendered from the old copy.
+  rmSync(target.replace(/\.pdf$/, "-pages"), { recursive: true, force: true });
+}
+
 // The file exactly as uploaded.
 export function ensureOriginal(db: Db, userId: number, row: Row): Promise<Served> {
-  const target = fileKind(row.file.displayName) === "pdf"
+  const named = fileKind(row.file.displayName) === "pdf";
+  if (named) row = newestOfName(db, row);
+  const target = named
     ? deckCachePath(row.mod.canvasCourseId, row.file.displayName, dbPath())
     : originalCachePath(row.mod.canvasCourseId, row.file.canvasFileId);
-  if (existsSync(target)) { touch(target); return Promise.resolve(stat(target)); }
+  if (named ? cacheIsCurrent(db, target, row) : existsSync(target)) { touch(target); return Promise.resolve(stat(target)); }
+  if (named && existsSync(target)) dropStale(target);
   if ((row.file.sizeBytes ?? 0) > MAX_PROXY_BYTES) {
     return Promise.resolve({ error: "this file is too large to open here — use the Canvas link", status: 413 });
   }
-  return once(target, () => download(db, userId, row, target));
+  return once(target, async () => {
+    const served = await download(db, userId, row, target);
+    if (named && !("error" in served)) recordSource(target, row);
+    return served;
+  });
 }
 
 // --- office → PDF ---------------------------------------------------------
@@ -124,8 +162,10 @@ export function ensurePdf(db: Db, userId: number, row: Row): Promise<Served> {
   if (kind === "pdf") return ensureOriginal(db, userId, row);
   if (kind !== "office") return Promise.resolve({ error: "no PDF form for this file", status: 415 });
 
+  row = newestOfName(db, row);
   const target = deckCachePath(row.mod.canvasCourseId, row.file.displayName, dbPath());
-  if (existsSync(target)) { touch(target); return Promise.resolve(stat(target)); }
+  if (cacheIsCurrent(db, target, row)) { touch(target); return Promise.resolve(stat(target)); }
+  if (existsSync(target)) dropStale(target);
   const bin = sofficeBin();
   if (!bin) return Promise.resolve({ error: "previews for this file type are not available on this server", status: 501 });
 
@@ -136,6 +176,7 @@ export function ensurePdf(db: Db, userId: number, row: Row): Promise<Served> {
     const pdf = await serial(() => runSoffice(bin, original.path, ext));
     if (!pdf || pdf.length === 0) return { error: "this file could not be converted for preview", status: 422 };
     writeAtomic(target, pdf);
+    recordSource(target, row);
     await optimizePdf(target);
     return stat(target);
   });

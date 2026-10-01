@@ -176,6 +176,13 @@
       "when": 1790747199807,
       "tag": "0024_home_layout",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1790851468027,
+      "tag": "0025_auto_guides",
+      "breakpoints": true
     }
   ]
 }

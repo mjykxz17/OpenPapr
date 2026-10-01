@@ -146,6 +146,25 @@ ${deckText}`,
       ));
       return repairMermaidBlocks(normalizeFences(body.trim()));
     },
+
+    // A tutorial or lab sheet, as practice for the topic just taught: what
+    // each task asks, which idea from the topic it exercises, and how to
+    // approach it. Hints, not answers — the point is that the student does it.
+    async practice(sheetName: string, sheetText: string, pageCount: number, heading: string, topic: string): Promise<string> {
+      const body = await withRetry(() => chatText(
+        cfg,
+        styleSystem(sheetName, pageCount, [], reader),
+        `Write this section: a practice guide to the sheet below, for the topic "${topic}".
+
+Heading (use it verbatim as your first line): ### ${heading}
+For each task or question on the sheet: say in one line what it asks, name the idea from this topic it exercises, and give a short approach — where to start, what to watch out for. Do NOT give final answers or full solutions. Skip "Explain like I'm a beginner" here; keep it brisk. Cite the sheet's pages as [p. N](slide:${sheetName}#N).
+
+=== SHEET TEXT (${sheetName}, ${pageCount} pages) ===
+${sheetText}`,
+        { maxTokens: 5000, temperature: 0.3 },
+      ));
+      return repairMermaidBlocks(normalizeFences(body.trim()));
+    },
   };
 }
 

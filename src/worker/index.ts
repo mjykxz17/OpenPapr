@@ -27,6 +27,7 @@ import { createGuard, runUserSync } from "./sync";
 import { pollIntervalAt } from "../lib/poll-schedule";
 import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type ProfileDeps } from "./profiles";
 import { refreshTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
+import { runAutoGuides, type GuideDeps } from "./guides";
 import { needsThread, normalizeDiscussion } from "../connectors/canvas/discussions";
 import { applyDiscussions, applyPlanner, discussionMetaFor } from "../db/canvas-extra";
 import { getModuleProfileRow } from "../db/profiles-repo";
@@ -545,7 +546,11 @@ async function tick(): Promise<void> {
     }
     // Generation takes minutes; it runs beside the tick rather than inside
     // it, so "Sync now" and everyone's syncs keep flowing meanwhile.
-    if (!guideJob) guideJob = runGuideJob().catch((err) => console.error("guide job crashed", err)).finally(() => { guideJob = null; });
+    // A guide someone asked for by hand first, then the automatic guides:
+    // new slides read, topics planned, at most one chapter written.
+    if (!guideJob) guideJob = runGuideJob()
+      .then(() => (Date.now() - lastAutoGuideAt >= AUTO_GUIDE_EVERY ? (lastAutoGuideAt = Date.now(), runAutoGuides(guideDeps)) : undefined))
+      .catch((err) => console.error("guide job crashed", err)).finally(() => { guideJob = null; });
     if (now - lastMaintenanceAt >= MAINTENANCE_MS) {
       lastMaintenanceAt = now;
       maintenance();
@@ -558,6 +563,25 @@ async function tick(): Promise<void> {
 }
 
 let guideJob: Promise<void> | null = null;
+// Preparing is cheap but reads every module; once a minute is plenty. A
+// chapter being written holds the job for minutes anyway.
+const AUTO_GUIDE_EVERY = 60_000;
+let lastAutoGuideAt = 0;
+const guideDeps: GuideDeps = {
+  db, now: Date.now,
+  cfgFor: (userId) => kitFor(userId).compatCfg,
+  readerFor: (userId, moduleId) => {
+    const u = db.select().from(users).where(eq(users.id, userId)).get();
+    if (!u) return null;
+    return readerBrief(
+      parseJson<UserProfile>(UserProfile, u.profileJson),
+      u.styleLearning ? parseJson<WritingStyle>(WritingStyle, u.writingStyleJson) : null,
+      parseJson<ModuleProfile>(ModuleProfile, getModuleProfileRow(db, moduleId)?.profileJson),
+    );
+  },
+  fileText: (userId, file, mod) => taskDeps.fileText(userId, file, mod),
+  log: (m) => console.log(m),
+};
 
 // --- liveness --------------------------------------------------------------
 // The heartbeat file tells the web server (and /api/health) the worker is
