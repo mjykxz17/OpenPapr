@@ -17,6 +17,7 @@ export function SetupChecklist({ steps }: { steps: SetupStep[] }) {
   const [dismissed, setDismissed] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [howTo, setHowTo] = useState(false);
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     setDismissed(get(DISMISSED) === "1");
     setInstalled(get(INSTALLED) === "1" || window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true);
@@ -27,17 +28,28 @@ export function SetupChecklist({ steps }: { steps: SetupStep[] }) {
   const left = all.filter((s) => !s.done).length;
   if (!ready || dismissed || left === 0) return null;
   const close = () => { set(DISMISSED, "1"); setDismissed(true); };
+  const nextStep = all.find((x) => !x.done) ?? null;
 
   return (
-    <section aria-labelledby="setup" className="mb-6 rounded-[10px] border border-line bg-panel px-5 py-4">
-      <div className="flex items-baseline justify-between gap-3">
-        <h2 id="setup" className="text-[15px] font-semibold text-ink">Get set up <span className="ml-1 text-[13px] font-normal tabular-nums text-ink-3">{all.length - left} of {all.length} done</span></h2>
-        <button type="button" onClick={close} className="text-[13px] text-ink-3 hover:text-ink">Hide</button>
+    <section aria-labelledby="setup" className="mb-6 rounded-[10px] border border-line bg-panel px-4 py-3">
+      {/* Folded to one line: the next thing to do. The full list opens on request. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <h2 id="setup" className="text-[14px] font-semibold text-ink">Finish setting up</h2>
+        <div className="flex items-center gap-2" aria-hidden>
+          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-line"><div className="h-full rounded-full bg-accent" style={{ width: `${((all.length - left) / all.length) * 100}%` }} /></div>
+          <span className="text-[12px] tabular-nums text-ink-3">{all.length - left} of {all.length}</span>
+        </div>
+        {!open && nextStep && (
+          nextStep.id === "install"
+            ? <button type="button" onClick={() => { setOpen(true); setHowTo(true); }} className="text-[13px] font-medium text-accent hover:underline">Next: {nextStep.label} →</button>
+            : <Link href={nextStep.href} className="text-[13px] font-medium text-accent no-underline hover:underline">Next: {nextStep.label} →</Link>
+        )}
+        <div className="ml-auto flex items-center gap-3 text-[13px]">
+          <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="text-ink-2 hover:text-ink">{open ? "Less" : "All steps"}</button>
+          <button type="button" onClick={close} className="text-ink-3 hover:text-ink">Hide</button>
+        </div>
       </div>
-      <div className="mt-2 h-1 overflow-hidden rounded-full bg-line" aria-hidden>
-        <div className="h-full rounded-full bg-accent transition-[width]" style={{ width: `${((all.length - left) / all.length) * 100}%` }} />
-      </div>
-      <ul className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+      {open && <ul className="mt-3 grid gap-x-6 gap-y-1 sm:grid-cols-2">
         {all.map((s) => {
           const mark = (
             <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${s.done ? "border-accent bg-accent text-on-accent" : "border-line-2"}`} aria-hidden>
@@ -70,7 +82,7 @@ export function SetupChecklist({ steps }: { steps: SetupStep[] }) {
             </li>
           );
         })}
-      </ul>
+      </ul>}
     </section>
   );
 }

@@ -20,8 +20,8 @@ type Module = Overview["modules"][number];
 
 const GRID = "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3";
 // Every tile is the same size whatever its module holds: the name is one
-// line, the weighting table always takes four rows, and "Next" sits on the
-// bottom edge. A tidy grid beats squeezing in every detail.
+// line, the weighting table always takes four rows, and what's new sits on
+// the bottom edge. A tidy grid beats squeezing in every detail.
 const CARD = "flex h-[258px] flex-col gap-3.5 rounded-[10px] border border-line bg-panel px-[18px] py-4 no-underline select-none";
 const ROWS = 4;
 const ROW_COLORS = ["bg-accent", "bg-seg-2", "bg-seg-3", "bg-seg-4"] as const;
@@ -47,7 +47,6 @@ function TileFace({ m }: { m: Module }) {
           <div className="text-[15px] font-semibold text-ink">{m.code}</div>
           <div className="truncate text-[13px] text-ink-2" title={m.name}>{m.shortName}</div>
         </div>
-        {m.newCount > 0 && <span className="shrink-0 pt-0.5 text-[12px] font-medium text-accent">{m.newCount} new</span>}
       </div>
       <WeightBar components={m.components} />
       {rows.length === 0 ? (
@@ -66,16 +65,11 @@ function TileFace({ m }: { m: Module }) {
           ))}
         </ul>
       )}
+      {/* Deadlines live in Coming up; the card says whether there is anything new to read. */}
       <div className="mt-auto flex items-baseline gap-3 border-t border-line pt-2.5 text-[13px]">
-        <span className="shrink-0 text-ink-3">Next</span>
-        {m.next ? (
-          <span className="ml-auto flex min-w-0 items-baseline gap-1" title={`${m.next.title} · ${m.next.when}`}>
-            <span className="truncate font-medium text-ink">{m.next.title}</span>
-            <span className="shrink-0 text-ink-2">· {m.next.when}</span>
-          </span>
-        ) : (
-          <span className="ml-auto text-ink-3">Nothing due</span>
-        )}
+        {m.newCount > 0
+          ? <span className="font-medium text-accent">{m.newCount} new update{m.newCount === 1 ? "" : "s"}</span>
+          : <span className="text-ink-3">No new updates</span>}
       </div>
     </>
   );

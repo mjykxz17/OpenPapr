@@ -12,12 +12,12 @@ import { dayLabel } from "@/lib/format-date";
 
 const D = 86_400_000;
 
-export function WidgetCard({ title, href, children, className = "" }: { title: string; href?: string; children: ReactNode; className?: string }) {
+export function WidgetCard({ title, href, linkLabel = "Open", children, className = "" }: { title: string; href?: string; linkLabel?: string; children: ReactNode; className?: string }) {
   return (
     <div className={`@container flex h-full flex-col gap-3 overflow-hidden rounded-[10px] border border-line bg-panel px-[18px] py-4 ${className}`}>
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="truncate text-[12px] font-semibold uppercase tracking-[0.06em] text-ink-2">{title}</h2>
-        {href && <Link href={href} className="hidden shrink-0 text-[12px] text-ink-3 hover:text-accent @[210px]:inline">Open →</Link>}
+        {href && <Link href={href} className="hidden shrink-0 text-[12px] text-ink-3 hover:text-accent @[210px]:inline">{linkLabel} →</Link>}
       </div>
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </div>
@@ -64,8 +64,12 @@ export function WeekWidget({ plan, today, size }: { plan: WeeklyPlan | null; tod
 }
 
 // --- Today's steps -------------------------------------------------------------
-export function TodayWidget({ view, size }: { view: TasksView; size: "S" | "W" | "L" }) {
+export function TodayWidget({ view, size, tomorrow }: { view: TasksView; size: "S" | "W" | "L"; tomorrow?: string }) {
   const steps = view.today;
+  // Room left on the large card shows what tomorrow holds, so the day after is never a surprise.
+  const later = size === "L" && tomorrow && steps.length < 5
+    ? [...view.soon, ...view.later].flatMap((t) => t.steps.filter((x) => !x.done && x.doBy === tomorrow).map((x) => ({ ...x, code: t.code, taskId: t.id }))).slice(0, 5 - steps.length)
+    : [];
   if (size === "S") {
     return (
       <WidgetCard title="Today" href="/tasks">
@@ -76,7 +80,7 @@ export function TodayWidget({ view, size }: { view: TasksView; size: "S" | "W" |
   }
   const max = size === "W" ? 2 : 7;
   return (
-    <WidgetCard title={steps.length ? `Today · ${fmtMinutes(view.todayMinutes)}` : "Today"} href="/tasks">
+    <WidgetCard title={steps.length ? `Today · ${fmtMinutes(view.todayMinutes)}` : "Today"} href="/tasks" linkLabel="All tasks">
       {steps.length === 0 ? (
         <Empty>{view.nextDay ? `Nothing today. Next steps on ${dayLabel(Date.parse(`${view.nextDay.date}T12:00:00+08:00`))}.` : "Nothing scheduled. Enjoy it."}</Empty>
       ) : (
@@ -91,6 +95,21 @@ export function TodayWidget({ view, size }: { view: TasksView; size: "S" | "W" |
           {steps.length > max && <li className="text-ink-3">+{steps.length - max} more</li>}
         </ul>
       )}
+      {later.length > 0 && (
+        <div className="mt-4">
+          <p className="text-[11.5px] font-semibold uppercase tracking-[0.06em] text-ink-3">Tomorrow</p>
+          <ul className="mt-2 flex flex-col gap-2 text-[13px]">
+            {later.map((s) => (
+              <li key={`${s.taskId}-${s.id}`} className="flex min-w-0 items-baseline gap-2 text-ink-2">
+                <span className="h-3 w-3 shrink-0 translate-y-0.5 rounded-[3px] border border-dashed border-line-2" />
+                {s.code && <span className="shrink-0 font-mono text-[12px] font-medium">{s.code}</span>}
+                <span className="truncate">{s.text}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {size === "L" && view.done.length > 0 && <p className="mt-auto pt-2 text-[12px] text-ink-3">{view.done.length} task{view.done.length === 1 ? "" : "s"} finished this week</p>}
     </WidgetCard>
   );
 }
@@ -134,26 +153,39 @@ export function DoneWidget({ view, size }: { view: TasksView; size: "S" | "W" })
   );
 }
 
-// --- Due this week (compact) ----------------------------------------------------------
-export function DueWidget({ todos, modules, now, size }: { todos: Overview["todos"]; modules: Overview["modules"]; now: number; size: "W" | "L" }) {
-  const due = todos.filter((t) => t.category !== "routine" && t.dueAt !== null && t.dueAt < now + 7 * D).slice(0, size === "W" ? 2 : 6);
-  const code = (id: number | null) => modules.find((m) => m.id === id)?.code ?? "";
+// --- Coming up --------------------------------------------------------------------
+// Every deadline in one list, soonest first: what is overdue, what Canvas has
+// dated, and the quizzes the planner expects. The first row is the next one.
+export type UpItem = { key: string; title: string; code: string | null; dueAt: number; overdue: boolean; estimated: boolean; worth: number | null; href: string };
+
+export function UpcomingWidget({ items, now, size }: { items: UpItem[]; now: number; size: "W" | "L" | "F" }) {
+  const list = items.slice(0, size === "W" ? 2 : size === "L" ? 7 : 8);
+  const when = (i: UpItem) => {
+    if (i.overdue) return "Overdue";
+    const d = Math.round((new Date(i.dueAt).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / D);
+    const base = d <= 0 ? `Today, ${new Date(i.dueAt).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}` : d === 1 ? "Tomorrow" : dayLabel(i.dueAt);
+    return i.estimated ? `~ ${base}` : base;
+  };
   return (
-    <WidgetCard title="Due this week" href="/tasks">
-      {due.length === 0 ? <Empty>Nothing due in the next seven days.</Empty> : (
-        <ul className="flex flex-col gap-2.5 text-[13px]">
-          {due.map((t) => {
-            const late = t.dueAt! < now;
-            return (
-              <li key={t.id} className="flex min-w-0 items-baseline gap-2">
-                <span className="w-[62px] shrink-0 font-mono text-[12px] font-medium text-ink-2">{code(t.moduleId)}</span>
-                <span className="truncate text-ink">{t.title}</span>
-                <span className={`ml-auto shrink-0 tabular-nums ${late ? "font-medium text-danger" : "text-ink-2"}`}>{late ? "Overdue" : dayLabel(t.dueAt!)}</span>
-              </li>
-            );
-          })}
+    <WidgetCard title="Coming up">
+      {list.length === 0 ? <Empty>Nothing due in the next two weeks.</Empty> : (
+        <ul className="flex flex-col text-[13px]">
+          {list.map((i, n) => (
+            <li key={i.key} className="border-b border-line/70 last:border-0">
+              <Link href={i.href} className="flex min-w-0 items-baseline gap-2 py-[7px] no-underline">
+                <span className="w-[62px] shrink-0 font-mono text-[12px] font-medium text-ink-2">{i.code ?? ""}</span>
+                <span className={`min-w-0 flex-1 truncate ${n === 0 && !i.overdue ? "font-semibold text-ink" : "text-ink"}`} title={i.title}>
+                  {i.title}
+                  {i.estimated && <span className="font-normal text-ink-3"> (expected)</span>}
+                  {i.worth != null && <span className="font-normal text-ink-3"> · {i.worth}%</span>}
+                </span>
+                <span className={`shrink-0 tabular-nums ${i.overdue ? "font-medium text-danger" : n === 0 ? "font-medium text-ink" : "text-ink-2"}`}>{when(i)}</span>
+              </Link>
+            </li>
+          ))}
         </ul>
       )}
+      {items.length > list.length && <p className="mt-auto pt-1 text-[12px] text-ink-3">+{items.length - list.length} more on the Tasks page</p>}
     </WidgetCard>
   );
 }

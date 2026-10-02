@@ -8,10 +8,10 @@ export const SIZE_NAMES: Record<Size, string> = { S: "Small", W: "Wide", L: "Lar
 
 export const WIDGETS = {
   week: { title: "This week", sizes: ["W", "L", "F"] as Size[], size: "F" as Size },
-  today: { title: "Today", sizes: ["S", "W", "L"] as Size[], size: "W" as Size },
+  today: { title: "Today", sizes: ["S", "W", "L"] as Size[], size: "L" as Size },
   next: { title: "Next up", sizes: ["S", "W"] as Size[], size: "S" as Size },
   done: { title: "Completed", sizes: ["S", "W"] as Size[], size: "S" as Size },
-  due: { title: "Due this week", sizes: ["W", "L", "F"] as Size[], size: "F" as Size },
+  due: { title: "Coming up", sizes: ["W", "L", "F"] as Size[], size: "L" as Size },
   modules: { title: "Modules", sizes: ["W", "L", "F"] as Size[], size: "F" as Size },
 } as const;
 export type WidgetId = keyof typeof WIDGETS;
@@ -19,8 +19,13 @@ export const WIDGET_IDS = Object.keys(WIDGETS) as WidgetId[];
 
 export type Slot = { id: WidgetId; size: Size; hidden: boolean };
 
-export const DEFAULT_LAYOUT: Slot[] = (["week", "today", "next", "done", "due", "modules"] as WidgetId[])
-  .map((id) => ({ id, size: WIDGETS[id].size, hidden: false }));
+// Each fact once: Today holds the steps, Coming up every deadline (the next
+// one first), Modules the courses. The week summary sits under the date.
+// "This week", "Next up" and "Completed" repeat those, so they start off the
+// home screen; Edit home puts them back.
+const START_HIDDEN: WidgetId[] = ["week", "next", "done"];
+export const DEFAULT_LAYOUT: Slot[] = (["today", "due", "modules", "week", "next", "done"] as WidgetId[])
+  .map((id) => ({ id, size: WIDGETS[id].size, hidden: START_HIDDEN.includes(id) }));
 
 const SlotIn = z.object({ id: z.string(), size: z.string(), hidden: z.boolean().optional() });
 
@@ -54,6 +59,8 @@ export function parseLayout(json: string | null | undefined): Slot[] {
 export const SIZE_CLASS: Record<Size, string> = {
   S: "col-span-1 row-span-1 h-[168px]",
   W: "col-span-2 row-span-1 h-[168px]",
-  L: "col-span-2 row-span-2 h-[352px]",
+  // On a phone a large card is as tall as what it holds; a fixed height
+  // there mostly meant empty space.
+  L: "col-span-2 row-span-2 md:h-[352px]",
   F: "col-span-2 md:col-span-4",
 };

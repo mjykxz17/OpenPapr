@@ -45,7 +45,7 @@ export function WeekPlan({ plan, status, moduleIdByCode, hasModel, todaySteps }:
         <h2 id="week-plan" className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-2">This week</h2>
         {hasModel
           ? <RebuildButton scope="plan" status={status} noun="summary" />
-          : <Link href="/account" className="text-[12px] text-accent hover:underline">Add an AI key for a weekly summary</Link>}
+          : plan ? null : <Link href="/account" className="text-[12px] text-accent hover:underline">Add an AI key for a weekly summary</Link>}
       </div>
       <div className="flex flex-col gap-3.5 px-5 py-4">
         {plan?.overview ? (

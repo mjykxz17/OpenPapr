@@ -7,14 +7,15 @@ import { AppShell } from "@/components/AppShell";
 import { SyncStatus } from "@/components/SyncStatus";
 import { SyncButton } from "@/components/SyncButton";
 import { ModuleGrid } from "@/components/ModuleGrid";
-import { DueThisWeek } from "@/components/DueThisWeek";
 import { getUser } from "@/db/repo";
 import { weeklyPlanView } from "@/server/profiles";
 import { canGenerateGuides } from "@/server/llm-access";
 import { WeekPlan } from "@/components/profile/WeekPlan";
 import { tasksView } from "@/server/tasks";
 import { HomeBoard, type WidgetViews } from "@/components/home/HomeBoard";
-import { DoneWidget, DueWidget, ModulesWidget, NextWidget, TodayWidget, WeekWidget, type NextUp } from "@/components/home/Widgets";
+import { DoneWidget, ModulesWidget, NextWidget, TodayWidget, UpcomingWidget, WeekWidget, type NextUp, type UpItem } from "@/components/home/Widgets";
+import { findWeightBadge } from "@/lib/component-display";
+import { firstSentence } from "@/components/profile/WeekPlan";
 import { parseLayout } from "@/lib/home-layout";
 import { SetupChecklist } from "@/components/home/SetupChecklist";
 import { sharedLlmConfig, userLlmConfig } from "@/lib/llm-provider";
@@ -36,6 +37,7 @@ export default async function Home() {
   // Today's steps are said once: by the Today widget when it is on the home
   // screen, otherwise by the This week card.
   const todayShown = layout.some((s) => s.id === "today" && !s.hidden);
+  const weekShown = layout.some((s) => s.id === "week" && !s.hidden);
   const todaySteps = todayShown ? null : { count: tv.today.length, minutes: tv.todayMinutes };
   const moduleIdByCode = Object.fromEntries(overview.modules.map((m) => [m.code.toUpperCase(), m.id]));
   const codeOf = (id: number | null) => overview.modules.find((m) => m.id === id)?.code ?? null;
@@ -47,19 +49,28 @@ export default async function Home() {
       .map((t) => ({ title: t.title, code: t.code, dueAt: t.dueAt!, estimated: t.dueConfidence === "estimated", href: "/tasks" })),
   ].sort((a, b) => a.dueAt - b.dueAt);
   const overdue = overview.todos.filter((t) => t.category !== "routine" && t.dueAt !== null && t.dueAt < now).length;
+  // Coming up: everything dated in the next two weeks, overdue first, then
+  // soonest; quizzes the planner expects are marked as such.
+  const D = 86_400_000;
+  const upcoming: UpItem[] = [
+    ...overview.todos.filter((t) => t.category !== "routine" && t.dueAt !== null && t.dueAt < now + 14 * D)
+      .map((t) => ({ key: `i${t.id}`, title: t.title, code: codeOf(t.moduleId), dueAt: t.dueAt!, overdue: t.dueAt! < now, estimated: false, worth: findWeightBadge(t, overview.modules), href: t.moduleId ? `/modules/${t.moduleId}` : "/tasks" })),
+    ...[...tv.soon, ...tv.later].filter((t) => t.anticipated && t.dueAt !== null && t.dueAt >= now && t.dueAt < now + 21 * D)
+      .map((t) => ({ key: `t${t.id}`, title: t.title.replace(/\s*\(expected\)$/i, ""), code: t.code, dueAt: t.dueAt!, overdue: false, estimated: t.dueConfidence === "estimated", worth: t.weightPct, href: `/tasks#task-${t.id}` })),
+  ].sort((a, b) => Number(b.overdue) - Number(a.overdue) || a.dueAt - b.dueAt);
   const views: WidgetViews = {
     week: {
       W: <WeekWidget plan={week.plan} today={todaySteps} size="W" />,
       L: <WeekWidget plan={week.plan} today={todaySteps} size="L" />,
       F: <WeekPlan {...week} todaySteps={todaySteps} moduleIdByCode={moduleIdByCode} hasModel={canGenerateGuides(db, userId)} />,
     },
-    today: { S: <TodayWidget view={tv} size="S" />, W: <TodayWidget view={tv} size="W" />, L: <TodayWidget view={tv} size="L" /> },
+    today: { S: <TodayWidget view={tv} size="S" />, W: <TodayWidget view={tv} size="W" />, L: <TodayWidget view={tv} size="L" tomorrow={new Date(now + 8 * 3_600_000 + 86_400_000).toISOString().slice(0, 10)} /> },
     next: { S: <NextWidget items={nextUp} overdue={overdue} now={now} size="S" />, W: <NextWidget items={nextUp} overdue={overdue} now={now} size="W" /> },
     done: { S: <DoneWidget view={tv} size="S" />, W: <DoneWidget view={tv} size="W" /> },
     due: {
-      W: <DueWidget todos={overview.todos} modules={overview.modules} now={now} size="W" />,
-      L: <DueWidget todos={overview.todos} modules={overview.modules} now={now} size="L" />,
-      F: <DueThisWeek todos={overview.todos} modules={overview.modules} now={now} />,
+      W: <UpcomingWidget items={upcoming} now={now} size="W" />,
+      L: <UpcomingWidget items={upcoming} now={now} size="L" />,
+      F: <UpcomingWidget items={upcoming} now={now} size="F" />,
     },
     modules: {
       W: <ModulesWidget modules={overview.modules} size="W" />,
@@ -109,8 +120,10 @@ export default async function Home() {
         initial={layout}
         views={views}
         title={
-          <div className="flex flex-col gap-1">
+          <div className="flex max-w-3xl flex-col gap-1">
             <h1 className="text-2xl font-semibold tracking-[-0.01em] tabular-nums text-ink">{dateLabel}</h1>
+            {/* The week in one sentence, unless the This week widget is on screen to say it. */}
+            {week.plan && !weekShown && <p className="text-[15px] leading-[1.5] text-ink-2">{firstSentence(week.plan.overview)}</p>}
             {user?.canvasTokenEnc && <SyncStatus syncStatus={overview.syncStatus} now={now} mailConnected={Boolean(user?.msRefreshTokenEnc)} />}
           </div>
         }
