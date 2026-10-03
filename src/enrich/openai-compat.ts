@@ -49,7 +49,9 @@ export function extractJson(text: string): unknown | null {
   }
 }
 
-type Message = { role: "system" | "user" | "assistant"; content: string };
+// Content is text, or (for models that read images) text and images.
+export type ContentPart = { type: "text"; text: string } | { type: "image_url"; image_url: { url: string } };
+type Message = { role: "system" | "user" | "assistant"; content: string | ContentPart[] };
 
 const gateKey = (cfg: CompatConfig) => createHash("sha256").update(`${cfg.baseUrl}\n${cfg.apiKey}`).digest("hex").slice(0, 24);
 
@@ -134,10 +136,16 @@ export async function complete(
   throw new Error(errors.join(" | "));
 }
 
-export async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system: string, user: string, maxTokens: number, timeoutMs = 180_000): Promise<unknown | null> {
+export async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system: string, user: string | ContentPart[], maxTokens: number, timeoutMs = 180_000): Promise<unknown | null> {
   const text = await complete(cfg, [{ role: "system", content: system }, { role: "user", content: user }], { maxTokens, timeoutMs, fetchFn });
   return extractJson(text);
 }
+
+// An error from a provider whose model can't take images ("image input is
+// not supported", "invalid content type"…), as opposed to any other failure.
+export const isImageRefusal = (err: unknown) =>
+  /\b(image|vision|multimodal|multi-modal|image_url|content type|content part)\b/i.test(String(err instanceof Error ? err.message : err))
+  && /llm 4\d\d/.test(String(err instanceof Error ? err.message : err));
 
 // Prose completion, for generated long-form content. chatJson is the wrong
 // shape for a study guide: it hunts for the first { and last } and would

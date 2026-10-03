@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { chatJson, type CompatConfig } from "./openai-compat";
+import { chatJson, isImageRefusal, type CompatConfig, type ContentPart } from "./openai-compat";
 
 // The course roadmap. Lecturers set out the semester once — a "Schedule"
 // table in the first lecture, an "Assessment" slide in the admin deck, the
@@ -13,6 +13,9 @@ import { chatJson, type CompatConfig } from "./openai-compat";
 export const ROADMAP_KINDS = ["quiz", "test", "midterm", "exam", "assignment", "lab", "project", "presentation", "tutorial", "other"] as const;
 
 export type RoadmapSource = { ref: string; label: string; text: string };
+// A slide whose schedule is a picture (a pasted table): its text is just a
+// title, so the page itself is sent to models that read images.
+export type RoadmapImage = { ref: string; label: string; page: number; png: Uint8Array };
 
 const Raw = z.object({
   title: z.string().min(2).max(120),
@@ -51,6 +54,8 @@ For each give:
 - slot: when it happens in the week if stated: "lecture", "tutorial", "lab", "online", "take-home".
 - weightPct, covers (e.g. "L1-L5"): if stated.
 - ref and page: where you read it; quote: the phrase, under 200 characters.
+
+Some slides come as images after the text, labelled with their ref and page — usually a schedule table pasted as a picture. Read them like text: each row is a week; a cell in a "Quiz", "Assignment", "Incident" or "Project" column is an assessment in that week. Cite their ref and page.
 
 Copy what the source says; do not guess. One entry per assessment instance ("Quizzes in Weeks 3, 5, 7" is three entries). If the sources hold no schedule, return an empty list.
 
@@ -93,17 +98,49 @@ export function cleanRoadmap(raw: unknown, refs: Set<string>): RoadmapItem[] | n
   return out;
 }
 
-export async function extractRoadmap(cfg: CompatConfig, module: { code: string; name: string }, sources: RoadmapSource[], fetchFn: typeof fetch = fetch): Promise<RoadmapItem[]> {
-  if (!sources.length) return [];
-  const refs = new Set(sources.map((s) => s.ref));
+export type RoadmapResult = { items: RoadmapItem[]; imagesRead: number; imagesRefused: boolean };
+
+export async function extractRoadmap(
+  cfg: CompatConfig, module: { code: string; name: string }, sources: RoadmapSource[], fetchFn: typeof fetch = fetch, images: RoadmapImage[] = [],
+): Promise<RoadmapResult> {
+  if (!sources.length && !images.length) return { items: [], imagesRead: 0, imagesRefused: false };
+  const refs = new Set([...sources.map((s) => s.ref), ...images.map((i) => i.ref)]);
+  const text = roadmapPrompt(module, sources);
+  const withImages: ContentPart[] = [
+    { type: "text", text },
+    ...images.flatMap((im): ContentPart[] => [
+      { type: "text", text: `=== [${im.ref}] ${im.label}, page ${im.page} (image) ===` },
+      { type: "image_url", image_url: { url: `data:image/png;base64,${Buffer.from(im.png).toString("base64")}` } },
+    ]),
+  ];
+  let send: string | ContentPart[] = images.length ? withImages : text;
+  let refused = false;
   let items: RoadmapItem[] | null = null;
   for (let attempt = 0; attempt < 2 && items === null; attempt++) {
-    items = cleanRoadmap(await chatJson(cfg, fetchFn, ROADMAP_SYSTEM, roadmapPrompt(module, sources), 5000), refs);
+    try {
+      items = cleanRoadmap(await chatJson(cfg, fetchFn, ROADMAP_SYSTEM, send, 5000), refs);
+    } catch (err) {
+      // A model that can't read images still gets the text.
+      if (typeof send !== "string" && isImageRefusal(err)) { refused = true; send = text; attempt--; continue; }
+      throw err;
+    }
   }
   if (!items) throw new Error("the model's roadmap was not in the expected shape");
-  return items;
+  return { items, imagesRead: refused ? 0 : images.length, imagesRefused: refused };
 }
 
+// Pages that are a picture with a title on top: little text, and either a
+// schedule-like title or among the first slides.
+const PICTURE_TITLE_RE = /schedule|timeline|calendar|assessment|grading|week|plan|overview|deadline/i;
+export function picturePages(text: string, max = 4): number[] {
+  const parts = text.split(/--\s*\d+\s*of\s*\d+\s*--/);
+  const out: number[] = [];
+  parts.forEach((body, i) => {
+    const words = body.replace(/\s+/g, " ").trim();
+    if (words.length > 0 && words.length < 70 && PICTURE_TITLE_RE.test(words)) out.push(i + 1);
+  });
+  return out.slice(0, max);
+}
 // --- choosing what to read ----------------------------------------------------
 const SCHEDULE_RE = /\b(week|wk)\s*\d|schedule|timeline|assessment|quiz|test|mid-?term|exam|deadline|\bdue\b|submission|presentation|project|milestone|\blab\b|tutorial|recess|reading week/i;
 

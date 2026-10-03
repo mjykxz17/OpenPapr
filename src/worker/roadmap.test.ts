@@ -96,3 +96,31 @@ describe("roadmap → planner", () => {
     expect(roadLog).toHaveLength(1);
   });
 });
+
+describe("schedules pasted as pictures", () => {
+  it("spots a slide that is only a title over a picture", async () => {
+    const { picturePages } = await import("../enrich/roadmap");
+    const deck = ["Welcome to CS4238", "Teaching Mode & Grading • 13 Lectures • Quizzes (approx. 4): 40% • Incident reports: 40% • CTF: 20%", "Tentave Schedule", "Tentave Schedule 7", "Our lab environment and many more words about virtual machines"]
+      .map((t, i) => `${t}\n-- ${i + 1} of 5 --`).join("\n");
+    expect(picturePages(deck)).toEqual([3, 4]);
+  });
+
+  it("sends those pages as images, and falls back to text when the model can't take images", async () => {
+    const { extractRoadmap } = await import("../enrich/roadmap");
+    const bodies: unknown[] = [];
+    let calls = 0;
+    const fetchFn = (async (_u: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      bodies.push(body.messages[1].content);
+      calls++;
+      if (calls === 1) return new Response("image input is not supported for this model", { status: 400 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"items":[]}' } }] }));
+    }) as unknown as typeof fetch;
+    const r = await extractRoadmap(cfg, { code: "CS4238", name: "x" }, [{ ref: "F1", label: "L1.pdf", text: "Tentative Schedule\n-- 6 of 7 --" }], fetchFn,
+      [{ ref: "F1", label: "L1.pdf", page: 6, png: new Uint8Array([1, 2, 3]) }]);
+    expect(Array.isArray(bodies[0])).toBe(true);
+    expect(JSON.stringify(bodies[0])).toContain("data:image/png;base64,AQID");
+    expect(typeof bodies[1]).toBe("string");
+    expect(r).toEqual({ items: [], imagesRead: 0, imagesRefused: true });
+  });
+});

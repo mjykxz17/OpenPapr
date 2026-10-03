@@ -75,6 +75,7 @@ Rules:
 - The student's own planner notes are tasks they chose: keep their wording, add steps only if the note is bigger than one sitting.
 - Work Canvas marks MISSING comes first: make its first step today.
 - The course roadmap is the course's own schedule, read from its syllabus, first or admin slides and welcome announcement. Every assessment on it within the horizon is a task: use a stated date as "exact"; a week resolved to a class slot's day and time as "exact" when the source says it happens in that slot, otherwise "estimated"; a bare week number as "estimated" on that week's last teaching day unless the source says otherwise. Cite the roadmap ref.
+- A quiz or test on the roadmap with no stated time, in a module whose only weekly class is one Canvas slot, is held in that class that week: place it there ("estimated") unless an announcement says it is take-home or online (then use the deadline it gives).
 - Announcements and staff replies are newer than the roadmap and win: a quiz "moved to Thursday", "postponed", "cancelled" or "now covers L1-L7" changes the task. Use the new date, say "moved from <old date>" (or what changed) in why, and cite both the roadmap ref and the announcement.
 - A weekly Canvas calendar event named after the course is a class slot, not an obligation; it matters only to place a roadmap item that happens "in lecture" or "in class".
 - Skip attending lectures, labs or tutorials, bringing or charging a laptop, anything already submitted or past, and generic advice with no source.

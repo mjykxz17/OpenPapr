@@ -1,3 +1,4 @@
+import { renderPdfPage } from "../lib/pdf-render";
 // src/worker/index.ts — run: npm run worker
 import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
@@ -437,6 +438,11 @@ const taskDeps: TaskDeps = {
     const served = await ensurePdf(db, userId, { file, mod });
     if ("error" in served) return null;
     return extractPdfText(new Uint8Array(readFileSync(served.path)));
+  },
+  pageImage: async (userId, file, mod, page) => {
+    const served = await ensurePdf(db, userId, { file, mod });
+    if ("error" in served) return null;
+    return renderPdfPage(new Uint8Array(readFileSync(served.path)), page, 1.25);
   },
 };
 const taskGuard = createGuard(env.POLL_INTERVAL_MS);

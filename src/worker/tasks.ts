@@ -31,6 +31,8 @@ export type TaskDeps = {
   // The file's text (PDF, or an office file converted to PDF), or null when
   // it cannot be read. Injected so tests need no Canvas.
   fileText: (userId: number, file: typeof files.$inferSelect, mod: typeof modules.$inferSelect) => Promise<string | null>;
+  // A page drawn as a PNG (for schedules pasted into slides as pictures).
+  pageImage?: (userId: number, file: typeof files.$inferSelect, mod: typeof modules.$inferSelect, page: number) => Promise<Uint8Array | null>;
   fetchFn?: typeof fetch;
 };
 

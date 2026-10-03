@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { files, items, moduleRoadmaps, modules } from "../db/schema";
-import { extractRoadmap, ROADMAP_FILE_RE, schedulePages, type RoadmapItem, type RoadmapSource } from "../enrich/roadmap";
+import { extractRoadmap, picturePages, ROADMAP_FILE_RE, schedulePages, type RoadmapImage, type RoadmapItem, type RoadmapSource } from "../enrich/roadmap";
 import type { CompatConfig } from "../enrich/openai-compat";
 import type { SignalItem, TaskSource } from "../enrich/tasks";
 import { htmlToText } from "../lib/html-text";
@@ -29,6 +29,8 @@ export type RoadmapDeps = {
   now: () => number;
   cfgFor: (userId: number) => CompatConfig | null;
   fileText: (userId: number, file: FileRow, mod: Mod) => Promise<string | null>;
+  // One page of a file drawn as a PNG, for schedules pasted as pictures.
+  pageImage?: (userId: number, file: FileRow, mod: Mod, page: number) => Promise<Uint8Array | null>;
   fetchFn?: typeof fetch;
 };
 
@@ -56,6 +58,7 @@ function plan(db: Db, mod: Mod) {
   const early = db.select().from(items).where(and(eq(items.moduleId, mod.id), eq(items.type, "announcement"))).all()
     .sort((a, b) => (a.sourceCreatedAt ?? a.firstSeenAt) - (b.sourceCreatedAt ?? b.firstSeenAt)).slice(0, 3);
   const fp = hash({
+    v: 2, // bump to re-read every module (v2: schedules pasted as pictures)
     syllabus: mod.syllabusBody ? hash(mod.syllabusBody) : null,
     files: fileRows.map((f) => [f.id, f.sizeBytes, f.textSigJson ? hash(f.textSigJson) : null]),
     early: early.map((a) => a.id),
@@ -65,6 +68,7 @@ function plan(db: Db, mod: Mod) {
 
 async function gather(deps: RoadmapDeps, userId: number, mod: Mod, fileRows: FileRow[], early: (typeof items.$inferSelect)[]) {
   const sources: RoadmapSource[] = [];
+  const images: RoadmapImage[] = [];
   const refs: SourceRef[] = [];
   if (mod.syllabusBody) {
     const text = htmlToText(mod.syllabusBody).replace(/\n{3,}/g, "\n\n").slice(0, 8000);
@@ -77,6 +81,14 @@ async function gather(deps: RoadmapDeps, userId: number, mod: Mod, fileRows: Fil
     const ref = `F${f.id}`;
     sources.push({ ref, label: f.displayName, text: schedulePages(text) });
     refs.push({ ref, label: f.displayName.replace(/\.[^.]+$/, ""), fileId: f.id });
+    if (deps.pageImage) {
+      for (const page of picturePages(text)) {
+        if (images.length >= 4) break;
+        let png: Uint8Array | null = null;
+        try { png = await deps.pageImage(userId, f, mod, page); } catch { /* not drawable */ }
+        if (png?.length) images.push({ ref, label: f.displayName, page, png });
+      }
+    }
   }
   for (const a of early) {
     const text = htmlToText(a.body).replace(/\s+/g, " ").slice(0, 3000);
@@ -85,7 +97,7 @@ async function gather(deps: RoadmapDeps, userId: number, mod: Mod, fileRows: Fil
     sources.push({ ref, label: `Announcement: ${a.title}`, text });
     refs.push({ ref, label: a.title, itemId: a.id });
   }
-  return { sources, refs };
+  return { sources, images, refs };
 }
 
 export async function refreshRoadmaps(deps: RoadmapDeps, userId: number, mods: Mod[]): Promise<{ read: number; errors: string[] }> {
@@ -102,9 +114,11 @@ export async function refreshRoadmaps(deps: RoadmapDeps, userId: number, mods: M
     .slice(0, PER_RUN);
   for (const d of due) {
     try {
-      const { sources, refs } = await gather(deps, userId, d.mod, d.fileRows, d.early);
-      const found = await extractRoadmap(cfg, { code: d.mod.code, name: d.mod.name }, sources, deps.fetchFn);
-      const set = { itemsJson: JSON.stringify(found), sourcesJson: JSON.stringify(refs), inputsHash: d.fp, generatedAt: deps.now(), error: null, errorAt: null };
+      const { sources, images, refs } = await gather(deps, userId, d.mod, d.fileRows, d.early);
+      const found = await extractRoadmap(cfg, { code: d.mod.code, name: d.mod.name }, sources, deps.fetchFn, images);
+      // Not a failure, but worth knowing: the schedule is a picture this model can't read.
+      const note = found.imagesRefused ? `the schedule on ${images.map((i) => `${i.label} p.${i.page}`).join(", ")} is a picture, and this AI model can't read pictures` : null;
+      const set = { itemsJson: JSON.stringify(found.items), sourcesJson: JSON.stringify(refs), inputsHash: d.fp, generatedAt: deps.now(), error: note, errorAt: null };
       db.insert(moduleRoadmaps).values({ moduleId: d.mod.id, ...set }).onConflictDoUpdate({ target: moduleRoadmaps.moduleId, set }).run();
       out.read++;
     } catch (err) {
@@ -178,6 +192,10 @@ export function roadmapSignals(db: Db, mod: Mod, now: number): { lines: SignalIt
         const day = wk.monday + ((slot.weekday + 6) % 7) * D;
         when += ` → in the ${it.slot ?? "class"} slot: ${dayLabel(day)} ${it.time ?? slot.time} (weekly Canvas event "${slot.title}")`;
       }
+    }
+    if (!it.date && wk && !it.slot && slots.length === 1 && ["quiz", "test", "midterm"].includes(it.kind)) {
+      const s = slots[0]!;
+      when += ` (the module's only weekly class is ${WD[s.weekday]} ${s.time}, ${dayLabel(wk.monday + ((s.weekday + 6) % 7) * D)} that week)`;
     }
     if (wk && wk.sunday + D < now) return; // long past
     const extra = [it.weightPct != null ? `${it.weightPct}%` : null, it.covers ? `covers ${it.covers}` : null, it.slot && !when.includes("slot") ? `in ${it.slot}` : null].filter(Boolean).join(", ");
