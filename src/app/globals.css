@@ -101,6 +101,15 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* iPhones zoom the whole page into any text field smaller than 16px and
+   don't zoom back out, which left Papi's chat unusable. On touch screens
+   every text field is 16px; outside a layer, so it beats the utilities. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select {
+    font-size: 16px;
+  }
+}
+
 /* Let Tailwind's dark: variant follow our attribute, not the OS. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
