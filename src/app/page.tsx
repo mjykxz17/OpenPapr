@@ -15,10 +15,12 @@ import { tasksView } from "@/server/tasks";
 import { HomeBoard, type WidgetViews } from "@/components/home/HomeBoard";
 import { DoneWidget, ModulesWidget, NextWidget, TodayWidget, UpcomingWidget, WeekWidget, type NextUp, type UpItem } from "@/components/home/Widgets";
 import { findWeightBadge } from "@/lib/component-display";
-import { firstSentence } from "@/components/profile/WeekPlan";
 import { parseLayout } from "@/lib/home-layout";
 import { SetupChecklist } from "@/components/home/SetupChecklist";
 import { sharedLlmConfig, userLlmConfig } from "@/lib/llm-provider";
+import { semesterView } from "@/lib/acad-week";
+import { SemesterBar } from "@/components/home/SemesterBar";
+import { shortDate, syncedLabel } from "@/lib/format-date";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +39,6 @@ export default async function Home() {
   // Today's steps are said once: by the Today widget when it is on the home
   // screen, otherwise by the This week card.
   const todayShown = layout.some((s) => s.id === "today" && !s.hidden);
-  const weekShown = layout.some((s) => s.id === "week" && !s.hidden);
   const todaySteps = todayShown ? null : { count: tv.today.length, minutes: tv.todayMinutes };
   const moduleIdByCode = Object.fromEntries(overview.modules.map((m) => [m.code.toUpperCase(), m.id]));
   const codeOf = (id: number | null) => overview.modules.find((m) => m.id === id)?.code ?? null;
@@ -88,6 +89,18 @@ export default async function Home() {
     { id: "calendar", label: "Add deadlines to your calendar", hint: "Google or Apple Calendar, kept up to date", href: "/account#acct-calendar", done: Boolean(user?.calendarToken) },
   ];
   const dateLabel = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" }).format(now);
+  // The header: where we are in the NUS semester, how far exams are, and
+  // whether anything is due today.
+  const sem = env.ACADEMIC_CALENDAR === "nus" ? semesterView(now) : null;
+  const todayKey = new Date(now + 8 * 3_600_000).toISOString().slice(0, 10);
+  const dueToday = overview.todos.filter((t) => t.category !== "routine" && t.dueAt !== null && t.dueAt >= now && new Date(t.dueAt + 8 * 3_600_000).toISOString().slice(0, 10) === todayKey).length;
+  const toExams = sem ? Math.round((sem.examsFrom - now) / 86_400_000) : 0;
+  const examsBit = !sem || sem.phase === "exams" || sem.phase === "vacation" || toExams < 0 ? null
+    : toExams <= 13 ? `${toExams} day${toExams === 1 ? "" : "s"} to exams` : `${Math.round(toExams / 7)} weeks to exams`;
+  const dueBit = dueToday ? `${dueToday} due today` : "nothing due today";
+  const semLine = [examsBit, dueBit].filter(Boolean).join(" · ").replace(/^./, (c) => c.toUpperCase());
+  const canvasOkAt = overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null;
+  const syncStale = overview.syncStatus.some((x) => (x.source === "canvas" || (x.source === "graph" && user?.msRefreshTokenEnc)) && x.stale);
 
   return (
     <AppShell>
@@ -120,14 +133,24 @@ export default async function Home() {
         initial={layout}
         views={views}
         title={
-          <div className="flex max-w-3xl flex-col gap-1">
-            <h1 className="text-2xl font-semibold tracking-[-0.01em] tabular-nums text-ink">{dateLabel}</h1>
-            {/* The week in one sentence, unless the This week widget is on screen to say it. */}
-            {week.plan && !weekShown && <p className="text-[15px] leading-[1.5] text-ink-2">{firstSentence(week.plan.overview)}</p>}
-            {user?.canvasTokenEnc && <SyncStatus syncStatus={overview.syncStatus} now={now} mailConnected={Boolean(user?.msRefreshTokenEnc)} />}
+          <div className="flex max-w-3xl flex-col">
+            {sem ? (
+              <>
+                <h1 className="text-2xl font-semibold tracking-[-0.01em] tabular-nums text-ink">
+                  {sem.title}{sem.weekOf && <span className="ml-1.5 text-[16px] font-medium text-ink-3">of {sem.weekOf}</span>}
+                </h1>
+                <p className="mt-0.5 text-[14px] text-ink-2">{dateLabel}{sem.phase === "vacation" && sem.nextSemStart ? ` · Semester ${sem.sem === 1 ? 2 : 1} starts ${shortDate(sem.nextSemStart)}` : ""}</p>
+                <SemesterBar v={sem} />
+                <p className="mt-2 text-[13.5px] text-ink-2">{semLine}</p>
+              </>
+            ) : (
+              <h1 className="text-2xl font-semibold tracking-[-0.01em] tabular-nums text-ink">{dateLabel}</h1>
+            )}
+            {/* Sync is the icon on the right; this line only speaks up when something is stale. */}
+            {user?.canvasTokenEnc && syncStale && <div className="mt-2"><SyncStatus syncStatus={overview.syncStatus} now={now} mailConnected={Boolean(user?.msRefreshTokenEnc)} /></div>}
           </div>
         }
-        actions={user?.canvasTokenEnc ? <SyncButton lastSyncedAt={overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null} /> : null}
+        actions={user?.canvasTokenEnc ? <SyncButton lastSyncedAt={canvasOkAt} label={canvasOkAt ? `Synced ${syncedLabel(canvasOkAt, now)}` : "Not synced yet"} /> : null}
       />
     </AppShell>
   );

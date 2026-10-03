@@ -18,11 +18,12 @@ import { shortComponentName } from "@/lib/module-name";
 
 type Module = Overview["modules"][number];
 
-const GRID = "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3";
-// Every tile is the same size whatever its module holds: the name is one
-// line, the weighting table always takes four rows, and what's new sits on
-// the bottom edge. A tidy grid beats squeezing in every detail.
-const CARD = "flex h-[258px] flex-col gap-3.5 rounded-[10px] border border-line bg-panel px-[18px] py-4 no-underline select-none";
+// On a phone, two small tiles a row: code, name, the weighting bar and what's
+// new; the weighting table waits on the module page. From tablet width up,
+// every tile is the same size whatever its module holds: the name is one
+// line, the table always takes four rows, and what's new sits on the bottom.
+const GRID = "grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-3";
+const CARD = "flex min-h-[124px] flex-col gap-2.5 rounded-[12px] border border-line bg-panel p-3 no-underline select-none sm:h-[258px] sm:gap-3.5 sm:rounded-[10px] sm:px-[18px] sm:py-4";
 const ROWS = 4;
 const ROW_COLORS = ["bg-accent", "bg-seg-2", "bg-seg-3", "bg-seg-4"] as const;
 
@@ -45,17 +46,17 @@ function TileFace({ m }: { m: Module }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[15px] font-semibold text-ink">{m.code}</div>
-          <div className="truncate text-[13px] text-ink-2" title={m.name}>{m.shortName}</div>
+          <div className="line-clamp-2 text-[12.5px] leading-snug text-ink-2 sm:line-clamp-none sm:truncate sm:text-[13px]" title={m.name}>{m.shortName}</div>
         </div>
       </div>
-      <WeightBar components={m.components} />
+      <div className="mt-auto sm:mt-0"><WeightBar components={m.components} /></div>
       {rows.length === 0 ? (
-        <div className="flex h-[88px] flex-col justify-center gap-1 text-[13px] text-ink-3">
+        <div className="hidden h-[88px] flex-col justify-center gap-1 text-[13px] text-ink-3 sm:flex">
           <span>Weighting not found yet</span>
           <span className="font-medium text-accent">Add it on the module page</span>
         </div>
       ) : (
-        <ul className="grid h-[88px] content-start gap-y-[5px] text-[13px] tabular-nums">
+        <ul className="hidden h-[88px] content-start gap-y-[5px] text-[13px] tabular-nums sm:grid">
           {rows.map((r, i) => (
             <li key={r.name} className="grid grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2" title={r.full}>
               <span className={`h-2 w-2 rounded-[2px] ${r.warn ? "border border-dashed border-warn-ink" : ROW_COLORS[i] ?? "bg-seg-4"}`} />
@@ -66,7 +67,13 @@ function TileFace({ m }: { m: Module }) {
         </ul>
       )}
       {/* Deadlines live in Coming up; the card says whether there is anything new to read. */}
-      <div className="mt-auto flex items-baseline gap-3 border-t border-line pt-2.5 text-[13px]">
+      {/* Phone: a small pill. Wider: the footer line. */}
+      <div className="text-[12px] sm:hidden">
+        {m.newCount > 0
+          ? <span className="rounded-full bg-accent-soft px-2 py-[1px] font-semibold text-accent">{m.newCount} new</span>
+          : <span className="text-ink-3">Up to date</span>}
+      </div>
+      <div className="mt-auto hidden items-baseline gap-3 border-t border-line pt-2.5 text-[13px] sm:flex">
         {m.newCount > 0
           ? <span className="font-medium text-accent">{m.newCount} new update{m.newCount === 1 ? "" : "s"}</span>
           : <span className="text-ink-3">No new updates</span>}
@@ -164,7 +171,7 @@ export function ModuleGrid({ modules }: { modules: Module[] }) {
               editing ? "border-accent bg-accent-soft text-accent" : "border-line-2 bg-panel text-ink hover:border-ink-3"
             }`}
           >
-            {editing ? "Done" : "Arrange modules"}
+            {editing ? "Done" : <>Arrange<span className="hidden sm:inline"> modules</span></>}
           </button>
         )}
       </div>

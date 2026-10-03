@@ -36,6 +36,9 @@ const EnvSchema = z.object({
   // without it module profiles are built without student reviews.
   DISQUS_API_KEY: z.string().optional(),
   POLL_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
+  // The academic calendar the home header follows: "nus" (week numbers,
+  // recess, reading week, exams) or "off" for a plain date.
+  ACADEMIC_CALENDAR: z.enum(["nus", "off"]).default("nus"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

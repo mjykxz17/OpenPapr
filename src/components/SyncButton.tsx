@@ -28,7 +28,9 @@ type State = { pending: boolean; running: boolean; lastOk: boolean | null; lastE
 // With lastSyncedAt, opening the page syncs straight away when Canvas was last
 // read more than a couple of minutes ago, so the student never starts from
 // stale data even overnight, when the background schedule is hourly.
-export function SyncButton({ lastSyncedAt }: { lastSyncedAt?: number | null } = {}) {
+// `label` is the tooltip (e.g. "Synced 11:44"); on a phone the button is
+// just the icon.
+export function SyncButton({ lastSyncedAt, label }: { lastSyncedAt?: number | null; label?: string } = {}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,15 +96,17 @@ export function SyncButton({ lastSyncedAt }: { lastSyncedAt?: number | null } = 
 
   return (
     <div className="flex items-center gap-2">
-      {error && <span className="text-[13px] text-danger">{error}</span>}
+      {error && <span className="max-w-[40vw] text-[12.5px] leading-tight text-danger sm:max-w-none sm:text-[13px]">{error}</span>}
       <button
         type="button"
         onClick={() => syncNow()}
         disabled={busy}
-        className="inline-flex h-9 items-center gap-2 rounded-md border border-line-2 bg-panel px-3 text-[13px] font-medium text-ink transition-colors hover:border-accent hover:text-accent disabled:opacity-60"
+        aria-label={busy ? "Syncing" : "Sync now"}
+        title={label ? `${label} · sync now` : "Sync now"}
+        className="inline-flex h-9 min-w-9 items-center justify-center gap-2 rounded-md border border-line-2 bg-panel px-2.5 text-[13px] font-medium text-ink transition-colors hover:border-accent hover:text-accent disabled:opacity-60 sm:px-3"
       >
         {busy ? <SpinnerIcon /> : <RefreshIcon />}
-        {busy ? "Syncing…" : "Sync now"}
+        <span className="hidden sm:inline">{busy ? "Syncing…" : "Sync now"}</span>
       </button>
     </div>
   );

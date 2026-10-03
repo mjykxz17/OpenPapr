@@ -77,13 +77,19 @@ export function HomeBoard({ initial, views, title, actions }: { initial: Slot[];
     <div className="flex flex-col gap-3">
       {/* The page header: the date and sync on the left, the two things you
           can do to the whole page on the right. */}
-      <header className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-3 sm:mb-6">
-        {title}
-        <div className="flex items-center gap-2">
+      <header className="mb-4 flex items-start justify-between gap-4 sm:mb-6">
+        <div className="min-w-0 flex-1">{title}</div>
+        {/* Icons on a phone, words from tablet width up. */}
+        <div className="flex shrink-0 items-center gap-2">
           {actions}
-          <button type="button" onClick={() => setEditing((e) => !e)} aria-pressed={editing}
-            className={`h-9 rounded-md border px-3 text-[13px] font-medium transition-colors ${editing ? "border-accent bg-accent-soft text-accent" : "border-line-2 bg-panel text-ink hover:border-ink-3"}`}>
-            {editing ? "Done" : "Edit home"}
+          <button type="button" onClick={() => setEditing((e) => !e)} aria-pressed={editing} aria-label={editing ? "Done editing home" : "Edit home"} title="Edit home"
+            className={`inline-flex h-9 min-w-9 items-center justify-center gap-2 rounded-md border px-2.5 text-[13px] font-medium transition-colors sm:px-3 ${editing ? "border-accent bg-accent-soft text-accent" : "border-line-2 bg-panel text-ink hover:border-ink-3"}`}>
+            {editing ? "Done" : (
+              <>
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 20h4L19 9l-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" /></svg>
+                <span className="hidden sm:inline">Edit home</span>
+              </>
+            )}
           </button>
         </div>
       </header>
