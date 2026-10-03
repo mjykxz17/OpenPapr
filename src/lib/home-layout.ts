@@ -11,7 +11,7 @@ export const WIDGETS = {
   today: { title: "Today", sizes: ["S", "W", "L"] as Size[], size: "L" as Size },
   next: { title: "Next up", sizes: ["S", "W"] as Size[], size: "S" as Size },
   done: { title: "Completed", sizes: ["S", "W"] as Size[], size: "S" as Size },
-  due: { title: "Coming up", sizes: ["W", "L", "F"] as Size[], size: "L" as Size },
+  due: { title: "Calendar", sizes: ["W", "L", "F"] as Size[], size: "L" as Size },
   modules: { title: "Modules", sizes: ["W", "L", "F"] as Size[], size: "F" as Size },
 } as const;
 export type WidgetId = keyof typeof WIDGETS;

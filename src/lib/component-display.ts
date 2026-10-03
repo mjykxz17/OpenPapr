@@ -49,3 +49,12 @@ export function findWeightBadge(todo: ItemRow, modules: Overview["modules"]): nu
   const match = mod.components.find((c) => c.weightPct != null && fuzzyMatch(todo.title, c.name));
   return match?.weightPct ?? null;
 }
+
+// The assessment component a deadline counts toward ("Labs", 28), when its
+// title matches one: the hover card on the home calendar says so.
+export function findWeightComponent(todo: Pick<ItemRow, "moduleId" | "title">, modules: Overview["modules"]): { name: string; pct: number } | null {
+  if (todo.moduleId == null) return null;
+  const mod = modules.find((m) => m.id === todo.moduleId);
+  const match = mod?.components.find((c) => c.weightPct != null && fuzzyMatch(todo.title, c.name));
+  return match ? { name: match.name, pct: match.weightPct! } : null;
+}

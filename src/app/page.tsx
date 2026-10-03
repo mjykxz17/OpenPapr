@@ -19,6 +19,8 @@ import { parseLayout } from "@/lib/home-layout";
 import { SetupChecklist } from "@/components/home/SetupChecklist";
 import { sharedLlmConfig, userLlmConfig } from "@/lib/llm-provider";
 import { semesterView } from "@/lib/acad-week";
+import { calendarDues } from "@/server/calendar-dues";
+import { MonthWidget } from "@/components/home/MonthWidget";
 import { SemesterBar } from "@/components/home/SemesterBar";
 import { shortDate, syncedLabel } from "@/lib/format-date";
 
@@ -59,6 +61,8 @@ export default async function Home() {
     ...[...tv.soon, ...tv.later].filter((t) => t.anticipated && t.dueAt !== null && t.dueAt >= now && t.dueAt < now + 21 * D)
       .map((t) => ({ key: `t${t.id}`, title: t.title.replace(/\s*\(expected\)$/i, ""), code: t.code, dueAt: t.dueAt!, overdue: false, estimated: t.dueConfidence === "estimated", worth: t.weightPct, href: `/tasks#task-${t.id}` })),
   ].sort((a, b) => Number(b.overdue) - Number(a.overdue) || a.dueAt - b.dueAt);
+  const cal = calendarDues(overview, tv, now);
+  const calModules = overview.modules.filter((m) => !m.hidden).map((m) => ({ id: m.id, code: m.code }));
   const views: WidgetViews = {
     week: {
       W: <WeekWidget plan={week.plan} today={todaySteps} size="W" />,
@@ -70,8 +74,9 @@ export default async function Home() {
     done: { S: <DoneWidget view={tv} size="S" />, W: <DoneWidget view={tv} size="W" /> },
     due: {
       W: <UpcomingWidget items={upcoming} now={now} size="W" />,
-      L: <UpcomingWidget items={upcoming} now={now} size="L" />,
-      F: <UpcomingWidget items={upcoming} now={now} size="F" />,
+      // Large and full width: the month, with a card per day on hover or tap.
+      L: <MonthWidget today={cal.today} dues={cal.dues} modules={calModules} />,
+      F: <MonthWidget today={cal.today} dues={cal.dues} modules={calModules} />,
     },
     modules: {
       W: <ModulesWidget modules={overview.modules} size="W" />,

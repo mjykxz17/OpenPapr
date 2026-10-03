@@ -61,7 +61,7 @@ test("a session reaches the dashboard, modules, reminders and mail", async ({ pa
   await expect(page.getByText("CS2103T").first()).toBeVisible();
   await expect(page.getByRole("link", { name: /^ST2334 Probability/ })).toHaveAttribute("href", "/modules/2");
   // One list of deadlines, not three.
-  await expect(page.getByRole("heading", { name: "Coming up" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Previous month" })).toBeVisible();
 
   await page.goto("/modules/2");
   await expect(page.getByRole("heading", { name: "Assessment" })).toBeVisible();
