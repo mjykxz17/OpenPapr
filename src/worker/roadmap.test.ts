@@ -124,3 +124,18 @@ describe("schedules pasted as pictures", () => {
     expect(r).toEqual({ items: [], imagesRead: 0, imagesRefused: true });
   });
 });
+
+describe("citations by name", () => {
+  it("maps a source cited by its file name back to its ref", async () => {
+    const { cleanRoadmap, refResolver } = await import("../enrich/roadmap");
+    const refs = new Set(["F36", "A9"]);
+    const resolve = refResolver(refs, [{ ref: "F36", label: "CS4238-Lec01A.pdf" }, { ref: "A9", label: "Announcement: Week 2: Updates" }]);
+    const items = cleanRoadmap({ items: [
+      { title: "Quiz 1", kind: "quiz", week: "4", ref: "CS4238-Lec01A.pdf", page: 6 },
+      { title: "Quiz 2", kind: "quiz", week: 6, ref: "[F36]", page: 6 },
+      { title: "Quiz 3", kind: "quiz", week: 8, ref: "Week 2: Updates" },
+      { title: "Nope", kind: "quiz", week: 9, ref: "Lecture 99.pdf" },
+    ] }, refs, resolve)!;
+    expect(items.map((i) => [i.title, i.ref, i.week])).toEqual([["Quiz 1", "F36", 4], ["Quiz 2", "F36", 6], ["Quiz 3", "A9", 8]]);
+  });
+});

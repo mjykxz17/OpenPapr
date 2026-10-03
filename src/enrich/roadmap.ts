@@ -72,14 +72,27 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
 
 // Keeps entries that cite a real source and say something placeable.
-export function cleanRoadmap(raw: unknown, refs: Set<string>): RoadmapItem[] | null {
+// Models sometimes cite a source by its name ("CS4238-Lec01A.pdf") or with
+// the brackets ("[F36]") instead of the ref; map those back.
+export function refResolver(refs: Set<string>, labels: { ref: string; label: string }[] = []): (r: string) => string | null {
+  const norm = (x: string) => x.toLowerCase().replace(/\.(pdf|pptx?|docx?)$/i, "").replace(/[^a-z0-9]+/g, "");
+  const byLabel = new Map(labels.flatMap((l) => [[norm(l.label), l.ref], [norm(l.label.replace(/^[a-z ]+:\s*/i, "")), l.ref]] as [string, string][]));
+  return (r) => {
+    const t = r.trim().replace(/^\[|\]$/g, "").replace(/\s*p(age)?\.?\s*\d+$/i, "");
+    if (refs.has(t)) return t;
+    return byLabel.get(norm(t)) ?? byLabel.get(norm(t.replace(/^(announcement|file|slides?)\s*:\s*/i, ""))) ?? null;
+  };
+}
+
+export function cleanRoadmap(raw: unknown, refs: Set<string>, resolve: (r: string) => string | null = (r) => (refs.has(r) ? r : null)): RoadmapItem[] | null {
   const top = z.object({ items: z.array(z.unknown()).max(80).default([]) }).safeParse(raw);
   if (!top.success) return null;
   const out: RoadmapItem[] = [];
   const seen = new Set<string>();
   for (const r of top.data.items) {
     const p = Raw.safeParse(r);
-    if (!p.success || !refs.has(p.data.ref)) continue;
+    const ref = p.success ? resolve(p.data.ref) : null;
+    if (!p.success || !ref) continue;
     const w = p.data.week;
     const week = typeof w === "number" ? (w >= 1 && w <= 13 ? w : null)
       : typeof w === "string" ? (/recess/i.test(w) ? "recess" : /reading/i.test(w) ? "reading" : /^\d{1,2}$/.test(w.trim()) && +w >= 1 && +w <= 13 ? +w : null)
@@ -92,7 +105,7 @@ export function cleanRoadmap(raw: unknown, refs: Set<string>): RoadmapItem[] | n
     out.push({
       title: p.data.title.trim(), kind: p.data.kind, week, date, time, slot: p.data.slot?.trim().toLowerCase() || null,
       weightPct: p.data.weightPct ?? null, covers: p.data.covers?.trim() || null,
-      ref: p.data.ref, page: p.data.page ?? null, quote: p.data.quote?.trim() || null,
+      ref, page: p.data.page ?? null, quote: p.data.quote?.trim() || null,
     });
   }
   return out;
@@ -105,11 +118,12 @@ export async function extractRoadmap(
 ): Promise<RoadmapResult> {
   if (!sources.length && !images.length) return { items: [], imagesRead: 0, imagesRefused: false };
   const refs = new Set([...sources.map((s) => s.ref), ...images.map((i) => i.ref)]);
+  const resolve = refResolver(refs, [...sources, ...images]);
   const text = roadmapPrompt(module, sources);
   const withImages: ContentPart[] = [
     { type: "text", text },
     ...images.flatMap((im): ContentPart[] => [
-      { type: "text", text: `=== [${im.ref}] ${im.label}, page ${im.page} (image) ===` },
+      { type: "text", text: `=== [${im.ref}] ${im.label}, page ${im.page} (image; cite ref "${im.ref}", page ${im.page}) ===` },
       { type: "image_url", image_url: { url: `data:image/png;base64,${Buffer.from(im.png).toString("base64")}` } },
     ]),
   ];
@@ -118,7 +132,7 @@ export async function extractRoadmap(
   let items: RoadmapItem[] | null = null;
   for (let attempt = 0; attempt < 2 && items === null; attempt++) {
     try {
-      items = cleanRoadmap(await chatJson(cfg, fetchFn, ROADMAP_SYSTEM, send, 5000), refs);
+      items = cleanRoadmap(await chatJson(cfg, fetchFn, ROADMAP_SYSTEM, send, 5000), refs, resolve);
     } catch (err) {
       // A model that can't read images still gets the text.
       if (typeof send !== "string" && isImageRefusal(err)) { refused = true; send = text; attempt--; continue; }

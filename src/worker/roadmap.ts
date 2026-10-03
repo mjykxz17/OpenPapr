@@ -58,7 +58,7 @@ function plan(db: Db, mod: Mod) {
   const early = db.select().from(items).where(and(eq(items.moduleId, mod.id), eq(items.type, "announcement"))).all()
     .sort((a, b) => (a.sourceCreatedAt ?? a.firstSeenAt) - (b.sourceCreatedAt ?? b.firstSeenAt)).slice(0, 3);
   const fp = hash({
-    v: 2, // bump to re-read every module (v2: schedules pasted as pictures)
+    v: 3, // bump to re-read every module (v2: pictures; v3: citations by file name)
     syllabus: mod.syllabusBody ? hash(mod.syllabusBody) : null,
     files: fileRows.map((f) => [f.id, f.sizeBytes, f.textSigJson ? hash(f.textSigJson) : null]),
     early: early.map((a) => a.id),
