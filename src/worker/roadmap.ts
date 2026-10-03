@@ -216,3 +216,51 @@ function pickSlot(slots: ClassSlot[], slot: string | null): ClassSlot | null {
   }
   return null;
 }
+
+// --- for the calendar --------------------------------------------------------------
+// Each schedule entry placed on a day, so the home calendar can show the
+// whole semester even before (or without) a task for it: a stated date; else
+// its class slot that week; else the week's Friday, marked as "in Week N".
+export type RoadmapEntry = {
+  moduleId: number; title: string; kind: RoadmapItem["kind"]; at: number; time: string | null;
+  placed: "date" | "slot" | "week"; week: string | null; weekFrom: number | null; weekTo: number | null;
+  weightPct: number | null; covers: string | null; source: string; fileId: number | null; page: number | null;
+};
+
+export function roadmapCalendar(db: Db, mod: Mod, now: number): RoadmapEntry[] {
+  const row = db.select().from(moduleRoadmaps).where(eq(moduleRoadmaps.moduleId, mod.id)).get();
+  if (!row) return [];
+  const found = parseList<RoadmapItem>(row.itemsJson);
+  const sources = new Map(parseList<SourceRef>(row.sourcesJson).map((s) => [s.ref, s]));
+  const { weeks } = semesterWeeks(now);
+  const slots = classSlots(db.select().from(items).where(eq(items.moduleId, mod.id)).all());
+  const out: RoadmapEntry[] = [];
+  for (const it of found) {
+    const src = sources.get(it.ref);
+    const wk = it.week === "recess" ? weeks.find((w) => w.label === "Recess week")
+      : it.week === "reading" ? weeks.find((w) => w.label === "Reading week")
+      : typeof it.week === "number" ? weeks.find((w) => w.teachingWeek === it.week) : undefined;
+    let at: number | null = null, time = it.time, placed: RoadmapEntry["placed"] = "week";
+    if (it.date) {
+      at = Date.parse(`${it.date}T${it.time ?? "23:59"}:00+08:00`);
+      placed = "date";
+    } else if (wk) {
+      const slot = pickSlot(slots, it.slot) ?? (!it.slot && slots.length === 1 && ["quiz", "test", "midterm"].includes(it.kind) ? slots[0]! : null);
+      if (slot) {
+        time = it.time ?? slot.time;
+        at = wk.monday + ((slot.weekday + 6) % 7) * D + Number(time.slice(0, 2)) * H + Number(time.slice(3, 5)) * 60_000;
+        placed = "slot";
+      } else {
+        at = wk.monday + 4 * D + (23 * 60 + 59) * 60_000; // Friday night of that week
+      }
+    }
+    if (at === null || Number.isNaN(at)) continue;
+    out.push({
+      moduleId: mod.id, title: it.title, kind: it.kind, at, time, placed,
+      week: wk?.label ?? null, weekFrom: wk?.monday ?? null, weekTo: wk ? wk.sunday + D - 1 : null,
+      weightPct: it.weightPct, covers: it.covers,
+      source: src ? `${src.label}${it.page ? ` p.${it.page}` : ""}` : "the course schedule", fileId: src?.fileId ?? null, page: it.page,
+    });
+  }
+  return out;
+}

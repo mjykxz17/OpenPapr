@@ -15,6 +15,8 @@ import { variantGroups } from "../lib/variants";
 import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
 import { calendarLines, classSlots, refreshRoadmaps, roadmapSignals } from "./roadmap";
+import { ownWork } from "../lib/own-work";
+export { ownWork };
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -266,17 +268,6 @@ function applyPlan(db: Db, userId: number, moduleId: number, planned: Awaited<Re
 
 // Tasks whose Canvas work has all been submitted are done; steps the student
 // did not get to move forward; no day is loaded past what is doable.
-// A cited Canvas item is the task's own work, not just the pattern it follows:
-// "Quiz 3" citing "Quiz-2" (the last one) is not finished when Quiz 2 is.
-export function ownWork(taskTitle: string, itemTitle: string, taskDue: number | null, itemDue: number | null): boolean {
-  const a = quizNumber(taskTitle) ?? numbered(taskTitle), b = quizNumber(itemTitle) ?? numbered(itemTitle);
-  if (a !== null && b !== null && a !== b) return false;
-  // Due days before the task: an earlier instance, cited as the pattern.
-  if (taskDue !== null && itemDue !== null && itemDue < taskDue - 2 * D) return false;
-  return true;
-}
-const numbered = (t: string) => { const m = /\b(?:assignment|incident|lab|tutorial|problem set|ps|homework|hw|milestone|report)\s*[-#]?\s*(\d{1,2})\b/i.exec(t); return m ? Number(m[1]) : null; };
-
 export function tidyTasks(db: Db, userId: number, now: number): number {
   reopenPatternDone(db, userId, now);
   const open = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.status, "open"))).all();

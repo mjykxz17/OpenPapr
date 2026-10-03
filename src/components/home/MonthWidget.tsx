@@ -157,15 +157,26 @@ function DayCard({ day, rect, today, list, color, onEnter, onLeave }: {
             {d.code && <span className="mr-1.5 text-[12px] font-bold" style={{ color: color(d.moduleId) }}>{d.code}</span>}{d.title}
           </p>
           <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-ink-2">
-            <dt>{d.event ? "Starts" : d.overdue ? "Was due" : d.estimated ? "Expected" : "Due"}</dt>
-            <dd className={`text-right font-medium ${d.overdue ? "text-danger" : "text-ink"}`}>{d.estimated ? `around ${d.time === "23:59" ? "this day" : d.time}` : d.time}{d.exam && " · exam"}</dd>
+            {d.schedule ? (
+              <>
+                <dt>When</dt>
+                <dd className="text-right font-medium text-ink">{d.schedule.placed === "week" ? `during ${d.schedule.week ?? "this week"}` : d.schedule.placed === "slot" ? `${d.time}, in class (expected)` : d.time}</dd>
+                {d.schedule.covers && <><dt>Covers</dt><dd className="text-right font-medium text-ink">{d.schedule.covers}</dd></>}
+              </>
+            ) : (
+              <>
+                <dt>{d.event ? "Starts" : d.overdue ? "Was due" : d.estimated ? "Expected" : "Due"}</dt>
+                <dd className={`text-right font-medium ${d.overdue ? "text-danger" : "text-ink"}`}>{d.estimated ? `around ${d.time === "23:59" ? "this day" : d.time}` : d.time}{d.exam && " · exam"}</dd>
+              </>
+            )}
             {d.counts && <><dt>Counts toward</dt><dd className="text-right font-medium text-ink">{d.counts.name} · {d.counts.pct}%</dd></>}
             {d.event?.repeats && <><dt>Repeats</dt><dd className="text-right font-medium text-ink">{d.event.repeats} more this term</dd></>}
             {d.plan && <><dt>Your plan</dt><dd className="text-right font-medium text-ink">{d.plan.done} of {d.plan.total} steps{d.plan.minutesLeft ? ` · ${fmtMin(d.plan.minutesLeft)} left` : " · done"}</dd></>}
           </dl>
+          {d.schedule && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-2">From the course schedule ({d.schedule.source}). No task for it yet.</p>}
           {d.event && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-2">{d.event.note ?? "A Canvas calendar event, not something to hand in."}</p>}
           {d.plan && <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-sunken"><div className="h-full bg-accent" style={{ width: `${Math.round((d.plan.done / d.plan.total) * 100)}%` }} /></div>}
-          <Link href={d.href} className="mt-2 inline-block text-[12.5px] font-semibold text-accent no-underline hover:underline">{d.href.startsWith("/tasks") ? "Open in Tasks →" : "Open module →"}</Link>
+          <Link href={d.href} className="mt-2 inline-block text-[12.5px] font-semibold text-accent no-underline hover:underline">{d.href.startsWith("/tasks") ? "Open in Tasks →" : d.href.includes("/files/") ? "Open the slide →" : "Open module →"}</Link>
         </div>
       ))}
       {list.length > shown.length && <Link href="/tasks" className="mt-3 block text-[12.5px] text-ink-3 no-underline">+{list.length - shown.length} more in Tasks</Link>}

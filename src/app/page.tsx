@@ -20,6 +20,9 @@ import { SetupChecklist } from "@/components/home/SetupChecklist";
 import { sharedLlmConfig, userLlmConfig } from "@/lib/llm-provider";
 import { semesterView } from "@/lib/acad-week";
 import { calendarDues } from "@/server/calendar-dues";
+import { roadmapCalendar } from "@/worker/roadmap";
+import { modules as modulesTable, tasks as tasksTable } from "@/db/schema";
+import { and, eq } from "drizzle-orm";
 import { MonthWidget } from "@/components/home/MonthWidget";
 import { SemesterBar } from "@/components/home/SemesterBar";
 import { shortDate, syncedLabel } from "@/lib/format-date";
@@ -61,7 +64,11 @@ export default async function Home() {
     ...[...tv.soon, ...tv.later].filter((t) => t.anticipated && t.dueAt !== null && t.dueAt >= now && t.dueAt < now + 21 * D)
       .map((t) => ({ key: `t${t.id}`, title: t.title.replace(/\s*\(expected\)$/i, ""), code: t.code, dueAt: t.dueAt!, overdue: false, estimated: t.dueConfidence === "estimated", worth: t.weightPct, href: `/tasks#task-${t.id}` })),
   ].sort((a, b) => Number(b.overdue) - Number(a.overdue) || a.dueAt - b.dueAt);
-  const cal = calendarDues(overview, tv, now);
+  const activeMods = db.select().from(modulesTable).where(and(eq(modulesTable.userId, userId), eq(modulesTable.active, true), eq(modulesTable.hidden, false))).all();
+  const cal = calendarDues(overview, tv, now, {
+    roadmap: activeMods.flatMap((m) => roadmapCalendar(db, m, now)),
+    allTasks: db.select({ moduleId: tasksTable.moduleId, title: tasksTable.title, dueAt: tasksTable.dueAt }).from(tasksTable).where(eq(tasksTable.userId, userId)).all(),
+  });
   const calModules = overview.modules.filter((m) => !m.hidden).map((m) => ({ id: m.id, code: m.code }));
   const views: WidgetViews = {
     week: {
