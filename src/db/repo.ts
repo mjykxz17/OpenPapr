@@ -312,7 +312,7 @@ export function recordActionFailure(db: Db, itemId: number): void {
 }
 
 export function applyCanvasSync(db: Db, userId: number, sync: NormalizedCanvasSync, now: number): { moduleId: number } {
-  const mod = db.insert(modules).values({ userId, ...sync.module })
+  const mod = db.insert(modules).values({ userId, ...sync.module, seenAt: now })
     .onConflictDoUpdate({
       target: [modules.userId, modules.canvasCourseId],
       set: { code: sync.module.code, name: sync.module.name, term: sync.module.term, syllabusBody: sync.module.syllabusBody, active: true },

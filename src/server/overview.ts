@@ -19,7 +19,9 @@ export interface Overview {
     id: number; code: string; name: string; components: ComponentRow[]; latestAnnouncements: ItemRow[]; unaccountedPct: number | null; hidden: boolean;
     shortName: string;
     next: { title: string; when: string } | null;   // the next thing due here, a Canvas item or a planned task; when is preformatted
-    newCount: number;                               // updates since the student last looked
+    newCount: number;                               // announcements + staff replies since the student last opened the module
+    newAnnouncements: number;
+    newReplies: number;
   }[];
   syncStatus: { source: string; lastOkAt: number | null; stale: boolean }[]; // stale = now - lastOkAt > three missed syncs (see poll-schedule)
   graphAuthBroken: boolean; // latest graph sync_run failed with /401|invalid_grant/ — drives the reconnect banner
@@ -168,10 +170,15 @@ export function getOverview(db: Db, userId: number, now: number, pollIntervalMs:
     const next = taskNext && (!itemNext || taskNext.dueAt! < itemNext.dueAt!)
       ? { title: taskNext.title, when: `${taskNext.dueConfidence === "estimated" ? "around " : ""}${dayLabel(taskNext.dueAt!)}` }
       : itemNext ? { title: itemNext.title, when: dayLabel(itemNext.dueAt!) } : null;
-    const newCount = scopedItems.filter((i) => i.moduleId === m.id && i.firstSeenAt > lastSeenAt && !i.dismissed
-      && (i.type === "announcement" || i.type === "discussion" || i.type === "staff_reply")).length;
+    // New since the student last opened this module: announcements and
+    // teaching-staff replies only. Other students' forum posts are not news.
+    const since = m.seenAt ?? 0;
+    const fresh = scopedItems.filter((i) => i.moduleId === m.id && i.firstSeenAt > since && !i.dismissed);
+    const newAnnouncements = fresh.filter((i) => i.type === "announcement").length;
+    const newReplies = fresh.filter((i) => i.type === "staff_reply").length;
+    const newCount = newAnnouncements + newReplies;
     return { id: m.id, code: m.code, name: m.name, components: comps, latestAnnouncements, unaccountedPct, hidden: m.hidden,
-      shortName: shortModuleName(m.code, m.name), next, newCount };
+      shortName: shortModuleName(m.code, m.name), next, newCount, newAnnouncements, newReplies };
   });
 
   // sync_runs grows about 585 rows/day and this function runs on every render

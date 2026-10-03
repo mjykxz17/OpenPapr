@@ -21,7 +21,7 @@ export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { 
   void users;
 
   const mod = (canvasCourseId: number, code: string, name: string, position: number) =>
-    db.insert(modules).values({ userId: u, canvasCourseId: courseBase + canvasCourseId, code, name, term: "AY26/27 Sem 1", position }).returning().get();
+    db.insert(modules).values({ userId: u, canvasCourseId: courseBase + canvasCourseId, code, name, term: "AY26/27 Sem 1", position, seenAt: now - D }).returning().get();
   const se = mod(1, "CS2103T", "Software Engineering", 0);
   const algo = mod(2, "CS3230", "Design and Analysis of Algorithms", 1);
   const net = mod(3, "CS2105", "Introduction to Computer Networks", 2);

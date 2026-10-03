@@ -19,6 +19,21 @@ const setup = () => {
 };
 
 describe("getOverview", () => {
+  it("counts only announcements and staff replies since the module was last opened", () => {
+    const { db, moduleId } = setup();
+    db.update(modules).set({ seenAt: 500 }).where(eq(modules.id, moduleId)).run();
+    const base = { userId: 1, moduleId, source: "canvas" as const, title: "" };
+    db.insert(items).values([
+      { ...base, sourceId: "n:1", type: "announcement" as const, firstSeenAt: 400 },   // before the visit
+      { ...base, sourceId: "n:2", type: "announcement" as const, firstSeenAt: 600 },
+      { ...base, sourceId: "n:3", type: "announcement" as const, firstSeenAt: 700 },
+      { ...base, sourceId: "r:1", type: "staff_reply" as const, firstSeenAt: 800 },
+      { ...base, sourceId: "d:1", type: "discussion" as const, firstSeenAt: 900 },     // a student's post
+      { ...base, sourceId: "n:4", type: "announcement" as const, firstSeenAt: 900, dismissed: true },
+    ]).run();
+    const m = getOverview(db, 1, 1000, 300_000).modules[0]!;
+    expect([m.newCount, m.newAnnouncements, m.newReplies]).toEqual([3, 2, 1]);
+  });
   it("orders todos overdue-first then by due date", () => {
     const { db } = setup();
     const base = { userId: 1, source: "canvas" as const, type: "assignment" as const, firstSeenAt: 1, title: "" };

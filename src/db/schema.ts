@@ -93,6 +93,10 @@ export const modules = sqliteTable("modules", {
   weightageCheckedAt: integer("weightage_checked_at"),  // last extraction attempt; null = never tried
   position: integer("position"),          // home-grid order; null = unplaced (sorts after placed, by id)
   hidden: integer("hidden", { mode: "boolean" }).notNull().default(false),  // hidden from the home grid (user preference)
+  // When the student last opened this module. Announcements and staff
+  // replies that arrived after it are "new" on the home card. Set on the
+  // first sync, so a new account doesn't start with its whole backlog new.
+  seenAt: integer("seen_at"),
 }, (t) => [uniqueIndex("modules_user_course").on(t.userId, t.canvasCourseId)]);
 
 // Every Canvas file we know about for a module, from the Files listing AND

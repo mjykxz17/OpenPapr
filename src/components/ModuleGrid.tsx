@@ -39,6 +39,15 @@ function weightRows(m: Module) {
   return rows;
 }
 
+// "2 new announcements", "1 staff reply", "2 announcements, 1 reply":
+// what actually arrived since the module was last opened.
+function newLabel(m: Module): string {
+  const a = m.newAnnouncements, r = m.newReplies;
+  if (a && r) return `${a} announcement${a === 1 ? "" : "s"}, ${r} staff repl${r === 1 ? "y" : "ies"}`;
+  if (a) return `${a} new announcement${a === 1 ? "" : "s"}`;
+  return `${r} new staff repl${r === 1 ? "y" : "ies"}`;
+}
+
 function TileFace({ m }: { m: Module }) {
   const rows = weightRows(m);
   return (
@@ -70,13 +79,13 @@ function TileFace({ m }: { m: Module }) {
       {/* Phone: a small pill. Wider: the footer line. */}
       <div className="text-[12px] sm:hidden">
         {m.newCount > 0
-          ? <span className="rounded-full bg-accent-soft px-2 py-[1px] font-semibold text-accent">{m.newCount} new</span>
-          : <span className="text-ink-3">Up to date</span>}
+          ? <span className="rounded-full bg-accent-soft px-2 py-[1px] font-semibold text-accent" title={newLabel(m)}>{m.newCount} new</span>
+          : <span className="text-ink-3">Nothing new</span>}
       </div>
       <div className="mt-auto hidden items-baseline gap-3 border-t border-line pt-2.5 text-[13px] sm:flex">
         {m.newCount > 0
-          ? <span className="font-medium text-accent">{m.newCount} new update{m.newCount === 1 ? "" : "s"}</span>
-          : <span className="text-ink-3">No new updates</span>}
+          ? <span className="font-medium text-accent">{newLabel(m)}</span>
+          : <span className="text-ink-3">Nothing new since you last looked</span>}
       </div>
     </>
   );

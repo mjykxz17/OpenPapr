@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MarkModuleSeen } from "@/components/module/MarkModuleSeen";
 import { BackLink } from "@/components/BackLink";
 import { requireUserId } from "@/server/session";
 import { eq } from "drizzle-orm";
@@ -335,6 +336,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
 
   return (
     <AppShell>
+      <MarkModuleSeen moduleId={mod.id} />
       <header className="flex flex-col gap-3">
         <BackLink href="/">Home</BackLink>
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
