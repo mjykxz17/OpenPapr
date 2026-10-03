@@ -22,10 +22,14 @@ function setup() {
   return db;
 }
 
-function llm(plan: unknown, log: string[] = []) {
+// Answers the planner with `plan`; the roadmap reader (which runs first)
+// with `roadmap`, kept out of the planner's log.
+function llm(plan: unknown, log: string[] = [], roadmap: unknown = { items: [] }, roadLog: string[] = []) {
   return (async (_url: string, init?: RequestInit) => {
-    log.push(String(JSON.parse(String(init?.body)).messages[1].content));
-    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }));
+    const msgs = JSON.parse(String(init?.body)).messages;
+    const isRoadmap = String(msgs[0].content).startsWith("You read a university course");
+    (isRoadmap ? roadLog : log).push(String(msgs[1].content));
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(isRoadmap ? roadmap : plan) } }] }));
   }) as unknown as typeof fetch;
 }
 

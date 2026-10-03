@@ -14,6 +14,7 @@ import { htmlToText } from "../lib/html-text";
 import { variantGroups } from "../lib/variants";
 import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
+import { calendarLines, classSlots, refreshRoadmaps, roadmapSignals } from "./roadmap";
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -202,6 +203,10 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     .sort((a, b) => b.createdAt - a.createdAt).slice(0, 15)
     .map((f) => (f.kind === "not_task" ? `"${f.title}" is NOT a real task — do not plan it` : `"${f.title}": wrong date — ${f.note ?? "the student set it"}`));
 
+  const road = roadmapSignals(db, mod, now);
+  for (const [k, v] of road.refs) refs.set(k, v);
+  const slots = classSlots(rows).map((s) => `${WEEKDAY[s.weekday]} ${s.time} — "${s.title}" (${s.count} on the calendar)`);
+
   const d = new Date(now + 8 * H);
   return {
     refs,
@@ -209,6 +214,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
       today: `${sgtDate(now)} (${WEEKDAY[d.getUTCDay()]})`,
       module: { code: mod.code, name: mod.name },
       canvas, past: pastRows, announcements, discussions, notes, fileHints: fileLines, weightage, examDate, studyAdvice, existing, feedback,
+      roadmap: road.lines, calendar: calendarLines(now), classSlots: slots,
     },
   };
 }
@@ -425,6 +431,9 @@ export async function refreshTasks(deps: TaskDeps, userId: number): Promise<Task
   const mods = db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true), eq(modules.hidden, false))).all();
 
   out.files = await harvestHints(deps, userId, mods);
+  // The course's own schedule first: the plan below works from it.
+  const road = await refreshRoadmaps(deps, userId, mods);
+  out.errors.push(...road.errors.map((e) => `roadmap ${e}`));
 
   const cfg = deps.cfgFor(userId);
   if (cfg) {

@@ -2,7 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import {
   components, courseHistory, fileHints, files, guidePlans, guideQuizzes, guideRuns, guideTopics, items, llmUsage,
-  moduleProfiles, modules, passages, petChats, slideNotes, studyGuides, syncRuns, taskFeedback, taskPlans, tasks, users, weeklyPlans,
+  moduleProfiles, moduleRoadmaps, modules, passages, petChats, slideNotes, studyGuides, syncRuns, taskFeedback, taskPlans, tasks, users, weeklyPlans,
 } from "@/db/schema";
 
 // The student's data, theirs to take or to remove. Export leaves out every
@@ -45,7 +45,7 @@ export function wipeUserData(db: Db, userId: number, andUser = false): void {
     if (ids.length) {
       const fileIds = tx.select({ id: files.id }).from(files).where(inArray(files.moduleId, ids)).all().map((f) => f.id);
       if (fileIds.length) tx.delete(fileHints).where(inArray(fileHints.fileId, fileIds)).run();
-      for (const t of [guideQuizzes, guideTopics, guidePlans, studyGuides, taskPlans, moduleProfiles, components] as const) {
+      for (const t of [guideQuizzes, guideTopics, guidePlans, studyGuides, taskPlans, moduleRoadmaps, moduleProfiles, components] as const) {
         tx.delete(t).where(inArray(t.moduleId, ids)).run();
       }
       tx.delete(files).where(inArray(files.moduleId, ids)).run();

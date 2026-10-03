@@ -35,6 +35,9 @@ export type ModuleTaskInput = {
   discussions: SignalItem[];    // discussions that ask something of the student
   notes: SignalItem[];          // the student's own Canvas planner notes
   fileHints: SignalItem[];       // obligation-looking lines from slides and handouts
+  roadmap?: SignalItem[];        // the course's own schedule, dates resolved where possible
+  calendar?: string[];           // NUS semester weeks with their dates
+  classSlots?: string[];         // the module's weekly Canvas class events
   weightage: { name: string; weightPct: number }[];
   examDate: string | null;       // NUSMods final exam date for this semester
   studyAdvice: string[];         // from the module profile: how to study, gaps
@@ -71,6 +74,9 @@ Rules:
 - A graded discussion appears both as a Canvas item and as a discussion: one task, citing both. A discussion the student HAS posted in is done — skip it. A staff reply that changes scope or dates ("the quiz only covers L1-L5") must shape the task and its steps; cite it.
 - The student's own planner notes are tasks they chose: keep their wording, add steps only if the note is bigger than one sitting.
 - Work Canvas marks MISSING comes first: make its first step today.
+- The course roadmap is the course's own schedule, read from its syllabus, first or admin slides and welcome announcement. Every assessment on it within the horizon is a task: use a stated date as "exact"; a week resolved to a class slot's day and time as "exact" when the source says it happens in that slot, otherwise "estimated"; a bare week number as "estimated" on that week's last teaching day unless the source says otherwise. Cite the roadmap ref.
+- Announcements and staff replies are newer than the roadmap and win: a quiz "moved to Thursday", "postponed", "cancelled" or "now covers L1-L7" changes the task. Use the new date, say "moved from <old date>" (or what changed) in why, and cite both the roadmap ref and the announcement.
+- A weekly Canvas calendar event named after the course is a class slot, not an obligation; it matters only to place a roadmap item that happens "in lecture" or "in class".
 - Skip attending lectures, labs or tutorials, bringing or charging a laptop, anything already submitted or past, and generic advice with no source.
 - Anticipate only when grounded in a source you cite (anticipated=true, dueConfidence="estimated"): the next instance of a clear weekly pattern, preparation for a dated or week-numbered assessment, a milestone the schedule implies, revision for the final exam. Never invent an assessment. The weightage alone tells you an assessment exists, never its date: without a dated or week-numbered source, set due to null.
 - Horizon: things due in the next 6 weeks, plus the final exam.
@@ -81,7 +87,7 @@ Rules:
 - Tasks the student added themselves (key starting "manual-") are theirs: do not repeat them as a new task and never reuse their key.
 - key: lowercase slug starting with the module code, e.g. "cs2103t-v1-2-milestone". Reuse the key of an existing task when it is the same obligation.
 - why: under 90 characters — the weight, what it covers, or what the source says.
-- sources: refs exactly as given (e.g. "C12", "A40", "R88", "D5", "P3", "F7p3", "W", "X"), each with the key phrase quoted (under 120 characters).
+- sources: refs exactly as given (e.g. "C12", "A40", "R88", "D5", "P3", "F7p3", "M2", "W", "X"), each with the key phrase quoted (under 120 characters).
 
 Return ONLY a JSON object: {"tasks": [{"key": "", "title": "<under 60 characters>", "kind": "exam|quiz|submission|project|presentation|prep|reading|admin", "due": "<ISO or null>", "dueConfidence": "exact|estimated", "anticipated": false, "weightPct": <number or null>, "why": "", "sources": [{"ref": "", "quote": ""}], "steps": [{"text": "", "minutes": 30, "doBy": "YYYY-MM-DD"}]}]}
 No emoji.`;
@@ -97,6 +103,9 @@ export function plannerPrompt(input: ModuleTaskInput): string {
     block("Announcements, and lecturers' or TAs' replies in discussions", input.announcements),
     block("Discussions", input.discussions),
     block("Your own Canvas planner notes", input.notes),
+    `NUS calendar (use it to turn week numbers into dates):\n${input.calendar?.join("\n") || "(unknown)"}`,
+    `Weekly class slots on the Canvas calendar:\n${input.classSlots?.length ? input.classSlots.join("\n") : "(none)"}`,
+    block("Course roadmap (the course's own schedule)", input.roadmap ?? []),
     block("From the slides and handouts", input.fileHints),
     `[W] Weightage: ${input.weightage.length ? input.weightage.map((c) => `${c.name} ${c.weightPct}%`).join(", ") : "(unknown)"}`,
     `[X] Final exam: ${input.examDate ?? "(no date on NUSMods)"}`,

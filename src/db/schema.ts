@@ -403,6 +403,21 @@ export const fileHints = sqliteTable("file_hints", {
   extractedAt: integer("extracted_at").notNull(),
 });
 
+// The course's own schedule, read once from where lecturers put it — the
+// syllabus, the first lecture or admin slides, the welcome announcement —
+// as a list of dated or week-numbered assessments the planner works from.
+// Re-read when those sources change; announcements that move a date are
+// applied by the planner on top, so this stays what the course first said.
+export const moduleRoadmaps = sqliteTable("module_roadmaps", {
+  moduleId: integer("module_id").primaryKey().references(() => modules.id),
+  itemsJson: text("items_json").notNull().default("[]"),   // RoadmapItem[]
+  sourcesJson: text("sources_json").notNull().default("[]"), // [{ref, label, fileId?, itemId?}]
+  inputsHash: text("inputs_hash"),
+  generatedAt: integer("generated_at"),
+  error: text("error"),
+  errorAt: integer("error_at"),
+});
+
 // When a module's tasks were last planned, and from what.
 export const taskPlans = sqliteTable("task_plans", {
   moduleId: integer("module_id").primaryKey().references(() => modules.id),

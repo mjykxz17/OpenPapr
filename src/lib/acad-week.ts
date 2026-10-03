@@ -75,3 +75,23 @@ export function semesterView(now: number): SemesterView {
   const next = sem === 1 ? semOrientation(ys, 2) + W : acadYearStart(startYear + 1) + W;
   return { ...base, phase: "vacation", week: null, title: "Vacation", weekOf: null, progress: null, nextSemStart: next };
 }
+
+// The semester around `now`, week by week, for prompts that turn "Week 8" or
+// "in recess" into dates: Week 1 to Week 13, recess, reading week and the two
+// exam weeks, each Monday to Sunday.
+export type SemesterWeek = { label: string; teachingWeek: number | null; monday: number; sunday: number };
+
+export function semesterWeeks(now: number): { sem: 1 | 2; year: string; weeks: SemesterWeek[] } {
+  const v = semesterView(now);
+  // Orientation Monday, from where the reading week sits (o + 15 weeks, minus
+  // the Saturday shift).
+  const o = v.readingFrom + 2 * D - 15 * W;
+  const weeks: SemesterWeek[] = [];
+  for (let n = 2; n <= 18; n++) {
+    const monday = o + (n - 1) * W;
+    const label = n === 8 ? "Recess week" : n === 16 ? "Reading week" : n >= 17 ? `Exam week ${n - 16}` : `Week ${n <= 7 ? n - 1 : n - 2}`;
+    const teachingWeek = n === 8 || n >= 16 ? null : n <= 7 ? n - 1 : n - 2;
+    weeks.push({ label, teachingWeek, monday, sunday: monday + 6 * D });
+  }
+  return { sem: v.sem, year: v.year, weeks };
+}

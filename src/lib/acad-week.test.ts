@@ -40,3 +40,17 @@ describe("NUS academic calendar", () => {
     expect(day(v.nextSemStart!)).toBe("2027-08-09");
   });
 });
+
+describe("semesterWeeks", () => {
+  it("lists the semester's weeks with their Mondays", async () => {
+    const { semesterWeeks } = await import("./acad-week");
+    const { weeks } = semesterWeeks(sgt("2026-10-03"));
+    const by = Object.fromEntries(weeks.map((w) => [w.label, day(w.monday)]));
+    expect(by["Week 1"]).toBe("2026-08-10");
+    expect(by["Recess week"]).toBe("2026-09-21");
+    expect(by["Week 8"]).toBe("2026-10-05");
+    expect(by["Week 13"]).toBe("2026-11-09");
+    expect(by["Exam week 2"]).toBe("2026-11-30");
+    expect(weeks.find((w) => w.label === "Week 8")!.teachingWeek).toBe(8);
+  });
+});

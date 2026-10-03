@@ -66,6 +66,10 @@ export function calendarDues(overview: Overview, tv: TasksView, now: number): { 
       estimated: t.dueConfidence === "estimated", exam: t.kind === "exam", overdue: false, plan: planOf(t), event: null,
     });
   }
-  dues.sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time));
-  return { today: sgtDate(now), dues };
+  // A class session that a deadline sits in (the quiz held in Tuesday's
+  // lecture) is said by the deadline; the bare session would only repeat it.
+  const covered = new Set(dues.filter((d) => !d.event).map((d) => `${d.moduleId}|${d.day}`));
+  const shown = dues.filter((d) => !(d.event && d.title === "Class session" && covered.has(`${d.moduleId}|${d.day}`)));
+  shown.sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time));
+  return { today: sgtDate(now), dues: shown };
 }
