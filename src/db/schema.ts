@@ -335,7 +335,7 @@ export const weeklyPlans = sqliteTable("weekly_plans", {
 // syllabus weights at 30%). The same obligation seen in several places is one
 // task citing every place. Big tasks carry small steps, each with a day to do
 // it by, scheduled backwards from the due date.
-export const TASK_KINDS = ["exam", "quiz", "submission", "project", "presentation", "prep", "reading", "admin"] as const;
+export const TASK_KINDS = ["exam", "quiz", "submission", "project", "presentation", "prep", "reading", "admin", "meeting", "personal"] as const;
 export const tasks = sqliteTable("tasks", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull().references(() => users.id),
@@ -360,6 +360,12 @@ export const tasks = sqliteTable("tasks", {
   touchedAt: integer("touched_at"),
   // The student set the date themselves: a rebuild never moves it again.
   dueLocked: integer("due_locked", { mode: "boolean" }).notNull().default(false),
+  // The student renamed it: a rebuild keeps their title.
+  titleLocked: integer("title_locked", { mode: "boolean" }).notNull().default(false),
+  // The student's own notes, never touched by the planner.
+  notes: text("notes"),
+  // Moved to "Doing" on the board (ticking a step counts too).
+  startedAt: integer("started_at"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
 }, (t) => [uniqueIndex("tasks_user_key").on(t.userId, t.key), index("tasks_user_status").on(t.userId, t.status)]);

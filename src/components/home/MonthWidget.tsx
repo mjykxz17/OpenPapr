@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { CalDue } from "@/server/calendar-dues";
 import { WidgetCard } from "./WidgetCard";
+import { moduleColors } from "@/lib/module-colors";
 
 // The home calendar: a month with a coloured dot for each deadline, one
 // colour per module. Hovering a day (tapping it on a phone, or focusing it
@@ -13,8 +14,6 @@ import { WidgetCard } from "./WidgetCard";
 
 export type MonthModule = { id: number; code: string };
 
-const PALETTE = ["#3b82f6", "#f97316", "#14b8a6", "#8b5cf6", "#ec4899", "#0ea5e9", "#65a30d", "#ca8a04"];
-const GREY = "#71717a";
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const MONTH = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -33,10 +32,7 @@ export function MonthWidget({ today, dues, modules }: { today: string; dues: Cal
   const [open, setOpen] = useState<{ day: string; rect: DOMRect; pinned: boolean } | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const color = useMemo(() => {
-    const m = new Map(modules.map((x, i) => [x.id, PALETTE[i % PALETTE.length]!]));
-    return (id: number | null) => (id != null ? m.get(id) ?? GREY : GREY);
-  }, [modules]);
+  const color = useMemo(() => moduleColors(modules), [modules]);
   const byDay = useMemo(() => {
     const m = new Map<string, CalDue[]>();
     for (const d of dues) m.set(d.day, [...(m.get(d.day) ?? []), d]);

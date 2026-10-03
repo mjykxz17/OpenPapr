@@ -224,7 +224,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
 }
 
 // --- writing a module's plan ----------------------------------------------------
-function applyPlan(db: Db, userId: number, moduleId: number, planned: Awaited<ReturnType<typeof planModuleTasks>>, now: number) {
+export function applyPlan(db: Db, userId: number, moduleId: number, planned: Awaited<ReturnType<typeof planModuleTasks>>, now: number) {
   const current = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.moduleId, moduleId))).all();
   // A key the planner reused from another module stays with that module.
   const elsewhere = new Set(db.select({ key: tasks.key, moduleId: tasks.moduleId }).from(tasks).where(eq(tasks.userId, userId)).all()
@@ -234,6 +234,7 @@ function applyPlan(db: Db, userId: number, moduleId: number, planned: Awaited<Re
     planned.filter((t) => !elsewhere.has(t.key) && !t.key.startsWith("manual-")),
   );
   const locked = new Set(current.filter((t) => t.dueLocked).map((t) => t.id));
+  const renamed = new Set(current.filter((t) => t.titleLocked).map((t) => t.id));
   // A safety-net task goes only once the plan covers its Canvas item.
   const citedNow = new Set(planned.flatMap((t) => t.sources.map((x) => x.itemId).filter((x): x is number => x != null)));
   const byIdNow = new Map(current.map((t) => [t.id, t]));
@@ -256,7 +257,8 @@ function applyPlan(db: Db, userId: number, moduleId: number, planned: Awaited<Re
       // A date the student set stays theirs.
       const date = locked.has(u.id) ? {} : { dueAt: t.dueAt, dueConfidence: t.dueConfidence };
       tx.update(tasks).set({
-        title: t.title, kind: t.kind, ...date, anticipated: t.anticipated,
+        // A title or type the student changed stays theirs too.
+        ...(renamed.has(u.id) ? {} : { title: t.title, kind: t.kind }), ...date, anticipated: t.anticipated,
         weightPct: t.weightPct, why: t.why, sourcesJson: JSON.stringify(t.sources), updatedAt: now,
         ...(u.keepSteps ? {} : { stepsJson: JSON.stringify(t.steps) }),
       }).where(eq(tasks.id, u.id)).run();

@@ -5,7 +5,8 @@ import { guideQuizzes, items, llmUsage, modules, studyGuides, taskFeedback, task
 import { calendarEvents } from "./calendar";
 import { deleteAccount, exportAccount } from "./account-data";
 import { recordLlmCall, sharedAllowanceLeft, usageThisMonth } from "./llm-usage";
-import { createManualTask, updateTask } from "./tasks";
+import { createManualTask, deleteManualTask, updateTask } from "./tasks";
+import { applyPlan } from "../worker/tasks";
 import { moduleSignals } from "../worker/tasks";
 import { search } from "./search";
 
@@ -96,6 +97,36 @@ describe("teaching the planner", () => {
     // Someone else's module is not attached.
     const id2 = createManualTask(db, 1, { title: "Thing", dueAt: null, moduleId: 999 }, now)!;
     expect(db.select().from(tasks).where(eq(tasks.id, id2)).get()!.moduleId).toBeNull();
+  });
+  it("edits like a calendar app: rename, re-time, notes, doing, delete only your own", () => {
+    const { db, mod, other } = setup();
+    const dentist = createManualTask(db, 1, { title: "Dentist", dueAt: Date.parse("2026-10-08T15:00:00+08:00"), moduleId: null, kind: "personal" }, now)!;
+    expect(JSON.parse(db.select().from(tasks).where(eq(tasks.id, dentist)).get()!.stepsJson)).toEqual([]);
+    // Moving the day keeps the time; a new time keeps the day.
+    expect(updateTask(db, 1, dentist, { dueDate: "2026-10-07" }, now)).toBe(true);
+    expect(db.select().from(tasks).where(eq(tasks.id, dentist)).get()!.dueAt).toBe(Date.parse("2026-10-07T15:00:00+08:00"));
+    expect(updateTask(db, 1, dentist, { time: "09:30" }, now)).toBe(true);
+    expect(db.select().from(tasks).where(eq(tasks.id, dentist)).get()!.dueAt).toBe(Date.parse("2026-10-07T09:30:00+08:00"));
+    expect(updateTask(db, 1, dentist, { time: "9pm" }, now)).toBe(false);
+    expect(updateTask(db, 1, dentist, { moduleId: other.id }, now)).toBe(false);
+    expect(updateTask(db, 1, dentist, { moduleId: mod.id, notes: "  bring card  ", started: true }, now)).toBe(true);
+    expect(db.select().from(tasks).where(eq(tasks.id, dentist)).get()).toMatchObject({ moduleId: mod.id, notes: "bring card" });
+    expect(db.select().from(tasks).where(eq(tasks.id, dentist)).get()!.startedAt).toBe(now);
+    expect(updateTask(db, 1, dentist, { noDate: true }, now)).toBe(true);
+    expect(db.select().from(tasks).where(eq(tasks.id, dentist)).get()!.dueAt).toBeNull();
+
+    const quiz = db.insert(tasks).values({ userId: 1, moduleId: mod.id, key: "cs4238-quiz-3", title: "Quiz 3 (expected)", kind: "quiz", dueAt: now + 5 * D, createdAt: now, updatedAt: now }).returning().get();
+    expect(updateTask(db, 1, quiz.id, { moduleId: null }, now)).toBe(false);
+    expect(updateTask(db, 1, quiz.id, { noDate: true }, now)).toBe(false);
+    expect(updateTask(db, 1, quiz.id, { title: "Quiz 3 — in lecture" }, now)).toBe(true);
+    expect(deleteManualTask(db, 1, quiz.id)).toBe(false);
+    expect(deleteManualTask(db, 2, dentist)).toBe(false);
+    expect(deleteManualTask(db, 1, dentist)).toBe(true);
+    expect(db.select().from(tasks).where(eq(tasks.id, dentist)).get()).toBeUndefined();
+
+    // A rebuild keeps the student's title.
+    applyPlan(db, 1, mod.id, [{ key: "cs4238-quiz-3", title: "Quiz 3", kind: "quiz", dueAt: now + 5 * D, dueConfidence: "exact", anticipated: false, weightPct: 10, why: null, sources: [], steps: [] }], now);
+    expect(db.select().from(tasks).where(eq(tasks.id, quiz.id)).get()).toMatchObject({ title: "Quiz 3 — in lecture", weightPct: 10 });
   });
 });
 
