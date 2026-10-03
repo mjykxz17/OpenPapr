@@ -215,3 +215,23 @@ describe("forms posted once per tutorial group", () => {
     expect(db.select().from(tasks).where(eq(tasks.id, mine[0].id)).get()!.status).toBe("done");
   });
 });
+
+describe("pattern citations", () => {
+  it("doesn't close Quiz 3 because the Quiz 2 it follows was submitted, and reopens one that was", async () => {
+    const { ownWork } = await import("./tasks");
+    expect(ownWork("Quiz 3", "Quiz-2", NOW + 9 * 24 * H, NOW - 5 * 24 * H)).toBe(false);
+    expect(ownWork("Submit Quiz 2", "Quiz-2", NOW, NOW)).toBe(true);
+    expect(ownWork("Incident 2 report", "Incident 1 Report", null, null)).toBe(false);
+    const db = setup();
+    db.insert(tasks).values([
+      { userId: 1, moduleId: 1, key: "st2334-quiz-3", title: "Quiz 3", kind: "quiz", dueAt: NOW + 9 * 24 * H, status: "open", anticipated: false,
+        sourcesJson: JSON.stringify([{ kind: "canvas", label: "Tutorial 3", itemId: 3 }]), stepsJson: "[]", createdAt: NOW, updatedAt: NOW },
+      { userId: 1, moduleId: 1, key: "st2334-quiz-4", title: "Quiz 4", kind: "quiz", dueAt: NOW + 16 * 24 * H, status: "done", anticipated: false, touchedAt: null,
+        sourcesJson: JSON.stringify([{ kind: "canvas", label: "Tutorial 3", itemId: 3 }]), stepsJson: "[]", createdAt: NOW, updatedAt: NOW },
+      { userId: 1, moduleId: 1, key: "st2334-quiz-5", title: "Quiz 5", kind: "quiz", dueAt: NOW + 20 * 24 * H, status: "done", anticipated: false, touchedAt: NOW,
+        sourcesJson: JSON.stringify([{ kind: "canvas", label: "Tutorial 3", itemId: 3 }]), stepsJson: "[]", createdAt: NOW, updatedAt: NOW },
+    ]).run();
+    tidyTasks(db, 1, NOW);
+    expect(db.select().from(tasks).all().map((t) => [t.key, t.status])).toEqual([["st2334-quiz-3", "open"], ["st2334-quiz-4", "open"], ["st2334-quiz-5", "done"]]);
+  });
+});

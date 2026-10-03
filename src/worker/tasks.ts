@@ -266,7 +266,19 @@ function applyPlan(db: Db, userId: number, moduleId: number, planned: Awaited<Re
 
 // Tasks whose Canvas work has all been submitted are done; steps the student
 // did not get to move forward; no day is loaded past what is doable.
+// A cited Canvas item is the task's own work, not just the pattern it follows:
+// "Quiz 3" citing "Quiz-2" (the last one) is not finished when Quiz 2 is.
+export function ownWork(taskTitle: string, itemTitle: string, taskDue: number | null, itemDue: number | null): boolean {
+  const a = quizNumber(taskTitle) ?? numbered(taskTitle), b = quizNumber(itemTitle) ?? numbered(itemTitle);
+  if (a !== null && b !== null && a !== b) return false;
+  // Due days before the task: an earlier instance, cited as the pattern.
+  if (taskDue !== null && itemDue !== null && itemDue < taskDue - 2 * D) return false;
+  return true;
+}
+const numbered = (t: string) => { const m = /\b(?:assignment|incident|lab|tutorial|problem set|ps|homework|hw|milestone|report)\s*[-#]?\s*(\d{1,2})\b/i.exec(t); return m ? Number(m[1]) : null; };
+
 export function tidyTasks(db: Db, userId: number, now: number): number {
+  reopenPatternDone(db, userId, now);
   const open = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.status, "open"))).all();
   if (!open.length) return 0;
   const cited = open.flatMap((t) => parseList<TaskSource>(t.sourcesJson).filter((s) => (s.kind === "canvas" || s.kind === "discussion" || s.kind === "planner") && s.itemId).map((s) => s.itemId!));
@@ -295,7 +307,8 @@ export function tidyTasks(db: Db, userId: number, now: number): number {
   let changed = 0;
   const live: { id: number; key: string; dueAt: number | null; steps: TaskStep[]; before: string }[] = [];
   for (const t of open) {
-    const srcs = parseList<TaskSource>(t.sourcesJson).filter((s) => (s.kind === "canvas" || s.kind === "discussion" || s.kind === "planner") && s.itemId && obligation(s.itemId));
+    const srcs = parseList<TaskSource>(t.sourcesJson).filter((s) => (s.kind === "canvas" || s.kind === "discussion" || s.kind === "planner") && s.itemId && obligation(s.itemId)
+      && ownWork(t.title, citedRows.get(s.itemId)!.title, t.dueAt, citedRows.get(s.itemId)!.dueAt));
     const workIds = srcs.map((s) => s.itemId!);
     const onlyPosts = srcs.length > 0 && srcs.every((s) => s.kind !== "canvas");
     // An anticipated task cites past work only as the pattern it follows.
@@ -319,6 +332,26 @@ export function tidyTasks(db: Db, userId: number, now: number): number {
     if (after !== t.before) { db.update(tasks).set({ stepsJson: after }).where(eq(tasks.id, t.id)).run(); changed++; }
   }
   return changed;
+}
+
+// Undo the old mistake ownWork now prevents: a future task closed only
+// because the earlier item it cited as a pattern was submitted, with none of
+// its own steps ticked. Reopened once; a task the student closes stays closed.
+function reopenPatternDone(db: Db, userId: number, now: number): void {
+  const done = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.status, "done"))).all()
+    // Closed by the app, not the student: marking done touches the task in
+    // the same moment, an automatic close only updates it.
+    .filter((t) => t.dueAt !== null && t.dueAt > now && !parseList<TaskStep>(t.stepsJson).some((s) => s.done)
+      && (t.touchedAt === null || t.touchedAt < t.updatedAt - 1000));
+  if (!done.length) return;
+  const ids = done.flatMap((t) => parseList<TaskSource>(t.sourcesJson).map((s) => s.itemId).filter((x): x is number => x != null));
+  const rows = new Map(ids.length ? db.select().from(items).where(inArray(items.id, ids)).all().map((r) => [r.id, r]) : []);
+  for (const t of done) {
+    const canvas = parseList<TaskSource>(t.sourcesJson).filter((s) => s.kind === "canvas" && s.itemId && rows.has(s.itemId));
+    if (canvas.length && canvas.every((s) => !ownWork(t.title, rows.get(s.itemId!)!.title, t.dueAt, rows.get(s.itemId!)!.dueAt))) {
+      db.update(tasks).set({ status: "open", updatedAt: now }).where(eq(tasks.id, t.id)).run();
+    }
+  }
 }
 
 const guessKind = (title: string) =>
