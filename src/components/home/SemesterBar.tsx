@@ -8,21 +8,22 @@ export function SemesterBar({ v }: { v: SemesterView }) {
   const seg = (from: number, to: number, cls: string) => (
     <span className={`absolute inset-y-0 ${cls}`} style={{ left: pct(from), width: pct(to - from) }} />
   );
+  // Done is the accent, still to come is a plain grey track, breaks are
+  // amber and exams red; a knob marks today.
   return (
-    <div className="relative mt-5 h-8 w-full max-w-[520px]" role="img"
+    <div className="relative mt-5 h-9 w-full max-w-[520px]" role="img"
       aria-label={`${v.title}, ${Math.round(v.progress * 100)}% through Semester ${v.sem}`}>
-      <span className="absolute -top-2 text-[10.5px] text-ink-3" style={{ left: pct(v.marks.recess[0]), transform: "translateX(-25%)" }}>Recess</span>
-      <span className="absolute -top-2 text-[10.5px] text-ink-3" style={{ left: pct(v.marks.reading[0]), transform: "translateX(-60%)" }}>Reading</span>
-      <div className="absolute inset-x-0 top-[10px] h-1.5 overflow-hidden rounded-full bg-seg-3/70">
-        {/* What has passed is solid; the rest is the track. */}
-        <span className="absolute inset-y-0 left-0 bg-accent/80" style={{ width: pct(v.progress) }} />
-        {seg(v.marks.recess[0], v.marks.recess[1], "bg-ink-3/60")}
-        {seg(v.marks.reading[0], v.marks.reading[1], "bg-ink-3/60")}
-        {seg(v.marks.exams[0], v.marks.exams[1], "bg-danger/60")}
+      <span className="absolute -top-2 text-[10.5px] font-medium text-warn" style={{ left: pct(v.marks.recess[0]), transform: "translateX(-25%)" }}>Recess</span>
+      <span className="absolute -top-2 text-[10.5px] font-medium text-warn" style={{ left: pct(v.marks.reading[0]), transform: "translateX(-60%)" }}>Reading</span>
+      <div className="absolute inset-x-0 top-[10px] h-2.5 overflow-hidden rounded-full bg-line-2">
+        <span className="absolute inset-y-0 left-0 bg-accent" style={{ width: pct(v.progress) }} />
+        {seg(v.marks.recess[0], v.marks.recess[1], "bg-warn")}
+        {seg(v.marks.reading[0], v.marks.reading[1], "bg-warn")}
+        {seg(v.marks.exams[0], v.marks.exams[1], "bg-danger")}
       </div>
-      <span className="absolute top-[5px] h-4 w-[2px] -translate-x-1/2 rounded-full bg-ink" style={{ left: pct(v.progress) }} />
-      <span className="absolute top-5 left-0 text-[10.5px] text-ink-3">Week 1</span>
-      <span className="absolute top-5 right-0 text-[10.5px] text-ink-3">Exams</span>
+      <span className="absolute top-[6px] h-[18px] w-[18px] -translate-x-1/2 rounded-full border-[3px] border-panel bg-ink shadow" style={{ left: pct(v.progress) }} />
+      <span className="absolute top-6 left-0 text-[10.5px] text-ink-3">Week 1</span>
+      <span className="absolute top-6 right-0 text-[10.5px] font-medium text-danger">Exams</span>
     </div>
   );
 }
