@@ -43,7 +43,7 @@ export function MonthWidget({ today, dues, modules }: { today: string; dues: Cal
     return m;
   }, [dues]);
   const overdue = dues.filter((d) => d.overdue);
-  const next = dues.find((d) => !d.overdue && d.day >= today);
+  const next = dues.find((d) => !d.overdue && !d.event && d.day >= today);
 
   // A tap elsewhere, Escape or scrolling closes a pinned card.
   useEffect(() => {
@@ -96,7 +96,7 @@ export function MonthWidget({ today, dues, modules }: { today: string; dues: Cal
           const active = open?.day === day;
           return (
             <button key={day} type="button" data-cal-day
-              aria-label={`${dayName(day, today)}${list.length ? `, ${list.length} due` : ""}`}
+              aria-label={`${dayName(day, today)}${list.length ? `, ${countLabel(list)}` : ""}`}
               onMouseEnter={(e) => show(day, e.currentTarget)}
               onFocus={(e) => show(day, e.currentTarget)}
               onBlur={hideSoon}
@@ -108,8 +108,8 @@ export function MonthWidget({ today, dues, modules }: { today: string; dues: Cal
               <span className="flex h-[5px] gap-[2px]">
                 {list.slice(0, 3).map((d) => (
                   <span key={d.key} className="h-[5px] w-[5px] rounded-full"
-                    style={d.estimated
-                      ? { border: `1px dashed ${isToday ? "var(--on-accent)" : color(d.moduleId)}` }
+                    style={d.estimated || d.event
+                      ? { border: `1px ${d.event ? "solid" : "dashed"} ${isToday ? "var(--on-accent)" : color(d.moduleId)}` }
                       : { background: isToday ? "var(--on-accent)" : late && d.overdue ? "var(--danger)" : color(d.moduleId), opacity: past && !d.overdue ? 0.5 : 1 }} />
                 ))}
               </span>
@@ -132,6 +132,12 @@ export function MonthWidget({ today, dues, modules }: { today: string; dues: Cal
   );
 }
 
+// "2 due", "1 event", "1 due · 1 event".
+function countLabel(list: CalDue[]): string {
+  const ev = list.filter((d) => d.event).length, due = list.length - ev;
+  return [due ? `${due} due` : "", ev ? `${ev} event${ev === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ");
+}
+
 function DayCard({ day, rect, today, list, color, onEnter, onLeave }: {
   day: string; rect: DOMRect; today: string; list: CalDue[]; color: (id: number | null) => string; onEnter: () => void; onLeave: () => void;
 }) {
@@ -144,18 +150,20 @@ function DayCard({ day, rect, today, list, color, onEnter, onLeave }: {
     <div data-cal-pop role="dialog" aria-label={dayName(day, today)} onMouseEnter={onEnter} onMouseLeave={onLeave}
       className="fixed z-50 max-w-[calc(100vw-16px)] rounded-xl border border-line-2 bg-panel p-3.5 text-[13px] shadow-[0_18px_40px_-12px_rgba(0,0,0,0.45)]"
       style={{ ...style, width: W }}>
-      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">{dayName(day, today)} · {list.length} due</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">{dayName(day, today)} · {countLabel(list)}</p>
       {shown.map((d, i) => (
         <div key={d.key} className={i > 0 ? "mt-3 border-t border-line pt-3" : "mt-1.5"}>
           <p className="text-[14px] font-semibold leading-snug text-ink">
             {d.code && <span className="mr-1.5 text-[12px] font-bold" style={{ color: color(d.moduleId) }}>{d.code}</span>}{d.title}
           </p>
           <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-ink-2">
-            <dt>{d.overdue ? "Was due" : d.estimated ? "Expected" : "Due"}</dt>
+            <dt>{d.event ? "Starts" : d.overdue ? "Was due" : d.estimated ? "Expected" : "Due"}</dt>
             <dd className={`text-right font-medium ${d.overdue ? "text-danger" : "text-ink"}`}>{d.estimated ? `around ${d.time === "23:59" ? "this day" : d.time}` : d.time}{d.exam && " · exam"}</dd>
             {d.counts && <><dt>Counts toward</dt><dd className="text-right font-medium text-ink">{d.counts.name} · {d.counts.pct}%</dd></>}
+            {d.event?.repeats && <><dt>Repeats</dt><dd className="text-right font-medium text-ink">{d.event.repeats} more this term</dd></>}
             {d.plan && <><dt>Your plan</dt><dd className="text-right font-medium text-ink">{d.plan.done} of {d.plan.total} steps{d.plan.minutesLeft ? ` · ${fmtMin(d.plan.minutesLeft)} left` : " · done"}</dd></>}
           </dl>
+          {d.event && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-2">{d.event.note ?? "A Canvas calendar event, not something to hand in."}</p>}
           {d.plan && <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-sunken"><div className="h-full bg-accent" style={{ width: `${Math.round((d.plan.done / d.plan.total) * 100)}%` }} /></div>}
           <Link href={d.href} className="mt-2 inline-block text-[12.5px] font-semibold text-accent no-underline hover:underline">{d.href.startsWith("/tasks") ? "Open in Tasks →" : "Open module →"}</Link>
         </div>
