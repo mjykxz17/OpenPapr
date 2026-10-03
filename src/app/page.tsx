@@ -89,16 +89,13 @@ export default async function Home() {
     { id: "calendar", label: "Add deadlines to your calendar", hint: "Google or Apple Calendar, kept up to date", href: "/account#acct-calendar", done: Boolean(user?.calendarToken) },
   ];
   const dateLabel = new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "long" }).format(now);
-  // The header: where we are in the NUS semester, how far exams are, and
-  // whether anything is due today.
+  // The header: which week of the NUS semester it is, and whether anything
+  // is due today.
   const sem = env.ACADEMIC_CALENDAR === "nus" ? semesterView(now) : null;
   const todayKey = new Date(now + 8 * 3_600_000).toISOString().slice(0, 10);
   const dueToday = overview.todos.filter((t) => t.category !== "routine" && t.dueAt !== null && t.dueAt >= now && new Date(t.dueAt + 8 * 3_600_000).toISOString().slice(0, 10) === todayKey).length;
-  const toExams = sem ? Math.round((sem.examsFrom - now) / 86_400_000) : 0;
-  const examsBit = !sem || sem.phase === "exams" || sem.phase === "vacation" || toExams < 0 ? null
-    : toExams <= 13 ? `${toExams} day${toExams === 1 ? "" : "s"} to exams` : `${Math.round(toExams / 7)} weeks to exams`;
-  const dueBit = dueToday ? `${dueToday} due today` : "nothing due today";
-  const semLine = [examsBit, dueBit].filter(Boolean).join(" · ").replace(/^./, (c) => c.toUpperCase());
+  // Under the bar: only whether anything is due today; the week is the title.
+  const semLine = dueToday ? `${dueToday} due today` : "Nothing due today";
   const canvasOkAt = overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null;
   const syncStale = overview.syncStatus.some((x) => (x.source === "canvas" || (x.source === "graph" && user?.msRefreshTokenEnc)) && x.stale);
 
