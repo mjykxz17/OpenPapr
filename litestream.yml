@@ -1,0 +1,24 @@
+# litestream.yml — continuous backup of the SQLite database.
+#
+# Litestream copies every change to the database to object storage a few
+# seconds after it is written, so losing the Fly volume loses seconds of
+# data, not everything. start.sh only runs it when LITESTREAM_REPLICA_URL is
+# set (or BUCKET_NAME, which `fly storage create` sets), and restores from
+# the backup on boot if the database file is missing.
+#
+# Only the database is backed up. Cached slide decks on the volume are
+# re-downloaded from Canvas when needed. Canvas tokens and AI keys inside the
+# database are encrypted with SECRET_KEY, so a restore needs that secret too.
+
+dbs:
+  - path: ${DATABASE_PATH}
+    replica:
+      url: ${LITESTREAM_REPLICA_URL}
+      # How often changes are uploaded: at most this many seconds of writes
+      # can be lost. 15s keeps object-storage requests (and cost) low.
+      sync-interval: 15s
+
+# A full snapshot once a day; backups older than a week are deleted.
+snapshot:
+  interval: 24h
+  retention: 168h

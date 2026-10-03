@@ -272,8 +272,11 @@ One container runs both the web server and the worker, and restarts the worker i
 fly launch --copy-config --no-deploy
 fly volumes create openpapr_data --size 1
 fly secrets set SECRET_KEY=$(openssl rand -hex 32) SESSION_KEY=$(openssl rand -hex 32) APP_PASSWORD=your-invite-code
+fly storage create   # optional: continuous database backups (below)
 fly deploy
 ```
+
+**Backups.** With a storage bucket attached, [Litestream](https://litestream.io) copies every database change to it within about 15 seconds and keeps a week of history. If the volume is ever lost, a new machine restores the database from the bucket on boot. `fly storage create` makes a Tigris bucket and sets the secrets; any S3-compatible bucket works through `LITESTREAM_REPLICA_URL`. Keep `SECRET_KEY` safe as well: the stored Canvas tokens and AI keys can't be read without it.
 
 <details>
 <summary><b>All environment variables</b></summary>
