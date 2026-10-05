@@ -4,6 +4,7 @@ import type { Db } from "@/db/client";
 import { items, modules, tasks, users } from "@/db/schema";
 import type { CalEvent } from "@/lib/ics";
 import { variantGroups } from "@/lib/variants";
+import { isConcrete } from "@/lib/concrete";
 
 // What goes into the student's calendar feed: every dated piece of work that
 // is still to do (Canvas assignments and quizzes, extracted deadlines, their
@@ -46,13 +47,16 @@ export function calendarEvents(db: Db, userId: number, now: number, opts: { step
     });
   }
 
+  const typeOf = new Map(db.select({ id: items.id, type: items.type }).from(items).where(eq(items.userId, userId)).all().map((i) => [i.id, i.type]));
   for (const t of db.select().from(tasks).where(eq(tasks.userId, userId)).all()) {
     if (t.status !== "open") continue;
+    // Only what the course posted or the student added (see concrete.ts).
+    if (!isConcrete(t.key, parse<{ kind: string; itemId?: number; label?: string }[]>(t.sourcesJson, []), (id) => typeOf.get(id))) continue;
     // Work already on Canvas is in the feed as itself; tasks add what is not:
     // expected quizzes, exams, things the student added, things only an
     // announcement or a slide mentioned.
     // An expected quiz cites the last real one only as its pattern.
-    const fromCanvas = !t.anticipated && parse<{ kind: string; itemId?: number }[]>(t.sourcesJson, []).some((s) => (s.kind === "canvas" || s.kind === "planner") && s.itemId);
+    const fromCanvas = !t.anticipated && parse<{ kind: string; itemId?: number; label?: string }[]>(t.sourcesJson, []).some((s) => (s.kind === "canvas" || s.kind === "planner") && s.itemId);
     if (!fromCanvas && t.dueAt !== null && t.dueAt > now - D && t.dueAt < now + 200 * D) {
       out.push(t.dueConfidence === "estimated"
         ? { uid: `task-${t.id}@openpapr`, title: label(t.moduleId, `${t.title} (date estimated)`), date: sgtDate(t.dueAt), allDay: true, description: `${t.why ?? ""}\nOpenPapr: ${opts.baseUrl}/tasks`.trim() }

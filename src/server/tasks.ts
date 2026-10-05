@@ -4,6 +4,7 @@ import { items, modules, taskFeedback, taskPlans, tasks, users } from "@/db/sche
 import { sgtDate, type TaskKind, type TaskSource, type TaskStep } from "@/enrich/tasks";
 import { TASK_KINDS } from "@/db/schema";
 import { dueLabel, shortDate } from "@/lib/format-date";
+import { isConcrete } from "@/lib/concrete";
 
 export type SourceLink = TaskSource & { href: string | null; external: boolean };
 export type TaskView = {
@@ -27,8 +28,8 @@ const D = 86_400_000;
 
 export function tasksView(db: Db, userId: number, now: number): TasksView {
   const mods = new Map(db.select().from(modules).where(eq(modules.userId, userId)).all().map((m) => [m.id, m]));
-  const rows = db.select().from(tasks).where(eq(tasks.userId, userId)).all();
-  const itemIds = rows.flatMap((t) => parse<TaskSource>(t.sourcesJson).filter((s) => s.itemId).map((s) => s.itemId!));
+  const all = db.select().from(tasks).where(eq(tasks.userId, userId)).all();
+  const itemIds = all.flatMap((t) => parse<TaskSource>(t.sourcesJson).filter((s) => s.itemId).map((s) => s.itemId!));
   // Also the source rows' own flags (missing), read once for all tasks.
   const urls = new Map(itemIds.length
     ? db.select({ id: items.id, url: items.url, type: items.type, missing: items.missing }).from(items).where(and(eq(items.userId, userId), inArray(items.id, itemIds))).all().map((i) => [i.id, i])
@@ -59,6 +60,8 @@ export function tasksView(db: Db, userId: number, now: number): TasksView {
   };
   const byDue = (a: TaskView, b: TaskView) => (a.dueAt ?? Number.MAX_SAFE_INTEGER) - (b.dueAt ?? Number.MAX_SAFE_INTEGER) || a.id - b.id;
 
+  // Only concrete work: what the course posted or the student added (see concrete.ts).
+  const rows = all.filter((t) => isConcrete(t.key, parse<TaskSource>(t.sourcesJson), (id) => urls.get(id)?.type));
   const open = rows.filter((t) => t.status === "open").map(view).sort(byDue);
   const today = sgtDate(now);
   const todaySteps: TodayStep[] = open.flatMap((t) => t.steps.filter((s) => !s.done && s.doBy <= today)

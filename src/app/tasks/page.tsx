@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { and, eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { requireUserId } from "@/server/session";
 import { getOverview } from "@/server/overview";
@@ -10,8 +9,6 @@ import { loadEnv } from "@/lib/env";
 import { semesterWeeks } from "@/lib/acad-week";
 import { calendarDues } from "@/server/calendar-dues";
 import { taskRows, weekBands } from "@/server/task-rows";
-import { roadmapCalendar } from "@/worker/roadmap";
-import { modules as modulesTable, tasks as tasksTable } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { TodoList } from "@/components/TodoList";
 import { TodaySteps } from "@/components/tasks/TodaySteps";
@@ -30,11 +27,7 @@ export default async function TasksPage() {
   const view = tasksView(db, userId, now);
   const hasModel = canGenerateGuides(db, userId);
   const overview = getOverview(db, userId, now, loadEnv().POLL_INTERVAL_MS);
-  const activeMods = db.select().from(modulesTable).where(and(eq(modulesTable.userId, userId), eq(modulesTable.active, true), eq(modulesTable.hidden, false))).all();
-  const cal = calendarDues(overview, view, now, {
-    roadmap: activeMods.flatMap((m) => roadmapCalendar(db, m, now)),
-    allTasks: db.select({ moduleId: tasksTable.moduleId, title: tasksTable.title, dueAt: tasksTable.dueAt }).from(tasksTable).where(eq(tasksTable.userId, userId)).all(),
-  });
+  const cal = calendarDues(overview, view, now);
   const rows = taskRows(overview, view, cal.dues);
   const modules = overview.modules.filter((m) => !m.hidden).map((m) => ({ id: m.id, code: m.code }));
   const today = sgtDate(now);
@@ -44,7 +37,7 @@ export default async function TasksPage() {
       <header className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">Tasks</h1>
-          <p className="text-[13px] text-ink-3">Canvas, your courses' schedules, the AI plan and what you add, in one list.</p>
+          <p className="text-[13px] text-ink-3">What your courses have posted and what you've added, in one list.</p>
         </div>
         {hasModel
           ? <RebuildButton scope="tasks" status={taskPlanStatus(db, userId)} noun="tasks" />

@@ -322,7 +322,7 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
       }).returning({ id: tasks.id }).get();
       // Work found after the module's first plan goes in the bell; the first
       // plan itself would only flood it.
-      if (plannedBefore && row) {
+      if (plannedBefore && row && t.sources.some((x) => x.kind === "announcement" || x.kind === "discussion" || ((x.kind === "canvas" || x.kind === "planner") && x.itemId != null))) {
         const src = newestNews(t.sources) ?? t.sources[0];
         tx.insert(taskChanges).values({ userId, moduleId, taskId: row.id, kind: "task_added", title: t.title, newDueAt: t.dueAt, newConfidence: t.dueConfidence,
           sourceItemId: src?.itemId ?? null, sourceLabel: src?.label ?? null, quote: src?.quote ?? null, createdAt: now }).run();

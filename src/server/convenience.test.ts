@@ -5,7 +5,7 @@ import { guideQuizzes, items, llmUsage, modules, studyGuides, taskFeedback, task
 import { calendarEvents } from "./calendar";
 import { deleteAccount, exportAccount } from "./account-data";
 import { recordLlmCall, sharedAllowanceLeft, usageThisMonth } from "./llm-usage";
-import { createManualTask, deleteManualTask, updateTask } from "./tasks";
+import { createManualTask, deleteManualTask, tasksView, updateTask } from "./tasks";
 import { changesFor, openChangeCount, resolveChange } from "./changes";
 import { applyPlan, fitAnnouncedWeeks } from "../worker/tasks";
 import { moduleSignals } from "../worker/tasks";
@@ -239,5 +239,26 @@ describe("the planner's own keys", () => {
     const all = db.select().from(tasks).all();
     expect(all).toHaveLength(1);
     expect(all[0]).toMatchObject({ key: "cs4238-series-quiz-3", dueAt: now + 8 * D });
+  });
+});
+
+describe("only concrete work", () => {
+  it("shows what the course posted or the student added, not what the schedule predicts", () => {
+    const { db, mod } = setup();
+    const [ann, ev, asg] = db.insert(items).values([
+      { ...base, moduleId: mod.id, type: "announcement", sourceId: "announcement:7", title: "Quiz-3 in Week 9" },
+      { ...base, moduleId: mod.id, type: "event", sourceId: "event:7", title: "CS4238 class", dueAt: now + 5 * D },
+      { ...base, moduleId: mod.id, type: "assignment", sourceId: "assignment:7", title: "Assignment 2", dueAt: now + 5 * D },
+    ]).returning().all();
+    const t = (key: string, title: string, sources: unknown[]) => db.insert(tasks).values({ userId: 1, moduleId: mod.id, key, title, kind: "quiz", dueAt: now + 5 * D, sourcesJson: JSON.stringify(sources), createdAt: now, updatedAt: now }).run();
+    t("a", "Quiz 3", [{ kind: "announcement", label: "x", itemId: ann!.id }]);
+    t("b", "Quiz 4", [{ kind: "file", label: "Lec01A p.7 (course schedule)", fileId: 1 }, { kind: "canvas", label: "class", itemId: ev!.id }]);
+    t("c", "Submit Assignment 2", [{ kind: "canvas", label: "A2", itemId: asg!.id }]);
+    t("d", "Final exam", [{ kind: "nusmods", label: "Final exam (NUSMods)" }]);
+    t("e", "Prepare for CTF", [{ kind: "file", label: "Lec01A p.7", fileId: 1 }]);
+    t("f", "Quiz 5", [{ kind: "announcement", label: "Welcome to CS4238 (course schedule)", itemId: ann!.id }]);
+    createManualTask(db, 1, { title: "Incident 2", dueAt: now + 3 * D, moduleId: mod.id }, now);
+    const v = tasksView(db, 1, now);
+    expect([...v.soon, ...v.later].map((x) => x.title).sort()).toEqual(["Final exam", "Incident 2", "Quiz 3", "Submit Assignment 2"]);
   });
 });
