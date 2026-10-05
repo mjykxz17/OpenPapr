@@ -109,7 +109,11 @@ export default async function Home() {
   // Under the bar: only whether anything is due today; the week is the title.
   const semLine = dueToday ? `${dueToday} due today` : "Nothing due today";
   const canvasOkAt = overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null;
-  const syncStale = overview.syncStatus.some((x) => (x.source === "canvas" || (x.source === "graph" && user?.msRefreshTokenEnc)) && x.stale);
+  // The server sleeps when nobody is using it, so data a few hours old on
+  // opening is normal (the Sync button catches up straight away). Only a
+  // source that hasn't synced for a day is worth a warning.
+  const syncStale = overview.syncStatus.some((x) => (x.source === "canvas" || (x.source === "graph" && user?.msRefreshTokenEnc)) && x.stale
+    && (x.lastOkAt === null || now - x.lastOkAt > 24 * 3_600_000));
 
   return (
     <AppShell>

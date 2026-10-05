@@ -12,6 +12,7 @@ import { createCanvasClient, isPdfFile, type CanvasClient } from "../connectors/
 import { extractCanvasFileLinks, type FileLinkSource } from "../lib/canvas-file-links";
 import { categorizeModuleFiles, createCompatFileCategorizer } from "../enrich/file-category";
 import { generateModuleGuide } from "../enrich/generate-guide";
+import { keepAwake, selfPing } from "./keep-awake";
 import { normalizeCanvasCourse } from "../connectors/canvas/normalize";
 import { DeltaExpiredError, fetchInboxDelta } from "../connectors/graph/client";
 import { refreshAccessToken } from "../connectors/graph/auth";
@@ -380,6 +381,9 @@ async function enrich(userId: number): Promise<void> {
     db.update(items).set({ category }).where(eq(items.id, id)).run();
 }
 
+// Keeps the machine up through long work while it would otherwise sleep.
+const awake = selfPing();
+
 const guard = createGuard(env.POLL_INTERVAL_MS);
 
 const deps = {
@@ -542,7 +546,7 @@ async function runGuideJob(): Promise<void> {
   }
 }
 
-async function tick(): Promise<void> {
+async function tickOnce(): Promise<void> {
   try {
     for (const user of selectRequestedUsers(db)) {
       // Clear first: an unclaimed flag would restart the cycle every 2s.
@@ -573,8 +577,8 @@ async function tick(): Promise<void> {
     // it, so "Sync now" and everyone's syncs keep flowing meanwhile.
     // A guide someone asked for by hand first, then the automatic guides:
     // new slides read, topics planned, at most one chapter written.
-    if (!guideJob) guideJob = runGuideJob()
-      .then(() => (Date.now() - lastAutoGuideAt >= AUTO_GUIDE_EVERY ? (lastAutoGuideAt = Date.now(), runAutoGuides(guideDeps)) : undefined))
+    if (!guideJob) guideJob = keepAwake(runGuideJob()
+      .then(() => (Date.now() - lastAutoGuideAt >= AUTO_GUIDE_EVERY ? (lastAutoGuideAt = Date.now(), runAutoGuides(guideDeps)) : undefined)), awake)
       .catch((err) => console.error("guide job crashed", err)).finally(() => { guideJob = null; });
     // The public demo account: made if missing, re-seeded after midnight.
     if (demoEnabled() && now - lastDemoCheckAt >= 60_000) {
@@ -589,7 +593,7 @@ async function tick(): Promise<void> {
     // changed decks re-read, then embeddings for anything new.
     if (!indexJob && now - lastIndexAt >= INDEX_EVERY) {
       lastIndexAt = now;
-      indexJob = runIndex().catch((err) => console.error("index job crashed", err)).finally(() => { indexJob = null; });
+      indexJob = keepAwake(runIndex(), awake).catch((err) => console.error("index job crashed", err)).finally(() => { indexJob = null; });
     }
     if (now - lastMaintenanceAt >= MAINTENANCE_MS) {
       lastMaintenanceAt = now;
@@ -598,6 +602,12 @@ async function tick(): Promise<void> {
   } catch (err) {
     console.error("worker tick failed", err);
   }
+}
+
+// A tick that runs long is doing real work (a sync, a rebuild): the machine
+// stays up until it finishes. See keep-awake.ts.
+async function tick(): Promise<void> {
+  await keepAwake(tickOnce(), awake);
   beat();
   setTimeout(tick, TICK_MS);
 }
@@ -660,7 +670,9 @@ setInterval(() => {
 // --- housekeeping ------------------------------------------------------------
 const MAINTENANCE_MS = 6 * 3_600_000;
 const CACHE_LIMIT_BYTES = 1_500_000_000;
-let lastMaintenanceAt = Date.now() - MAINTENANCE_MS + 5 * 60_000; // first run 5 min after start
+// First run 2 min after start: the machine sleeps when idle, so the worker
+// starts often and is rarely up for long.
+let lastMaintenanceAt = Date.now() - MAINTENANCE_MS + 2 * 60_000;
 function maintenance(): void {
   try {
     const dir = dirname(env.DATABASE_PATH);

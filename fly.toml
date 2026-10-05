@@ -16,8 +16,14 @@ swap_size_mb = 512
 [http_service]
   internal_port = 3000
   force_https = true
-  auto_stop_machines = false   # worker must keep polling
-  min_machines_running = 1
+  # Sleeps when nobody is using it, to keep the bill under $5 a month: Fly's
+  # proxy stops the machine after a few minutes without requests and starts
+  # it on the next one. Opening the app (or a calendar app fetching the feed)
+  # syncs straight away; long work keeps the machine up (src/worker/keep-awake.ts).
+  # "stop" rather than "suspend": suspend can't be used with swap.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
 
   # The web server and its database; the worker's state is in the body only
   # (see src/app/api/health/route.ts).
