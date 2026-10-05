@@ -548,12 +548,16 @@ async function runGuideJob(): Promise<void> {
 
 async function tickOnce(): Promise<void> {
   try {
+    // Work someone asked for (opening the app, Sync now, a calendar app
+    // fetching the feed, Build now) keeps the machine up until it's done.
+    // The background schedule doesn't: it would keep the machine awake
+    // forever, one sync after another. See keep-awake.ts.
     for (const user of selectRequestedUsers(db)) {
       // Clear first: an unclaimed flag would restart the cycle every 2s.
       if (!takeSyncRequest(db, user.id)) continue;
       guard.resetUser(user.id);
       console.log(`manual sync requested for user ${user.id}`);
-      await runFor(user.id);
+      await keepAwake(runFor(user.id), awake);
     }
 
     const now = Date.now();
@@ -567,18 +571,18 @@ async function tickOnce(): Promise<void> {
     }
     for (const userId of usersWithProfileRequests(db)) {
       profileGuard.resetUser(userId);
-      await guardedProfiles(userId).catch(() => {});
+      await keepAwake(guardedProfiles(userId).catch(() => {}), awake);
     }
     for (const userId of usersWithTaskRequests(db)) {
       taskGuard.resetUser(userId);
-      await guardedTasks(userId).catch(() => {});
+      await keepAwake(guardedTasks(userId).catch(() => {}), awake);
     }
     // Generation takes minutes; it runs beside the tick rather than inside
     // it, so "Sync now" and everyone's syncs keep flowing meanwhile.
     // A guide someone asked for by hand first, then the automatic guides:
     // new slides read, topics planned, at most one chapter written.
-    if (!guideJob) guideJob = keepAwake(runGuideJob()
-      .then(() => (Date.now() - lastAutoGuideAt >= AUTO_GUIDE_EVERY ? (lastAutoGuideAt = Date.now(), runAutoGuides(guideDeps)) : undefined)), awake)
+    if (!guideJob) guideJob = keepAwake(runGuideJob(), awake)
+      .then(() => (Date.now() - lastAutoGuideAt >= AUTO_GUIDE_EVERY ? (lastAutoGuideAt = Date.now(), runAutoGuides(guideDeps)) : undefined))
       .catch((err) => console.error("guide job crashed", err)).finally(() => { guideJob = null; });
     // The public demo account: made if missing, re-seeded after midnight.
     if (demoEnabled() && now - lastDemoCheckAt >= 60_000) {
@@ -593,7 +597,7 @@ async function tickOnce(): Promise<void> {
     // changed decks re-read, then embeddings for anything new.
     if (!indexJob && now - lastIndexAt >= INDEX_EVERY) {
       lastIndexAt = now;
-      indexJob = keepAwake(runIndex(), awake).catch((err) => console.error("index job crashed", err)).finally(() => { indexJob = null; });
+      indexJob = runIndex().catch((err) => console.error("index job crashed", err)).finally(() => { indexJob = null; });
     }
     if (now - lastMaintenanceAt >= MAINTENANCE_MS) {
       lastMaintenanceAt = now;
@@ -604,10 +608,8 @@ async function tickOnce(): Promise<void> {
   }
 }
 
-// A tick that runs long is doing real work (a sync, a rebuild): the machine
-// stays up until it finishes. See keep-awake.ts.
 async function tick(): Promise<void> {
-  await keepAwake(tickOnce(), awake);
+  await tickOnce();
   beat();
   setTimeout(tick, TICK_MS);
 }
