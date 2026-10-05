@@ -198,14 +198,15 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   const existing = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.moduleId, mod.id))).all().map((t) => {
     const steps = parseList<TaskStep>(t.stepsJson);
     return {
-      key: t.key, title: t.title, due: t.dueAt === null ? null : `${sgtLabel(t.dueAt)}${t.dueLocked ? ", set by the student" : ""}`,
+      key: t.key, title: t.title,
+      due: t.dueAt === null ? null : `${sgtLabel(t.dueAt)}${t.dueLocked ? `, set by the student${t.dueLockedAt ? ` on ${sgtLabel(t.dueLockedAt)}` : ""}` : ""}`,
       progress: t.status === "open" ? `${steps.filter((s) => s.done).length}/${steps.length} steps done`
         : t.status === "dismissed" ? "dismissed by the student" : t.status,
     };
   });
   const feedback = db.select().from(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, mod.id))).all()
     .sort((a, b) => b.createdAt - a.createdAt).slice(0, 15)
-    .map((f) => (f.kind === "not_task" ? `"${f.title}" is NOT a real task — do not plan it` : `"${f.title}": wrong date — ${f.note ?? "the student set it"}`));
+    .map((f) => (f.kind === "not_task" ? `"${f.title}" is NOT a real task — do not plan it` : `"${f.title}": wrong date — ${f.note ?? "the student set it"} (said ${sgtLabel(f.createdAt)})`));
 
   const road = roadmapSignals(db, mod, now);
   for (const [k, v] of road.refs) refs.set(k, v);
@@ -238,6 +239,11 @@ export function applyPlan(db: Db, userId: number, moduleId: number, planned: Awa
   // A safety-net task goes only once the plan covers its Canvas item.
   const citedNow = new Set(planned.flatMap((t) => t.sources.map((x) => x.itemId).filter((x): x is number => x != null)));
   const byIdNow = new Map(current.map((t) => [t.id, t]));
+  // When each cited announcement or staff reply was posted.
+  const citedIds = [...citedNow];
+  const postedAt = new Map(citedIds.length
+    ? db.select({ id: items.id, at: items.sourceCreatedAt, seen: items.firstSeenAt }).from(items).where(and(eq(items.userId, userId), inArray(items.id, citedIds))).all().map((i) => [i.id, i.at ?? i.seen])
+    : []);
   ops.remove = ops.remove.filter((id) => {
     const t = byIdNow.get(id)!;
     if (t.key.includes("-series-quiz-")) return planned.some((p) => p.kind === "quiz" && (p.dueAt === null || p.dueAt > now));
@@ -254,8 +260,17 @@ export function applyPlan(db: Db, userId: number, moduleId: number, planned: Awa
     }
     for (const u of ops.update) {
       const t = u.task;
-      // A date the student set stays theirs.
-      const date = locked.has(u.id) ? {} : { dueAt: t.dueAt, dueConfidence: t.dueConfidence };
+      // A date the student set stays theirs — until the course announces a
+      // new one after they set it ("Quiz 3 moved to Week 9").
+      const was = byIdNow.get(u.id)!;
+      const announcedAfter = locked.has(u.id) && t.dueAt !== null && t.dueAt !== was.dueAt
+        && t.sources.some((x) => (x.kind === "announcement" || x.kind === "discussion") && x.itemId != null && (postedAt.get(x.itemId) ?? 0) > (was.dueLockedAt ?? was.touchedAt ?? 0));
+      if (announcedAfter) {
+        // The student's old correction is out of date too; the planner must not be told it again.
+        tx.delete(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, moduleId), eq(taskFeedback.kind, "wrong_date"),
+          inArray(taskFeedback.title, [...new Set([was.title, t.title])]))).run();
+      }
+      const date = locked.has(u.id) && !announcedAfter ? {} : { dueAt: t.dueAt, dueConfidence: t.dueConfidence, ...(announcedAfter ? { dueLocked: false, dueLockedAt: null } : {}) };
       tx.update(tasks).set({
         // A title or type the student changed stays theirs too.
         ...(renamed.has(u.id) ? {} : { title: t.title, kind: t.kind }), ...date, anticipated: t.anticipated,

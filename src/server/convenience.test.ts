@@ -128,6 +128,27 @@ describe("teaching the planner", () => {
     applyPlan(db, 1, mod.id, [{ key: "cs4238-quiz-3", title: "Quiz 3", kind: "quiz", dueAt: now + 5 * D, dueConfidence: "exact", anticipated: false, weightPct: 10, why: null, sources: [], steps: [] }], now);
     expect(db.select().from(tasks).where(eq(tasks.id, quiz.id)).get()).toMatchObject({ title: "Quiz 3 — in lecture", weightPct: 10 });
   });
+
+  it("keeps a date the student set, until an announcement posted after it moves it", () => {
+    const { db, mod } = setup();
+    const quiz = db.insert(tasks).values({ userId: 1, moduleId: mod.id, key: "cs4238-quiz-3", title: "Quiz 3", kind: "quiz", dueAt: Date.parse("2026-10-04T23:59:00+08:00"), createdAt: now, updatedAt: now }).returning().get();
+    expect(updateTask(db, 1, quiz.id, { dueDate: "2026-10-06" }, now)).toBe(true);
+    const plan = (dueAt: number, itemId?: number) => [{ key: "cs4238-quiz-3", title: "Quiz 3", kind: "quiz" as const, dueAt, dueConfidence: "exact" as const, anticipated: false, weightPct: null, why: null,
+      sources: itemId ? [{ kind: "announcement" as const, label: "Quiz-3 in Week 9", itemId }] : [], steps: [] }];
+    const week9 = Date.parse("2026-10-13T18:30:00+08:00");
+    // The planner disagreeing on its own changes nothing…
+    applyPlan(db, 1, mod.id, plan(week9), now + D);
+    expect(db.select().from(tasks).where(eq(tasks.id, quiz.id)).get()!.dueAt).toBe(Date.parse("2026-10-06T23:59:00+08:00"));
+    // …nor does an announcement from before the student's change…
+    const old = db.insert(items).values({ ...base, moduleId: mod.id, type: "announcement", sourceId: "announcement:1", title: "Schedule", sourceCreatedAt: now - D }).returning().get();
+    applyPlan(db, 1, mod.id, plan(week9, old.id), now + D);
+    expect(db.select().from(tasks).where(eq(tasks.id, quiz.id)).get()!.dueLocked).toBe(true);
+    // …but one posted after it does, and the student's stale correction goes.
+    const moved = db.insert(items).values({ ...base, moduleId: mod.id, type: "announcement", sourceId: "announcement:2", title: "Quiz-3 in Week 9", sourceCreatedAt: now + D / 2 }).returning().get();
+    applyPlan(db, 1, mod.id, plan(week9, moved.id), now + D);
+    expect(db.select().from(tasks).where(eq(tasks.id, quiz.id)).get()).toMatchObject({ dueAt: week9, dueLocked: false });
+    expect(db.select().from(taskFeedback).all().filter((f) => f.kind === "wrong_date")).toEqual([]);
+  });
 });
 
 describe("search", () => {

@@ -148,7 +148,7 @@ export function updateTask(db: Db, userId: number, taskId: number, change: TaskC
   if (change.started !== undefined) { patch.startedAt = change.started ? (t.startedAt ?? now) : null; if (change.started && t.status !== "open") patch.status = "open"; }
   if (change.noDate) {
     if (!mine) return false;
-    patch.dueAt = null; patch.dueLocked = false;
+    patch.dueAt = null; patch.dueLocked = false; patch.dueLockedAt = null;
   }
   // Only the time moves: same day.
   if (change.time !== undefined && change.dueDate === undefined) {
@@ -165,6 +165,7 @@ export function updateTask(db: Db, userId: number, taskId: number, change: TaskC
     patch.dueAt = dueAt;
     patch.dueConfidence = "exact";
     patch.dueLocked = true;
+    patch.dueLockedAt = now;
     // Steps planned for after the new date move up to it.
     const steps = parse<TaskStep>(t.stepsJson);
     if (steps.some((s) => s.doBy > change.dueDate!)) patch.stepsJson = JSON.stringify(steps.map((s) => (s.doBy > change.dueDate! ? { ...s, doBy: change.dueDate! } : s)));

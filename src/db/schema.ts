@@ -360,6 +360,8 @@ export const tasks = sqliteTable("tasks", {
   touchedAt: integer("touched_at"),
   // The student set the date themselves: a rebuild never moves it again.
   dueLocked: integer("due_locked", { mode: "boolean" }).notNull().default(false),
+  // When they set it: an announcement posted after this still moves it.
+  dueLockedAt: integer("due_locked_at"),
   // The student renamed it: a rebuild keeps their title.
   titleLocked: integer("title_locked", { mode: "boolean" }).notNull().default(false),
   // The student's own notes, never touched by the planner.
