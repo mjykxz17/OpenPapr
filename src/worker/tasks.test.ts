@@ -235,3 +235,20 @@ describe("pattern citations", () => {
     expect(db.select().from(tasks).all().map((t) => [t.key, t.status])).toEqual([["st2334-quiz-3", "open"], ["st2334-quiz-4", "open"], ["st2334-quiz-5", "done"]]);
   });
 });
+
+import { announcedSince, sameAssessment } from "./tasks";
+describe("a newer announcement about an assessment", () => {
+  const a = (title: string, body: string, at: number) => ({ type: "announcement", title, body, sourceCreatedAt: at, firstSeenAt: at });
+  it("is found by kind and number, posted after the student's date", () => {
+    const rows = [a("Quiz-3 in Week 9", "<p>Quiz3 - Week 9 - during the class</p>", 200)];
+    expect(announcedSince("Quiz 3", 100, rows)).toBe(true);
+    expect(announcedSince("Quiz 3", 300, rows)).toBe(false);
+    expect(announcedSince("Quiz 4", 100, rows)).toBe(false);
+    expect(announcedSince("Quiz 3", 100, [a("Update", "Quiz 13 is cancelled", 200)])).toBe(false);
+    expect(announcedSince("Assignment 2", 100, [a("Update", "assignment-2 deadline extended", 200)])).toBe(true);
+  });
+  it("matches the student's old correction to the task", () => {
+    expect(sameAssessment("Quiz 3", "Submit Quiz 3")).toBe(true);
+    expect(sameAssessment("Quiz 3", "Quiz 4")).toBe(false);
+  });
+});

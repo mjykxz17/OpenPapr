@@ -15,7 +15,7 @@ import { variantGroups } from "../lib/variants";
 import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
 import { calendarLines, classSlots, refreshRoadmaps, roadmapSignals } from "./roadmap";
-import { ownWork } from "../lib/own-work";
+import { assessmentNumber, ownWork } from "../lib/own-work";
 export { ownWork };
 
 const H = 3_600_000;
@@ -195,16 +195,27 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     if (p.success) studyAdvice = [...p.data.howToStudy, ...p.data.fit.gaps.map((g) => `gap: ${g}`)].slice(0, 7);
   } catch { /* no profile yet */ }
 
-  const existing = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.moduleId, mod.id))).all().map((t) => {
+  // A date the student set is theirs — unless the course has announced
+  // something about that assessment since. Then the planner sees the date as
+  // an ordinary one, without the student's old correction, and the
+  // announcement decides.
+  const reopened = new Set<string>();
+  const existingRows = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.moduleId, mod.id))).all();
+  for (const t of existingRows) {
+    if (t.dueLocked && announcedSince(t.title, t.dueLockedAt ?? t.touchedAt ?? 0, rows)) reopened.add(t.title);
+  }
+  const existing = existingRows.map((t) => {
     const steps = parseList<TaskStep>(t.stepsJson);
+    const lockedNote = t.dueLocked && !reopened.has(t.title) ? `, set by the student${t.dueLockedAt ? ` on ${sgtLabel(t.dueLockedAt)}` : ""}` : "";
     return {
       key: t.key, title: t.title,
-      due: t.dueAt === null ? null : `${sgtLabel(t.dueAt)}${t.dueLocked ? `, set by the student${t.dueLockedAt ? ` on ${sgtLabel(t.dueLockedAt)}` : ""}` : ""}`,
+      due: t.dueAt === null ? null : `${sgtLabel(t.dueAt)}${lockedNote}${reopened.has(t.title) ? " — the course has announced a change since; use the announcement" : ""}`,
       progress: t.status === "open" ? `${steps.filter((s) => s.done).length}/${steps.length} steps done`
         : t.status === "dismissed" ? "dismissed by the student" : t.status,
     };
   });
   const feedback = db.select().from(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, mod.id))).all()
+    .filter((f) => !(f.kind === "wrong_date" && [...reopened].some((title) => sameAssessment(title, f.title))))
     .sort((a, b) => b.createdAt - a.createdAt).slice(0, 15)
     .map((f) => (f.kind === "not_task" ? `"${f.title}" is NOT a real task — do not plan it` : `"${f.title}": wrong date — ${f.note ?? "the student set it"} (said ${sgtLabel(f.createdAt)})`));
 
@@ -222,6 +233,24 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
       roadmap: road.lines, calendar: calendarLines(now), classSlots: slots,
     },
   };
+}
+
+// "Quiz 3" and "Submit Quiz-3": the same kind of assessment with the same number.
+const KIND_WORD = /\b(quiz|test|midterm|exam|assignment|incident|lab|tutorial|project|presentation|milestone|report)\b/i;
+export function sameAssessment(a: string, b: string): boolean {
+  const ka = KIND_WORD.exec(a)?.[1]?.toLowerCase(), kb = KIND_WORD.exec(b)?.[1]?.toLowerCase();
+  return Boolean(ka) && ka === kb && assessmentNumber(a) === assessmentNumber(b);
+}
+
+// An announcement or staff reply posted after `since` that names this
+// assessment ("Quiz-3 in Week 9", "Quiz3 - Week 9 - during the class").
+export function announcedSince(title: string, since: number, rows: { type: string; title: string; body: string | null; sourceCreatedAt: number | null; firstSeenAt: number }[]): boolean {
+  const kind = KIND_WORD.exec(title)?.[1]?.toLowerCase();
+  const n = assessmentNumber(title);
+  if (!kind || n === null) return false;
+  const re = new RegExp(`\\b${kind}[\\s_-]*0?${n}\\b`, "i");
+  return rows.some((i) => (i.type === "announcement" || i.type === "staff_reply") && (i.sourceCreatedAt ?? i.firstSeenAt) > since
+    && (re.test(i.title) || re.test(htmlToText(i.body ?? ""))));
 }
 
 // --- writing a module's plan ----------------------------------------------------
