@@ -7,6 +7,8 @@ import { loadEnv } from "@/lib/env";
 import { Papi } from "./pet/Papi";
 import { SearchPalette } from "./SearchPalette";
 import { DemoBanner } from "./DemoBanner";
+import { ChangesStrip } from "./ChangesBell";
+import { openChangeCount } from "@/server/changes";
 
 // `wide` opts a page out of the 1280px cap. Dashboard-style pages read better
 // capped — a grid of tiles stretched across a 27" display looks sparse — but a
@@ -25,12 +27,13 @@ export async function AppShell({ children, wide = false, bleed = false }: { chil
   const showMail = await mailAvailable();
   const uid = await currentUserId().catch(() => null);
   const demo = uid !== null && Boolean(getUser(getDb(), uid)?.isDemo);
+  const changes = uid !== null ? openChangeCount(getDb(), uid) : 0;
   return (
     <div className="min-h-svh bg-surface text-ink">
-      <Rail showMail={showMail && !demo} />
+      <Rail showMail={showMail && !demo} changes={uid !== null ? changes : null} />
       {/* Room for the tab bar (and Papi above it) on a phone; for the rail beside. */}
       <main className={`sm:pl-14 ${bleed ? "pb-[60px] sm:pb-0" : "pb-24 sm:pb-16"}`}>
-        {bleed ? children : <div className={`mx-auto px-4 py-6 sm:px-10 sm:py-9 ${wide ? "max-w-[1800px]" : "max-w-[1280px]"}`}>{demo && <DemoBanner />}{children}</div>}
+        {bleed ? children : <div className={`mx-auto px-4 py-6 sm:px-10 sm:py-9 ${wide ? "max-w-[1800px]" : "max-w-[1280px]"}`}>{demo && <DemoBanner />}{uid !== null && <ChangesStrip count={changes} />}{children}</div>}
       </main>
       {/* The study buddy lives on every page except the file viewer, whose
           controls sit where it would. */}

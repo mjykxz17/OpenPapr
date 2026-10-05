@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb } from "../db/client";
-import { guideQuizzes, items, llmUsage, modules, studyGuides, taskFeedback, tasks, users } from "../db/schema";
+import { guideQuizzes, items, llmUsage, modules, studyGuides, taskFeedback, taskPlans, tasks, users } from "../db/schema";
 import { calendarEvents } from "./calendar";
 import { deleteAccount, exportAccount } from "./account-data";
 import { recordLlmCall, sharedAllowanceLeft, usageThisMonth } from "./llm-usage";
 import { createManualTask, deleteManualTask, updateTask } from "./tasks";
+import { changesFor, openChangeCount, resolveChange } from "./changes";
 import { applyPlan, fitAnnouncedWeeks } from "../worker/tasks";
 import { moduleSignals } from "../worker/tasks";
 import { search } from "./search";
@@ -129,25 +130,68 @@ describe("teaching the planner", () => {
     expect(db.select().from(tasks).where(eq(tasks.id, quiz.id)).get()).toMatchObject({ title: "Quiz 3 — in lecture", weightPct: 10 });
   });
 
-  it("keeps a date the student set, until an announcement posted after it moves it", () => {
+  it("asks before an announcement moves a date the student set, and remembers the answer", () => {
     const { db, mod } = setup();
     const quiz = db.insert(tasks).values({ userId: 1, moduleId: mod.id, key: "cs4238-quiz-3", title: "Quiz 3", kind: "quiz", dueAt: Date.parse("2026-10-04T23:59:00+08:00"), createdAt: now, updatedAt: now }).returning().get();
     expect(updateTask(db, 1, quiz.id, { dueDate: "2026-10-06" }, now)).toBe(true);
+    const mine = Date.parse("2026-10-06T23:59:00+08:00");
     const plan = (dueAt: number, itemId?: number) => [{ key: "cs4238-quiz-3", title: "Quiz 3", kind: "quiz" as const, dueAt, dueConfidence: "exact" as const, anticipated: false, weightPct: null, why: null,
-      sources: itemId ? [{ kind: "announcement" as const, label: "Quiz-3 in Week 9", itemId }] : [], steps: [] }];
+      sources: itemId ? [{ kind: "announcement" as const, label: "Quiz-3 in Week 9", itemId, quote: "Quiz3 - Week 9" }] : [], steps: [] }];
     const week9 = Date.parse("2026-10-13T18:30:00+08:00");
-    // The planner disagreeing on its own changes nothing…
+    const get = () => db.select().from(tasks).where(eq(tasks.id, quiz.id)).get()!;
+    // The planner disagreeing on its own, or an announcement from before the student's change: nothing.
     applyPlan(db, 1, mod.id, plan(week9), now + D);
-    expect(db.select().from(tasks).where(eq(tasks.id, quiz.id)).get()!.dueAt).toBe(Date.parse("2026-10-06T23:59:00+08:00"));
-    // …nor does an announcement from before the student's change…
     const old = db.insert(items).values({ ...base, moduleId: mod.id, type: "announcement", sourceId: "announcement:1", title: "Schedule", sourceCreatedAt: now - D }).returning().get();
     applyPlan(db, 1, mod.id, plan(week9, old.id), now + D);
-    expect(db.select().from(tasks).where(eq(tasks.id, quiz.id)).get()!.dueLocked).toBe(true);
-    // …but one posted after it does, and the student's stale correction goes.
+    expect(changesFor(db, 1, now + D)).toEqual([]);
+    // One posted after it: the date stays, and the bell asks — once, however often the plan runs.
     const moved = db.insert(items).values({ ...base, moduleId: mod.id, type: "announcement", sourceId: "announcement:2", title: "Quiz-3 in Week 9", sourceCreatedAt: now + D / 2 }).returning().get();
     applyPlan(db, 1, mod.id, plan(week9, moved.id), now + D);
-    expect(db.select().from(tasks).where(eq(tasks.id, quiz.id)).get()).toMatchObject({ dueAt: week9, dueLocked: false });
+    applyPlan(db, 1, mod.id, plan(week9, moved.id), now + D + 60_000);
+    expect(get()).toMatchObject({ dueAt: mine, dueLocked: true });
+    const asks = changesFor(db, 1, now + D);
+    expect(asks).toHaveLength(1);
+    expect(asks[0]).toMatchObject({ kind: "date_proposed", open: true, oldDueAt: mine, newDueAt: week9, source: { quote: "Quiz3 - Week 9" } });
+    expect(openChangeCount(db, 1)).toBe(1);
+    // Keep: stays, and the same announcement doesn't ask again.
+    expect(resolveChange(db, 1, asks[0]!.id, "keep", now + D + 120_000)).toBe(true);
+    applyPlan(db, 1, mod.id, plan(week9, moved.id), now + 2 * D);
+    expect(openChangeCount(db, 1)).toBe(0);
+    expect(get().dueAt).toBe(mine);
+    // A later announcement asks again; accepting moves it and drops the old correction.
+    const later = db.insert(items).values({ ...base, moduleId: mod.id, type: "announcement", sourceId: "announcement:3", title: "Quiz 3 update", sourceCreatedAt: now + 3 * D }).returning().get();
+    applyPlan(db, 1, mod.id, plan(week9, later.id), now + 3 * D + 60_000);
+    const ask2 = changesFor(db, 1, now + 3 * D).find((c) => c.open)!;
+    expect(resolveChange(db, 1, ask2.id, "accept", now + 3 * D + 120_000)).toBe(true);
+    expect(get()).toMatchObject({ dueAt: week9, dueLocked: false });
     expect(db.select().from(taskFeedback).all().filter((f) => f.kind === "wrong_date")).toEqual([]);
+    // Someone else can't answer it.
+    expect(resolveChange(db, 2, ask2.id, "keep", now)).toBe(false);
+  });
+
+  it("tells the student when a date moves for them, with undo, and when new work turns up", () => {
+    const { db, mod } = setup();
+    db.insert(taskPlans).values({ moduleId: mod.id, inputsHash: "x", generatedAt: now - D }).run();
+    const lab = db.insert(tasks).values({ userId: 1, moduleId: mod.id, key: "cs4238-lab-5", title: "Lab 5", kind: "submission", dueAt: now + 3 * D, createdAt: now, updatedAt: now }).returning().get();
+    const ann = db.insert(items).values({ ...base, moduleId: mod.id, type: "announcement", sourceId: "announcement:5", title: "Lab 5 extended", sourceCreatedAt: now }).returning().get();
+    const src = [{ kind: "announcement" as const, label: "Lab 5 extended", itemId: ann.id }];
+    applyPlan(db, 1, mod.id, [
+      { key: "cs4238-lab-5", title: "Lab 5", kind: "submission", dueAt: now + 6 * D, dueConfidence: "exact", anticipated: false, weightPct: null, why: null, sources: src, steps: [] },
+      { key: "cs4238-incident-4", title: "Incident 4", kind: "project", dueAt: now + 20 * D, dueConfidence: "estimated", anticipated: false, weightPct: null, why: null, sources: src, steps: [] },
+    ], now);
+    const list = changesFor(db, 1, now);
+    expect(list.map((c) => c.kind).sort()).toEqual(["date_moved", "task_added"]);
+    expect(db.select().from(tasks).where(eq(tasks.id, lab.id)).get()!.dueAt).toBe(now + 6 * D);
+    const moved = list.find((c) => c.kind === "date_moved")!;
+    expect(resolveChange(db, 1, moved.id, "undo", now)).toBe(true);
+    expect(db.select().from(tasks).where(eq(tasks.id, lab.id)).get()).toMatchObject({ dueAt: now + 3 * D, dueLocked: true });
+    const added = list.find((c) => c.kind === "task_added")!;
+    expect(resolveChange(db, 1, added.id, "not_task", now)).toBe(true);
+    expect(db.select().from(tasks).where(eq(tasks.id, added.taskId!)).get()!.status).toBe("dismissed");
+    expect(openChangeCount(db, 1)).toBe(0);
+    // History stays for two weeks.
+    expect(changesFor(db, 1, now).map((c) => c.status).sort()).toEqual(["undone", "undone"]);
+    expect(changesFor(db, 1, now + 15 * D)).toEqual([]);
   });
 });
 

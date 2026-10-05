@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { components, fileHints, files, items, modules, taskFeedback, taskPlans, tasks, users } from "../db/schema";
+import { components, fileHints, files, items, modules, taskChanges, taskFeedback, taskPlans, tasks, users } from "../db/schema";
 import { getModuleProfileRow, getNusmods } from "../db/profiles-repo";
 import { moduleCodes } from "../connectors/nusmods/client";
 import type { CompatConfig } from "../enrich/openai-compat";
@@ -15,7 +15,7 @@ import { variantGroups } from "../lib/variants";
 import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
 import { calendarLines, classSlots, placeInWeek, refreshRoadmaps, roadmapSignals, weekNote, weeksNamed } from "./roadmap";
-import { assessmentNumber, ownWork } from "../lib/own-work";
+import { assessmentNumber, KIND_WORD, ownWork, sameAssessment } from "../lib/own-work";
 export { ownWork };
 
 const H = 3_600_000;
@@ -237,15 +237,9 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   };
 }
 
-// "Quiz 3" and "Submit Quiz-3": the same kind of assessment with the same number.
-const KIND_WORD = /\b(quiz|test|midterm|exam|assignment|incident|lab|tutorial|project|presentation|milestone|report)\b/i;
-export function sameAssessment(a: string, b: string): boolean {
-  const ka = KIND_WORD.exec(a)?.[1]?.toLowerCase(), kb = KIND_WORD.exec(b)?.[1]?.toLowerCase();
-  return Boolean(ka) && ka === kb && assessmentNumber(a) === assessmentNumber(b);
-}
-
 // An announcement or staff reply posted after `since` that names this
 // assessment ("Quiz-3 in Week 9", "Quiz3 - Week 9 - during the class").
+export { sameAssessment };
 export function announcedSince(title: string, since: number, rows: { type: string; title: string; body: string | null; sourceCreatedAt: number | null; firstSeenAt: number }[]): boolean {
   const kind = KIND_WORD.exec(title)?.[1]?.toLowerCase();
   const n = assessmentNumber(title);
@@ -304,6 +298,10 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
   // A safety-net task goes only once the plan covers its Canvas item.
   const citedNow = new Set(planned.flatMap((t) => t.sources.map((x) => x.itemId).filter((x): x is number => x != null)));
   const byIdNow = new Map(current.map((t) => [t.id, t]));
+  const plannedBefore = Boolean(db.select().from(taskPlans).where(eq(taskPlans.moduleId, moduleId)).get()?.generatedAt);
+  // The newest announcement or staff reply a planned task cites.
+  const newestNews = (sources: TaskSource[]) => sources.filter((x) => (x.kind === "announcement" || x.kind === "discussion") && x.itemId != null)
+    .sort((a, b) => (postedAt.get(b.itemId!) ?? 0) - (postedAt.get(a.itemId!) ?? 0))[0] ?? null;
   // When each cited announcement or staff reply was posted.
   const citedIds = [...citedNow];
   const postedAt = new Map(citedIds.length
@@ -317,26 +315,43 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
   });
   db.transaction((tx) => {
     for (const t of ops.insert) {
-      tx.insert(tasks).values({
+      const row = tx.insert(tasks).values({
         userId, moduleId, key: t.key, title: t.title, kind: t.kind, dueAt: t.dueAt, dueConfidence: t.dueConfidence,
         anticipated: t.anticipated, weightPct: t.weightPct, why: t.why, sourcesJson: JSON.stringify(t.sources),
         stepsJson: JSON.stringify(t.steps), status: "open", createdAt: now, updatedAt: now,
-      }).run();
+      }).returning({ id: tasks.id }).get();
+      // Work found after the module's first plan goes in the bell; the first
+      // plan itself would only flood it.
+      if (plannedBefore && row) {
+        const src = newestNews(t.sources) ?? t.sources[0];
+        tx.insert(taskChanges).values({ userId, moduleId, taskId: row.id, kind: "task_added", title: t.title, newDueAt: t.dueAt, newConfidence: t.dueConfidence,
+          sourceItemId: src?.itemId ?? null, sourceLabel: src?.label ?? null, quote: src?.quote ?? null, createdAt: now }).run();
+      }
     }
     for (const u of ops.update) {
       const t = u.task;
-      // A date the student set stays theirs — until the course announces a
-      // new one after they set it ("Quiz 3 moved to Week 9").
       const was = byIdNow.get(u.id)!;
-      const announcedAfter = locked.has(u.id) && t.dueAt !== null && t.dueAt !== was.dueAt
-        && t.sources.some((x) => (x.kind === "announcement" || x.kind === "discussion") && x.itemId != null && (postedAt.get(x.itemId) ?? 0) > (was.dueLockedAt ?? was.touchedAt ?? 0));
-      if (announcedAfter) {
-        // The student's old correction is out of date too; the planner must not be told it again.
-        const stale = tx.select().from(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, moduleId), eq(taskFeedback.kind, "wrong_date"))).all()
-          .filter((f) => f.title === was.title || sameAssessment(f.title, was.title) || sameAssessment(f.title, t.title));
-        if (stale.length) tx.delete(taskFeedback).where(inArray(taskFeedback.id, stale.map((f) => f.id))).run();
+      const moved = t.dueAt !== null && was.dueAt !== null && Math.abs(t.dueAt - was.dueAt) >= 12 * 3_600_000;
+      const news = newestNews(t.sources);
+      // A date the student set stays theirs. When the course announces a
+      // different one after they set it ("Quiz 3 moved to Week 9"), the bell
+      // asks them; nothing moves until they choose.
+      if (locked.has(u.id) && t.dueAt !== null && t.dueAt !== was.dueAt && news && (postedAt.get(news.itemId!) ?? 0) > (was.dueLockedAt ?? was.touchedAt ?? 0)) {
+        const open = tx.select().from(taskChanges).where(and(eq(taskChanges.taskId, u.id), eq(taskChanges.kind, "date_proposed"))).all();
+        const asked = open.find((c) => c.sourceItemId === news.itemId && (c.status === "kept" || (c.status === "pending" && c.newDueAt === t.dueAt)));
+        if (!asked) {
+          const pending = open.find((c) => c.status === "pending");
+          const values = { title: was.title, oldDueAt: was.dueAt, newDueAt: t.dueAt, newConfidence: t.dueConfidence, sourceItemId: news.itemId!, sourceLabel: news.label, quote: news.quote ?? null };
+          if (pending) tx.update(taskChanges).set({ ...values, createdAt: now }).where(eq(taskChanges.id, pending.id)).run();
+          else tx.insert(taskChanges).values({ userId, moduleId, taskId: u.id, kind: "date_proposed", ...values, createdAt: now }).run();
+        }
+      } else if (!locked.has(u.id) && moved && news && !parseList<TaskSource>(was.sourcesJson).some((x) => x.itemId === news.itemId)) {
+        // Moved for them because of something new the course posted: shown in
+        // the bell with an undo.
+        tx.insert(taskChanges).values({ userId, moduleId, taskId: u.id, kind: "date_moved", title: t.title, oldDueAt: was.dueAt, newDueAt: t.dueAt, newConfidence: t.dueConfidence,
+          sourceItemId: news.itemId!, sourceLabel: news.label, quote: news.quote ?? null, createdAt: now }).run();
       }
-      const date = locked.has(u.id) && !announcedAfter ? {} : { dueAt: t.dueAt, dueConfidence: t.dueConfidence, ...(announcedAfter ? { dueLocked: false, dueLockedAt: null } : {}) };
+      const date = locked.has(u.id) ? {} : { dueAt: t.dueAt, dueConfidence: t.dueConfidence };
       tx.update(tasks).set({
         // A title or type the student changed stays theirs too.
         ...(renamed.has(u.id) ? {} : { title: t.title, kind: t.kind }), ...date, anticipated: t.anticipated,

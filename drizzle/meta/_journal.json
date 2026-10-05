@@ -239,6 +239,13 @@
       "when": 1791212415017,
       "tag": "0033_task_due_locked_at",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1791217238789,
+      "tag": "0034_task_changes",
+      "breakpoints": true
     }
   ]
 }

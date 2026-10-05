@@ -372,6 +372,30 @@ export const tasks = sqliteTable("tasks", {
   updatedAt: integer("updated_at").notNull(),
 }, (t) => [uniqueIndex("tasks_user_key").on(t.userId, t.key), index("tasks_user_status").on(t.userId, t.status)]);
 
+// What the courses changed, for the bell: a date the student set that an
+// announcement now contradicts (asks before moving it), a date moved for
+// them (with undo), and work newly found. Kept as history once handled.
+export const TASK_CHANGE_KINDS = ["date_proposed", "date_moved", "task_added"] as const;
+export const taskChanges = sqliteTable("task_changes", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  moduleId: integer("module_id").references(() => modules.id),
+  taskId: integer("task_id"),
+  kind: text("kind", { enum: TASK_CHANGE_KINDS }).notNull(),
+  title: text("title").notNull(),
+  oldDueAt: integer("old_due_at"),
+  newDueAt: integer("new_due_at"),
+  newConfidence: text("new_confidence", { enum: ["exact", "estimated"] }),
+  sourceItemId: integer("source_item_id"),
+  sourceLabel: text("source_label"),
+  quote: text("quote"),
+  // pending: waiting for the student (proposals) or not yet seen (the rest);
+  // accepted / kept / undone / seen: handled.
+  status: text("status", { enum: ["pending", "accepted", "kept", "undone", "seen"] }).notNull().default("pending"),
+  createdAt: integer("created_at").notNull(),
+  resolvedAt: integer("resolved_at"),
+}, (t) => [index("task_changes_user").on(t.userId, t.status)]);
+
 // What the student told the planner it got wrong ("not a real task", "wrong
 // date"), shown to it on the next plan for that module so it stops repeating
 // the mistake.

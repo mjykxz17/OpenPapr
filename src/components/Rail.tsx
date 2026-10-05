@@ -6,6 +6,7 @@ import { SignOutButton } from "./SignOutButton";
 import { AppearanceMenu } from "./AppearanceMenu";
 import { PapiMark } from "./brand/PapiMark";
 import { openSearch } from "./SearchPalette";
+import { ChangesBell } from "./ChangesBell";
 
 function HomeIcon() {
   return (
@@ -72,7 +73,7 @@ const NAV = [
 // The rail is the only persistent chrome, so it also says where you are:
 // the current section's icon sits on an accent tint and carries
 // aria-current. Targets are 44px — the minimum a finger can hit.
-export function Rail({ showMail = true }: { showMail?: boolean }) {
+export function Rail({ showMail = true, changes = null }: { showMail?: boolean; changes?: number | null }) {
   const nav = NAV.filter((n) => showMail || n.href !== "/mail");
   const pathname = usePathname();
   // A module's guide belongs to Guides; the rest of a module page to Home.
@@ -124,6 +125,7 @@ export function Rail({ showMail = true }: { showMail?: boolean }) {
           </Link>
         );
       })}
+      {changes !== null && <ChangesBell count={changes} />}
       <div className="mt-auto flex flex-col items-center gap-1">
         <Link
           href="/account"
