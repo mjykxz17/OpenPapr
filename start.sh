@@ -66,7 +66,12 @@ trap shutdown TERM INT
 [ "$backups" -eq 1 ] && start_litestream
 node server.js &
 web_pid=$!
-start_worker
+# The machine sleeps when idle and wakes on a request, which is waiting for
+# the web server. The worker (tsx compiling it) competes for the one CPU, so
+# it starts a few seconds later, once the page is on its way.
+sleep 6 &
+wait $!
+[ "$stopping" -eq 0 ] && start_worker
 
 while [ "$stopping" -eq 0 ]; do
   sleep 5 &
