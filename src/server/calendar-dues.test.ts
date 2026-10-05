@@ -44,4 +44,12 @@ describe("calendarDues", () => {
       ["Submit Quiz 3", "2026-10-06", null], ["Quiz 4", "2026-10-20", "Week 10"], ["CTF", "2026-10-30", "Week 11"],
     ]);
   });
+
+  it("drops the schedule's Quiz 3 once an announcement has moved the task to another week", () => {
+    const q3 = task({ title: "Quiz 3", dueAt: Date.parse("2026-10-13T18:30:00+08:00") });
+    const roadmap = [{ moduleId: 1, kind: "quiz" as const, time: "18:30", placed: "slot" as const, weightPct: 40, covers: null, source: "CS4238-Lec01A p.7", fileId: 36, page: 7,
+      title: "Quiz 3 (Incident2, W6, W7)", at: Date.parse("2026-10-06T18:30:00+08:00"), week: "Week 8", weekFrom: Date.parse("2026-10-05T00:00:00+08:00"), weekTo: Date.parse("2026-10-11T23:59:59+08:00") }];
+    const { dues } = calendarDues(ov(), tv([q3]), NOW, { roadmap, allTasks: [{ moduleId: 1, title: "Quiz 3", dueAt: q3.dueAt }] });
+    expect(dues.map((d) => [d.title, d.day])).toEqual([["Quiz 3", "2026-10-13"]]);
+  });
 });
