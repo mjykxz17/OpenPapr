@@ -6,7 +6,7 @@ import { calendarEvents } from "./calendar";
 import { deleteAccount, exportAccount } from "./account-data";
 import { recordLlmCall, sharedAllowanceLeft, usageThisMonth } from "./llm-usage";
 import { createManualTask, deleteManualTask, updateTask } from "./tasks";
-import { applyPlan } from "../worker/tasks";
+import { applyPlan, fitAnnouncedWeeks } from "../worker/tasks";
 import { moduleSignals } from "../worker/tasks";
 import { search } from "./search";
 
@@ -165,5 +165,24 @@ describe("search", () => {
     expect(hits.find((h) => h.kind === "guide")!.href).toBe(`/modules/${mod.id}/guide#stack-canaries`);
     expect(search(db, 1, "cs4238", now)[0]!.kind).toBe("module");
     expect(search(db, 1, "x", now)).toEqual([]);
+  });
+});
+
+describe("an announced week", () => {
+  it("puts the quiz in that week's class when the planner counted wrong", () => {
+    const { db, mod } = setup();
+    const t0 = Date.parse("2026-10-05T12:00:00+08:00");
+    for (const d of ["2026-09-22", "2026-09-29", "2026-10-06", "2026-10-13"]) {
+      db.insert(items).values({ ...base, moduleId: mod.id, type: "event", sourceId: `event:${d}`, title: "CS4238 Computer Security Practice [2610]", dueAt: Date.parse(`${d}T18:30:00+08:00`) }).run();
+    }
+    const ann = db.insert(items).values({ ...base, moduleId: mod.id, type: "announcement", sourceId: "announcement:9", title: "Quiz-3 in Week 9",
+      body: "<p>Quiz3 - Week 9 - during the class. Covered in W6,W7 and W8.</p>", sourceCreatedAt: t0 }).returning().get();
+    const q = (dueAt: number) => ({ title: "Quiz 3", dueAt, dueConfidence: "estimated" as const, sources: [{ kind: "announcement" as const, label: "x", itemId: ann.id }] });
+    const wrong = fitAnnouncedWeeks(db, mod.id, [q(Date.parse("2026-10-06T18:30:00+08:00"))], t0)[0]!;
+    expect(wrong.dueAt).toBe(Date.parse("2026-10-13T18:30:00+08:00"));
+    const right = Date.parse("2026-10-15T10:00:00+08:00");
+    expect(fitAnnouncedWeeks(db, mod.id, [q(right)], t0)[0]!.dueAt).toBe(right);
+    // A different quiz citing it is left alone.
+    expect(fitAnnouncedWeeks(db, mod.id, [{ ...q(right - 9 * D), title: "Quiz 4" }], t0)[0]!.dueAt).toBe(right - 9 * D);
   });
 });

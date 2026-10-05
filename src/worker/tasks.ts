@@ -14,7 +14,7 @@ import { htmlToText } from "../lib/html-text";
 import { variantGroups } from "../lib/variants";
 import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
-import { calendarLines, classSlots, refreshRoadmaps, roadmapSignals } from "./roadmap";
+import { calendarLines, classSlots, placeInWeek, refreshRoadmaps, roadmapSignals, weekNote, weeksNamed } from "./roadmap";
 import { assessmentNumber, ownWork } from "../lib/own-work";
 export { ownWork };
 
@@ -122,6 +122,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
 
   // Announcements and what lecturers or TAs said in discussions read the same
   // way: the course telling the student something.
+  const weeklyClasses = classSlots(rows);
   const announcements: SignalItem[] = rows
     .filter((i) => (i.type === "announcement" || i.type === "staff_reply") && (i.sourceCreatedAt ?? i.firstSeenAt) >= now - 45 * D)
     .sort((a, b) => (b.sourceCreatedAt ?? b.firstSeenAt) - (a.sourceCreatedAt ?? a.firstSeenAt)).slice(0, 14)
@@ -135,7 +136,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
         return { ref: `R${i.id}`, line: `${i.sender ?? "A lecturer"} replied in the discussion “${meta?.topicTitle ?? i.title}” (${posted})`, body: text.slice(0, 600) };
       }
       refs.set(`A${i.id}`, { kind: "announcement", label: i.title, itemId: i.id });
-      return { ref: `A${i.id}`, line: `${i.title} (posted ${posted})`, body: text.slice(0, 1200) };
+      return { ref: `A${i.id}`, line: `${i.title} (posted ${posted})${weekNote(`${i.title} ${text}`, now, weeklyClasses)}`, body: text.slice(0, 1200) };
     });
 
   // Discussions that ask something of the student: graded, "post first", or
@@ -215,7 +216,8 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     };
   });
   const feedback = db.select().from(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, mod.id))).all()
-    .filter((f) => !(f.kind === "wrong_date" && [...reopened].some((title) => sameAssessment(title, f.title))))
+    // A date correction the course has since announced over is out of date.
+    .filter((f) => !(f.kind === "wrong_date" && announcedSince(f.title, f.createdAt, rows)))
     .sort((a, b) => b.createdAt - a.createdAt).slice(0, 15)
     .map((f) => (f.kind === "not_task" ? `"${f.title}" is NOT a real task — do not plan it` : `"${f.title}": wrong date — ${f.note ?? "the student set it"} (said ${sgtLabel(f.createdAt)})`));
 
@@ -251,6 +253,28 @@ export function announcedSince(title: string, since: number, rows: { type: strin
   const re = new RegExp(`\\b${kind}[\\s_-]*0?${n}\\b`, "i");
   return rows.some((i) => (i.type === "announcement" || i.type === "staff_reply") && (i.sourceCreatedAt ?? i.firstSeenAt) > since
     && (re.test(i.title) || re.test(htmlToText(i.body ?? ""))));
+}
+
+// The planner sometimes counts weeks wrong. When the newest announcement it
+// cites for an assessment names it and exactly one "Week N", the date must
+// fall in that week: if it doesn't, it goes to the module's weekly class that
+// week (or the week's Friday).
+export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | null; dueConfidence: "exact" | "estimated"; sources: TaskSource[] }>(db: Db, moduleId: number, planned: T[], now: number): T[] {
+  const rows = db.select().from(items).where(eq(items.moduleId, moduleId)).all();
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const slots = classSlots(rows);
+  return planned.map((t) => {
+    const anns = t.sources.filter((x) => x.kind === "announcement" && x.itemId != null).map((x) => byId.get(x.itemId!)).filter((r) => r !== undefined)
+      .sort((a, b) => (b.sourceCreatedAt ?? b.firstSeenAt) - (a.sourceCreatedAt ?? a.firstSeenAt));
+    const a = anns[0];
+    if (!a) return t;
+    const text = `${a.title} ${htmlToText(a.body ?? "")}`;
+    const weeks = weeksNamed(text);
+    if (weeks.length !== 1 || !announcedSince(t.title, -1, [a])) return t;
+    const p = placeInWeek(weeks[0]!, now, slots);
+    if (!p || (t.dueAt !== null && t.dueAt >= p.from && t.dueAt < p.to)) return t;
+    return { ...t, dueAt: p.at, dueConfidence: p.inClass ? t.dueConfidence : "estimated" };
+  });
 }
 
 // --- writing a module's plan ----------------------------------------------------
@@ -296,8 +320,9 @@ export function applyPlan(db: Db, userId: number, moduleId: number, planned: Awa
         && t.sources.some((x) => (x.kind === "announcement" || x.kind === "discussion") && x.itemId != null && (postedAt.get(x.itemId) ?? 0) > (was.dueLockedAt ?? was.touchedAt ?? 0));
       if (announcedAfter) {
         // The student's old correction is out of date too; the planner must not be told it again.
-        tx.delete(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, moduleId), eq(taskFeedback.kind, "wrong_date"),
-          inArray(taskFeedback.title, [...new Set([was.title, t.title])]))).run();
+        const stale = tx.select().from(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, moduleId), eq(taskFeedback.kind, "wrong_date"))).all()
+          .filter((f) => f.title === was.title || sameAssessment(f.title, was.title) || sameAssessment(f.title, t.title));
+        if (stale.length) tx.delete(taskFeedback).where(inArray(taskFeedback.id, stale.map((f) => f.id))).run();
       }
       const date = locked.has(u.id) && !announcedAfter ? {} : { dueAt: t.dueAt, dueConfidence: t.dueConfidence, ...(announcedAfter ? { dueLocked: false, dueLockedAt: null } : {}) };
       tx.update(tasks).set({
@@ -520,7 +545,7 @@ export async function refreshTasks(deps: TaskDeps, userId: number): Promise<Task
       .sort((a, b) => (a.plan?.generatedAt ?? 0) - (b.plan?.generatedAt ?? 0));
     for (const c of requested ? candidates : candidates.slice(0, MODULES_PER_RUN)) {
       try {
-        const planned = await planModuleTasks(cfg, c.input, c.refs, deps.now(), deps.fetchFn);
+        const planned = fitAnnouncedWeeks(db, c.mod.id, await planModuleTasks(cfg, c.input, c.refs, deps.now(), deps.fetchFn), deps.now());
         applyPlan(db, userId, c.mod.id, planned, deps.now());
         db.insert(taskPlans).values({ moduleId: c.mod.id, inputsHash: c.h, generatedAt: deps.now(), error: null, errorAt: null })
           .onConflictDoUpdate({ target: taskPlans.moduleId, set: { inputsHash: c.h, generatedAt: deps.now(), error: null, errorAt: null } }).run();

@@ -264,3 +264,33 @@ export function roadmapCalendar(db: Db, mod: Mod, now: number): RoadmapEntry[] {
   }
   return out;
 }
+
+// --- weeks named in announcements ---------------------------------------------
+// "Quiz3 - Week 9 - during the class": the week, resolved on the NUS calendar
+// and, when the module has one weekly class, to that class's day and time.
+// Only "Week N" counts — "covered in W6, W7" is what a quiz covers, not when.
+export function weeksNamed(text: string): number[] {
+  return [...new Set([...text.matchAll(/\bweek\s*-?\s*(\d{1,2})\b/gi)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= 13))];
+}
+
+export function placeInWeek(week: number, now: number, slots: ClassSlot[]): { at: number; from: number; to: number; inClass: boolean } | null {
+  const wk = semesterWeeks(now).weeks.find((w) => w.teachingWeek === week);
+  if (!wk) return null;
+  const day = (offset: number) => new Date(wk.monday + offset * D + SGT).toISOString().slice(0, 10);
+  if (slots.length === 1) {
+    const s = slots[0]!;
+    return { at: Date.parse(`${day((s.weekday + 6) % 7)}T${s.time}:00+08:00`), from: wk.monday, to: wk.sunday + D, inClass: true };
+  }
+  return { at: Date.parse(`${day(4)}T23:59:00+08:00`), from: wk.monday, to: wk.sunday + D, inClass: false };
+}
+
+// The note added to an announcement for the planner.
+export function weekNote(text: string, now: number, slots: ClassSlot[]): string {
+  const notes = weeksNamed(text).slice(0, 3).flatMap((n) => {
+    const wk = semesterWeeks(now).weeks.find((w) => w.teachingWeek === n);
+    if (!wk) return [];
+    const p = placeInWeek(n, now, slots);
+    return [`Week ${n} = ${dayLabel(wk.monday)} – ${dayLabel(wk.sunday)}${p?.inClass ? `; the module's weekly class that week is ${dayLabel(p.at)} ${hhmm(p.at)}` : ""}`];
+  });
+  return notes.length ? ` [${notes.join("; ")}]` : "";
+}
