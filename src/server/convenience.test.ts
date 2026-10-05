@@ -186,3 +186,14 @@ describe("an announced week", () => {
     expect(fitAnnouncedWeeks(db, mod.id, [{ ...q(right - 9 * D), title: "Quiz 4" }], t0)[0]!.dueAt).toBe(right - 9 * D);
   });
 });
+
+describe("the planner's own keys", () => {
+  it("keeps one task per assessment when it renames the key", () => {
+    const { db, mod } = setup();
+    db.insert(tasks).values({ userId: 1, moduleId: mod.id, key: "cs4238-series-quiz-3", title: "Quiz 3", kind: "quiz", dueAt: now + D, touchedAt: now, createdAt: now, updatedAt: now }).run();
+    applyPlan(db, 1, mod.id, [{ key: "cs4238-quiz-3", title: "Quiz 3: Incident 2 & W6-W8", kind: "quiz", dueAt: now + 8 * D, dueConfidence: "exact", anticipated: false, weightPct: null, why: null, sources: [], steps: [] }], now);
+    const all = db.select().from(tasks).all();
+    expect(all).toHaveLength(1);
+    expect(all[0]).toMatchObject({ key: "cs4238-series-quiz-3", dueAt: now + 8 * D });
+  });
+});

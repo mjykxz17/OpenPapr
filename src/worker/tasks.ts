@@ -278,8 +278,20 @@ export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | nul
 }
 
 // --- writing a module's plan ----------------------------------------------------
-export function applyPlan(db: Db, userId: number, moduleId: number, planned: Awaited<ReturnType<typeof planModuleTasks>>, now: number) {
+export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: Awaited<ReturnType<typeof planModuleTasks>>, now: number) {
   const current = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.moduleId, moduleId))).all();
+  // The planner sometimes names a new key for an assessment it already has
+  // ("cs4238-quiz-3" next to "cs4238-series-quiz-3"). Same kind and number is
+  // the same task: it keeps the existing one, with the student's progress.
+  const existingKeys = new Set(current.map((t) => t.key));
+  const claimed = new Set(plannedIn.map((p) => p.key).filter((k) => existingKeys.has(k)));
+  const planned = plannedIn.map((p) => {
+    if (existingKeys.has(p.key)) return p;
+    const twin = current.find((t) => t.status !== "dismissed" && !claimed.has(t.key) && !t.key.startsWith("manual-") && sameAssessment(t.title, p.title));
+    if (!twin) return p;
+    claimed.add(twin.key);
+    return { ...p, key: twin.key };
+  });
   // A key the planner reused from another module stays with that module.
   const elsewhere = new Set(db.select({ key: tasks.key, moduleId: tasks.moduleId }).from(tasks).where(eq(tasks.userId, userId)).all()
     .filter((t) => t.moduleId !== moduleId).map((t) => t.key));
