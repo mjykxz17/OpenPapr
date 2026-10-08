@@ -44,8 +44,16 @@ start_litestream() {
   litestream_pid=$!
 }
 
+# The worker runs at low priority: on one shared core, a page being served
+# always beats a sync or a study guide being written. The bundled worker
+# (dist/worker.cjs, built with the image) needs no compiling; tsx is only
+# the fallback for a tree without a build.
 start_worker() {
-  $TSX src/worker/index.ts &
+  if [ -f dist/worker.cjs ]; then
+    nice -n 15 node dist/worker.cjs &
+  else
+    nice -n 15 $TSX src/worker/index.ts &
+  fi
   worker_pid=$!
 }
 
@@ -67,9 +75,9 @@ trap shutdown TERM INT
 node server.js &
 web_pid=$!
 # The machine sleeps when idle and wakes on a request, which is waiting for
-# the web server. The worker (tsx compiling it) competes for the one CPU, so
-# it starts a few seconds later, once the page is on its way.
-sleep 6 &
+# the web server: the worker starts a few seconds later, once the page is on
+# its way.
+sleep 4 &
 wait $!
 [ "$stopping" -eq 0 ] && start_worker
 

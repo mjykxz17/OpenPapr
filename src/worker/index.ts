@@ -617,7 +617,10 @@ async function tick(): Promise<void> {
 let lastDemoCheckAt = 0;
 let indexJob: Promise<void> | null = null;
 const INDEX_EVERY = 2 * 60_000;
-let lastIndexAt = 0;
+// Indexing and guide writing wait a few minutes after a start: the machine
+// wakes for a page load and a sync, and those come first on the one core.
+const QUIET_AFTER_START_MS = 3 * 60_000;
+let lastIndexAt = Date.now() - INDEX_EVERY + QUIET_AFTER_START_MS;
 async function runIndex(): Promise<void> {
   const ids = [...new Set(db.select({ userId: modules.userId }).from(modules).where(eq(modules.active, true)).all().map((m) => m.userId))];
   for (const userId of ids) {
@@ -631,7 +634,7 @@ let guideJob: Promise<void> | null = null;
 // Preparing is cheap but reads every module; once a minute is plenty. A
 // chapter being written holds the job for minutes anyway.
 const AUTO_GUIDE_EVERY = 60_000;
-let lastAutoGuideAt = 0;
+let lastAutoGuideAt = Date.now() - AUTO_GUIDE_EVERY + QUIET_AFTER_START_MS;
 const guideDeps: GuideDeps = {
   db, now: Date.now,
   cfgFor: (userId) => kitFor(userId).compatCfg,
@@ -672,9 +675,9 @@ setInterval(() => {
 // --- housekeeping ------------------------------------------------------------
 const MAINTENANCE_MS = 6 * 3_600_000;
 const CACHE_LIMIT_BYTES = 1_500_000_000;
-// First run 2 min after start: the machine sleeps when idle, so the worker
-// starts often and is rarely up for long.
-let lastMaintenanceAt = Date.now() - MAINTENANCE_MS + 2 * 60_000;
+// First run 10 min after start: the machine wakes for a page load, and
+// pruning, cache sweeps and deck compression can wait until that is served.
+let lastMaintenanceAt = Date.now() - MAINTENANCE_MS + 10 * 60_000;
 function maintenance(): void {
   try {
     const dir = dirname(env.DATABASE_PATH);

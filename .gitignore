@@ -53,3 +53,5 @@ next-env.d.ts
 # generated study guides (derived from copyrighted lecture material)
 pre-study/
 /public/pdfjs/
+# bundled worker (scripts/build-worker.mjs)
+/dist
