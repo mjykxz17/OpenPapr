@@ -16,6 +16,7 @@ import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
 import { calendarLines, classSlots, placeInWeek, refreshRoadmaps, roadmapSignals, weekNote, weeksNamed } from "./roadmap";
 import { assessmentNumber, KIND_WORD, ownWork, sameAssessment } from "../lib/own-work";
+import { isConcrete } from "../lib/concrete";
 export { ownWork };
 
 const H = 3_600_000;
@@ -304,9 +305,18 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
     .sort((a, b) => (postedAt.get(b.itemId!) ?? 0) - (postedAt.get(a.itemId!) ?? 0))[0] ?? null;
   // When each cited announcement or staff reply was posted.
   const citedIds = [...citedNow];
-  const postedAt = new Map(citedIds.length
-    ? db.select({ id: items.id, at: items.sourceCreatedAt, seen: items.firstSeenAt }).from(items).where(and(eq(items.userId, userId), inArray(items.id, citedIds))).all().map((i) => [i.id, i.at ?? i.seen])
-    : []);
+  const cited = citedIds.length
+    ? db.select({ id: items.id, type: items.type, at: items.sourceCreatedAt, seen: items.firstSeenAt }).from(items).where(and(eq(items.userId, userId), inArray(items.id, citedIds))).all()
+    : [];
+  const postedAt = new Map(cited.map((i) => [i.id, i.at ?? i.seen]));
+  const typeOf = new Map(cited.map((i) => [i.id, i.type]));
+  // The bell only tells of work the student will actually see (concrete.ts),
+  // and of each thing once: the planner renames keys between runs, and a
+  // second "added" for the same assessment is noise.
+  const recentChanges = db.select().from(taskChanges).where(and(eq(taskChanges.userId, userId), eq(taskChanges.moduleId, moduleId))).all()
+    .filter((c) => c.createdAt > now - 14 * 86_400_000);
+  const alreadyTold = (kind: "task_added" | "date_moved", title: string, newDueAt: number | null) =>
+    recentChanges.some((c) => c.kind === kind && (c.title === title || sameAssessment(c.title, title)) && (kind === "task_added" || c.newDueAt === newDueAt));
   ops.remove = ops.remove.filter((id) => {
     const t = byIdNow.get(id)!;
     if (t.key.includes("-series-quiz-")) return planned.some((p) => p.kind === "quiz" && (p.dueAt === null || p.dueAt > now));
@@ -314,15 +324,17 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
     return parseList<TaskSource>(t.sourcesJson).some((x) => x.itemId != null && citedNow.has(x.itemId));
   });
   db.transaction((tx) => {
+    const inserted: { id: number; title: string }[] = [];
     for (const t of ops.insert) {
       const row = tx.insert(tasks).values({
         userId, moduleId, key: t.key, title: t.title, kind: t.kind, dueAt: t.dueAt, dueConfidence: t.dueConfidence,
         anticipated: t.anticipated, weightPct: t.weightPct, why: t.why, sourcesJson: JSON.stringify(t.sources),
         stepsJson: JSON.stringify(t.steps), status: "open", createdAt: now, updatedAt: now,
       }).returning({ id: tasks.id }).get();
+      if (row) inserted.push({ id: row.id, title: t.title });
       // Work found after the module's first plan goes in the bell; the first
       // plan itself would only flood it.
-      if (plannedBefore && row && t.sources.some((x) => x.kind === "announcement" || x.kind === "discussion" || ((x.kind === "canvas" || x.kind === "planner") && x.itemId != null))) {
+      if (plannedBefore && row && isConcrete(t.key, t.sources, (id) => typeOf.get(id)) && !alreadyTold("task_added", t.title, t.dueAt)) {
         const src = newestNews(t.sources) ?? t.sources[0];
         tx.insert(taskChanges).values({ userId, moduleId, taskId: row.id, kind: "task_added", title: t.title, newDueAt: t.dueAt, newConfidence: t.dueConfidence,
           sourceItemId: src?.itemId ?? null, sourceLabel: src?.label ?? null, quote: src?.quote ?? null, createdAt: now }).run();
@@ -345,9 +357,13 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
           if (pending) tx.update(taskChanges).set({ ...values, createdAt: now }).where(eq(taskChanges.id, pending.id)).run();
           else tx.insert(taskChanges).values({ userId, moduleId, taskId: u.id, kind: "date_proposed", ...values, createdAt: now }).run();
         }
-      } else if (!locked.has(u.id) && moved && news && !parseList<TaskSource>(was.sourcesJson).some((x) => x.itemId === news.itemId)) {
+      } else if (!locked.has(u.id) && moved && news && was.status === "open" && !parseList<TaskSource>(was.sourcesJson).some((x) => x.itemId === news.itemId)
+        && isConcrete(t.key, t.sources, (id) => typeOf.get(id)) && !alreadyTold("date_moved", t.title, t.dueAt)) {
         // Moved for them because of something new the course posted: shown in
-        // the bell with an undo.
+        // the bell with an undo. An earlier pending notice for this task is
+        // replaced rather than stacked.
+        tx.update(taskChanges).set({ status: "seen", resolvedAt: now })
+          .where(and(eq(taskChanges.taskId, u.id), eq(taskChanges.kind, "date_moved"), eq(taskChanges.status, "pending"))).run();
         tx.insert(taskChanges).values({ userId, moduleId, taskId: u.id, kind: "date_moved", title: t.title, oldDueAt: was.dueAt, newDueAt: t.dueAt, newConfidence: t.dueConfidence,
           sourceItemId: news.itemId!, sourceLabel: news.label, quote: news.quote ?? null, createdAt: now }).run();
       }
@@ -359,7 +375,17 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
         ...(u.keepSteps ? {} : { stepsJson: JSON.stringify(t.steps) }),
       }).where(eq(tasks.id, u.id)).run();
     }
-    if (ops.remove.length) tx.delete(tasks).where(inArray(tasks.id, ops.remove)).run();
+    if (ops.remove.length) {
+      tx.delete(tasks).where(inArray(tasks.id, ops.remove)).run();
+      // The planner renamed a key: the task is back under a new id, and its
+      // notices follow it. A task that is simply gone was never news.
+      for (const id of ops.remove) {
+        const was = byIdNow.get(id)!;
+        const twin = inserted.find((n) => n.title === was.title || sameAssessment(n.title, was.title));
+        if (twin) tx.update(taskChanges).set({ taskId: twin.id }).where(eq(taskChanges.taskId, id)).run();
+        else tx.delete(taskChanges).where(and(eq(taskChanges.taskId, id), eq(taskChanges.status, "pending"))).run();
+      }
+    }
   });
   return ops;
 }

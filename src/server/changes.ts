@@ -18,7 +18,20 @@ export type ChangeView = {
 
 const D = 86_400_000;
 
+// Notices that no longer apply settle themselves: a task that was deleted,
+// finished or dismissed since can't be asked about or undone. They become
+// history, so the badge and the list always agree.
+export function reconcileChanges(db: Db, userId: number, now: number): void {
+  const pending = db.select({ id: taskChanges.id, taskId: taskChanges.taskId, kind: taskChanges.kind }).from(taskChanges)
+    .where(and(eq(taskChanges.userId, userId), eq(taskChanges.status, "pending"))).all();
+  const ids = [...new Set(pending.map((c) => c.taskId).filter((x): x is number => x != null))];
+  const state = new Map(ids.length ? db.select({ id: tasks.id, status: tasks.status }).from(tasks).where(inArray(tasks.id, ids)).all().map((t) => [t.id, t.status]) : []);
+  const settle = pending.filter((c) => c.taskId === null || !state.has(c.taskId) || state.get(c.taskId) !== "open").map((c) => c.id);
+  if (settle.length) db.update(taskChanges).set({ status: "seen", resolvedAt: now }).where(inArray(taskChanges.id, settle)).run();
+}
+
 export function changesFor(db: Db, userId: number, now: number): ChangeView[] {
+  reconcileChanges(db, userId, now);
   const rows = db.select().from(taskChanges)
     .where(and(eq(taskChanges.userId, userId), or(eq(taskChanges.status, "pending"), gte(taskChanges.resolvedAt, now - 14 * D))))
     .orderBy(desc(taskChanges.createdAt)).all();
@@ -26,10 +39,8 @@ export function changesFor(db: Db, userId: number, now: number): ChangeView[] {
   const mods = new Map(db.select().from(modules).where(eq(modules.userId, userId)).all().map((m) => [m.id, m]));
   const itemIds = rows.map((r) => r.sourceItemId).filter((x): x is number => x != null);
   const urls = new Map(itemIds.length ? db.select({ id: items.id, type: items.type, moduleId: items.moduleId }).from(items).where(inArray(items.id, itemIds)).all().map((i) => [i.id, i]) : []);
-  // Gone tasks (deleted since) drop out of the list.
-  const taskIds = rows.map((r) => r.taskId).filter((x): x is number => x != null);
-  const alive = new Set(taskIds.length ? db.select({ id: tasks.id }).from(tasks).where(inArray(tasks.id, taskIds)).all().map((t) => t.id) : []);
-  return rows.filter((r) => r.taskId === null || alive.has(r.taskId)).map((r) => {
+  // History of a task that has since gone is kept; only open questions need it.
+  return rows.map((r) => {
     const it = r.sourceItemId != null ? urls.get(r.sourceItemId) : undefined;
     return {
       id: r.id, kind: r.kind, status: r.status, title: r.title.replace(/\s*\(expected\)$/i, ""),
@@ -41,8 +52,10 @@ export function changesFor(db: Db, userId: number, now: number): ChangeView[] {
   }).sort((a, b) => Number(b.open) - Number(a.open) || Number(b.kind === "date_proposed") - Number(a.kind === "date_proposed") || b.createdAt - a.createdAt);
 }
 
-export function openChangeCount(db: Db, userId: number): number {
-  return db.select({ id: taskChanges.id, taskId: taskChanges.taskId }).from(taskChanges)
+// The badge: exactly the notices the list shows as open.
+export function openChangeCount(db: Db, userId: number, now = Date.now()): number {
+  reconcileChanges(db, userId, now);
+  return db.select({ id: taskChanges.id }).from(taskChanges)
     .where(and(eq(taskChanges.userId, userId), eq(taskChanges.status, "pending"))).all().length;
 }
 

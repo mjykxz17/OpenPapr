@@ -193,6 +193,29 @@ describe("teaching the planner", () => {
     expect(changesFor(db, 1, now).map((c) => c.status).sort()).toEqual(["undone", "undone"]);
     expect(changesFor(db, 1, now + 15 * D)).toEqual([]);
   });
+
+  it("keeps the badge honest: one notice per thing, none for work that vanished or closed", () => {
+    const { db, mod } = setup();
+    db.insert(taskPlans).values({ moduleId: mod.id, inputsHash: "x", generatedAt: now - D }).run();
+    const ann = db.insert(items).values({ ...base, moduleId: mod.id, type: "announcement", sourceId: "announcement:8", title: "Field trip", sourceCreatedAt: now }).returning().get();
+    const src = [{ kind: "announcement" as const, label: "Field trip", itemId: ann.id }];
+    const plan = (key: string, title: string) => ({ key, title, kind: "admin" as const, dueAt: now + 4 * D, dueConfidence: "exact" as const, anticipated: false, weightPct: null, why: null, sources: src, steps: [] });
+    // Found once…
+    applyPlan(db, 1, mod.id, [plan("cs4238-register-trip", "Register for the field trip")], now);
+    expect(openChangeCount(db, 1, now)).toBe(1);
+    // …then the planner renames its key: the old task goes, the new one is the same thing. Still one notice.
+    applyPlan(db, 1, mod.id, [plan("cs4238-field-trip-registration", "Register for the field trip")], now + 60_000);
+    expect(openChangeCount(db, 1, now)).toBe(1);
+    expect(changesFor(db, 1, now).filter((c) => c.open)).toHaveLength(1);
+    // The student finishes it: the notice settles into history by itself.
+    const t = db.select().from(tasks).where(eq(tasks.userId, 1)).get()!;
+    expect(updateTask(db, 1, t.id, { status: "done" }, now)).toBe(true);
+    expect(openChangeCount(db, 1, now)).toBe(0);
+    expect(changesFor(db, 1, now).map((c) => c.status)).toEqual(["seen"]);
+    // Work the student never sees (only the schedule behind it) makes no notice.
+    applyPlan(db, 1, mod.id, [{ ...plan("cs4238-quiz-9", "Quiz 9"), sources: [{ kind: "file", label: "Lec01A p.7 (course schedule)", fileId: 1 }] }], now + 120_000);
+    expect(openChangeCount(db, 1, now)).toBe(0);
+  });
 });
 
 describe("search", () => {
