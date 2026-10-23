@@ -15,7 +15,7 @@ describe("isConcrete", () => {
 
   it("hides what is only expected", () => {
     // Read from the course schedule, a class event, a slide, or the weightage.
-    expect(isConcrete("cs-quiz-3", [{ kind: "file", label: "L1 p.4 (course schedule)", fileId: 1 }], typeOf, "Quiz 3")).toBe(false);
+    expect(isConcrete("cs-quiz-3", [{ kind: "file", label: "L1 p.4 (course schedule)" }], typeOf, "Quiz 3")).toBe(false);
     expect(isConcrete("cs-quiz-3", [{ kind: "announcement", label: "Welcome (course schedule)", itemId: 2 }], typeOf, "Quiz 3")).toBe(false);
     expect(isConcrete("cs-quiz-3", [{ kind: "canvas", label: "Lecture", itemId: 3 }], typeOf, "Quiz 3")).toBe(false);
     expect(isConcrete("cs-mid", [{ kind: "weightage", label: "Assessment weightage" }], typeOf, "Midterm")).toBe(false);

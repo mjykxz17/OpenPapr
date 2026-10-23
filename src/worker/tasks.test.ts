@@ -70,8 +70,14 @@ describe("refreshTasks", () => {
     db.update(tasks).set({ stepsJson: JSON.stringify(steps), touchedAt: NOW }).where(eq(tasks.id, quiz.id)).run();
 
     const calls: string[] = [];
+    // Ticking a step is not something new to plan from, inside the TTL or after.
     await refreshTasks(deps(db, llm(quizPlan, calls), NOW + H), 1);
-    expect(calls).toHaveLength(0); // inputs changed but inside the TTL
+    await refreshTasks(deps(db, llm(quizPlan, calls), NOW + 4 * H), 1);
+    expect(calls).toHaveLength(0);
+
+    db.insert(items).values({ userId: 1, moduleId: 1, type: "announcement", source: "canvas", sourceId: "n2", title: "Quiz 2 room", body: "<p>Quiz 2 is in LT27.</p>", sourceCreatedAt: NOW + 2 * H, firstSeenAt: NOW + 2 * H }).run();
+    await refreshTasks(deps(db, llm(quizPlan, calls), NOW + 2 * H), 1);
+    expect(calls).toHaveLength(0); // something new, but inside the TTL
 
     const replanned = { tasks: [{ ...quizPlan.tasks[0], steps: [{ text: "Something else", minutes: 20, doBy: "2026-09-27" }] }] };
     await refreshTasks(deps(db, llm(replanned, calls), NOW + 4 * H), 1);

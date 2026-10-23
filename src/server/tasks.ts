@@ -1,7 +1,7 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { items, modules, taskFeedback, taskPlans, tasks, users } from "@/db/schema";
-import { sgtDate, type TaskKind, type TaskSource, type TaskStep } from "@/enrich/tasks";
+import { capWithClasses, dayLoads, fitSteps, sgtDate, type DayLoad, type TaskKind, type TaskSource, type TaskStep } from "@/enrich/tasks";
 import { TASK_KINDS } from "@/db/schema";
 import { dueLabel, shortDate } from "@/lib/format-date";
 import { isConcrete } from "@/lib/concrete";
@@ -21,6 +21,12 @@ export type TodayStep = TaskStep & { taskId: number; taskTitle: string; code: st
 export type TasksView = {
   today: TodayStep[]; todayMinutes: number; nextDay: { date: string; steps: number; minutes: number } | null;
   soon: TaskView[]; later: TaskView[]; done: TaskView[];
+  // The next 14 days from today, each with the minutes of steps planned on it
+  // (late ones count on today), how much the student can do that day (less
+  // for days with classes), and overloaded: more planned than that even
+  // after the worker balanced the days — nothing could move without missing
+  // a deadline. For the UI to warn on; not shown yet.
+  days: DayLoad[];
 };
 
 const parse = <T,>(json: string): T[] => { try { const v = JSON.parse(json); return Array.isArray(v) ? v : []; } catch { return []; } };
@@ -82,7 +88,24 @@ export function tasksView(db: Db, userId: number, now: number): TasksView {
     soon: open.filter((t) => t.dueAt !== null && t.dueAt <= now + 14 * D),
     later: open.filter((t) => t.dueAt === null || t.dueAt > now + 14 * D),
     done: rows.filter((t) => t.status === "done" && t.updatedAt >= now - 7 * D).map(view).sort((a, b) => (b.dueAt ?? 0) - (a.dueAt ?? 0)),
+    days: dayLoads(open, today, capWithClasses(classesOn(db, userId, today))),
   };
+}
+
+// How many classes (Canvas calendar events of active modules) fall on each
+// Singapore day from `today`. Canvas gives their start, not their length,
+// and NUSMods timetables are not stored, so it is a count, not hours.
+export function classesOn(db: Db, userId: number, today: string, days = 22): Map<string, number> {
+  const from = Date.parse(`${today}T00:00:00+08:00`);
+  const active = new Set(db.select({ id: modules.id }).from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all().map((m) => m.id));
+  const out = new Map<string, number>();
+  for (const e of db.select({ dueAt: items.dueAt, moduleId: items.moduleId, dismissed: items.dismissed }).from(items)
+    .where(and(eq(items.userId, userId), eq(items.type, "event"), gte(items.dueAt, from), lt(items.dueAt, from + days * D))).all()) {
+    if (e.dismissed || e.dueAt === null || (e.moduleId !== null && !active.has(e.moduleId))) continue;
+    const day = sgtDate(e.dueAt);
+    out.set(day, (out.get(day) ?? 0) + 1);
+  }
+  return out;
 }
 
 export function taskPlanStatus(db: Db, userId: number) {
@@ -95,7 +118,8 @@ export function taskPlanStatus(db: Db, userId: number) {
 }
 
 // The student's changes. Any change marks the task touched, after which a
-// replan refreshes its date and sources but never rewrites its steps.
+// replan refreshes its date and sources and may add steps, but never
+// changes or removes the ones it has.
 //
 // Two of them also teach the planner: "not a real task" and a date the
 // student corrects are written down and shown to it on the next plan.
@@ -169,16 +193,17 @@ export function updateTask(db: Db, userId: number, taskId: number, change: TaskC
     patch.dueConfidence = "exact";
     patch.dueLocked = true;
     patch.dueLockedAt = now;
-    // Steps planned for after the new date move up to it.
+    // The steps follow the new date (see fitSteps).
     const steps = parse<TaskStep>(t.stepsJson);
-    if (steps.some((s) => s.doBy > change.dueDate!)) patch.stepsJson = JSON.stringify(steps.map((s) => (s.doBy > change.dueDate! ? { ...s, doBy: change.dueDate! } : s)));
+    const fitted = JSON.stringify(fitSteps(steps, sgtDate(now), dueAt));
+    if (fitted !== JSON.stringify(steps)) patch.stepsJson = fitted;
     const was = t.dueAt === null ? "no date" : `${sgtDate(t.dueAt)}${t.dueConfidence === "estimated" ? " (estimated)" : ""}`;
     if (!mine && dueAt !== t.dueAt && change.dueDate !== (t.dueAt === null ? null : sgtDate(t.dueAt))) {
       db.insert(taskFeedback).values({ userId, moduleId: t.moduleId, kind: "wrong_date", title: t.title, note: `you said ${was}; really ${change.dueDate}`, createdAt: now }).run();
     }
   }
   if (change.stepId !== undefined) {
-    const steps = parse<TaskStep>(t.stepsJson);
+    const steps = parse<TaskStep>(patch.stepsJson ?? t.stepsJson);
     const s = steps.find((x) => x.id === change.stepId);
     if (!s) return false;
     s.done = Boolean(change.done);

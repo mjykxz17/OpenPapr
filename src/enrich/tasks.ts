@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { chatJson, type CompatConfig } from "./openai-compat";
 import { TASK_KINDS } from "../db/schema";
+import { assessmentNumber, assessmentNumbers, ownWork, quizNumber } from "../lib/own-work";
+import type { WeakSpot } from "../server/weak-topics";
+export { quizNumber };
 
 // The task planner. Obligations reach a student from many places — a Canvas
 // quiz, the announcement about that quiz, a slide that says "Tutorial 4 due
@@ -85,6 +88,7 @@ Rules:
 - due: ISO 8601 with +08:00. "exact" only when a source states the date; a week number or pattern gives an "estimated" date; null if you cannot place it.
 - Different dates for different tutorial or lab groups: you do not know the student's group, so make ONE task with the earliest date and name the other date in "why".
 - steps: every task needs 1-6 steps (only a task resting on the weightage alone may have none), each 15-90 minutes, verb first, under 70 characters, specific to this module's material (name the lecture, chapter, question range or topic). A form or registration is one step. Each step has doBy (YYYY-MM-DD) between today and the due date, spread out and finishing a day early where possible. For anticipated tasks more than two weeks away give only the first one or two steps.
+- Study advice starting "revise" is what the student keeps getting wrong in the chapter quizzes. Let it shape the steps for this module's next quiz or exam; the app itself adds the short "Revise <deck> slides X-Y" step, so do not add that one.
 - The student's corrections are final. Never plan again anything they said is not a real task (or the same thing reworded). A date they set is the real date: keep it.
 - Tasks the student added themselves (key starting "manual-") are theirs: do not repeat them as a new task and never reuse their key.
 - key: lowercase slug starting with the module code, e.g. "cs2103t-v1-2-milestone". Reuse the key of an existing task when it is the same obligation.
@@ -121,19 +125,82 @@ export function plannerPrompt(input: ModuleTaskInput): string {
 export type CleanTask = {
   key: string; title: string; kind: TaskKind; dueAt: number | null; dueConfidence: "exact" | "estimated";
   anticipated: boolean; weightPct: number | null; why: string | null; sources: TaskSource[]; steps: TaskStep[];
+  // The date is the Canvas item's own, whatever the model said.
+  dueFromCanvas?: boolean;
+  // Where code overrode the model ("date from Canvas: the planner said …"), for the logs.
+  checks?: string[];
 };
 
 export const sgtDate = (ms: number) => new Date(ms + 8 * 3_600_000).toISOString().slice(0, 10);
+// A date or time from a model, read as Singapore time whatever the server's
+// zone: "2026-10-30" is by the end of that day (23:59), "2026-10-30T14:00"
+// is 2pm there, and anything with its own offset keeps it. NaN if unreadable.
+export function parseSgt(s: string): number {
+  const t = s.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return Date.parse(`${t}T23:59:00+08:00`);
+  const local = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2}(\.\d+)?)?$/.exec(t);
+  if (local) return Date.parse(`${local[1]}T${local[2]}${local[3] ?? ":00"}+08:00`);
+  return Date.parse(t);
+}
+// "2026-10-30 14:05 (Fri)" in Singapore time, for prompts.
+export const sgtStamp = (ms: number) => {
+  const d = new Date(ms + 8 * 3_600_000);
+  return `${d.toISOString().slice(0, 16).replace("T", " ")} (${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()]})`;
+};
 const addDays = (date: string, n: number) => sgtDate(Date.parse(`${date}T12:00:00+08:00`) + n * 86_400_000);
 export const stepId = (key: string, text: string) => createHash("sha1").update(`${key}\n${text}`).digest("hex").slice(0, 10);
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 const ROUTINE_RE = /^(attend|bring|charge|go to|join|be present)\b/i;
 const slugKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 
+// What we know about each ref the planner may cite: the text it was shown
+// (to check its quotes against) and, for open Canvas work, the item's own
+// title and due date.
+export type RefFact = { text: string; dueAt?: number; title?: string };
+
+export function refFacts(input: ModuleTaskInput, canvasDue: Map<string, { dueAt: number; title: string }> = new Map()): Map<string, RefFact> {
+  const facts = new Map<string, RefFact>();
+  const add = (ref: string, text: string) => { const f = facts.get(ref); facts.set(ref, { ...f, text: f ? `${f.text}\n${text}` : text }); };
+  for (const rows of [input.canvas, input.past, input.announcements, input.discussions, input.notes, input.fileHints, input.roadmap ?? []]) {
+    for (const r of rows) add(r.ref, `${r.line}${r.body ? `\n${r.body}` : ""}`);
+  }
+  add("W", input.weightage.map((c) => `${c.name} ${c.weightPct}%`).join(", "));
+  if (input.examDate) add("X", `Final exam: ${input.examDate}`);
+  for (const [ref, d] of canvasDue) facts.set(ref, { text: facts.get(ref)?.text ?? d.title, dueAt: d.dueAt, title: d.title });
+  return facts;
+}
+
+// Words for comparing a quote with its source: lower case, no punctuation,
+// "Quiz3" read as "quiz 3".
+const words = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "")
+  .replace(/([a-z])(\d)/g, "$1 $2").replace(/(\d)([a-z])/g, "$1 $2").split(/[^a-z0-9]+/).filter(Boolean);
+
+// The model's quote really is in the source: word for word (each piece of it
+// between "…"), or nearly so for a longer quote, with every number exact.
+export function quoteFound(quote: string, text: string): boolean {
+  const q = words(quote);
+  if (!q.length) return true;
+  const t = words(text);
+  const hay = ` ${t.join(" ")} `;
+  const pieces = quote.split(/\.{3}|…/).map(words).filter((p) => p.length);
+  if (pieces.every((p) => hay.includes(` ${p.join(" ")} `))) return true;
+  const have = new Set(t);
+  return q.length >= 4 && q.filter((w) => /\d/.test(w)).every((w) => have.has(w)) && q.filter((w) => have.has(w)).length >= 0.8 * q.length;
+}
+
+// Kinds of task whose date is the Canvas item's date. Prep is done before it.
+const DATED_BY_ITEM = new Set<TaskKind>(["exam", "quiz", "submission", "project", "presentation", "reading", "admin"]);
+
 // Turns the model's answer into tasks we can trust: every task must cite at
 // least one real signal, dates must parse, past work is dropped, steps land
 // between today and the due date.
-export function cleanPlan(raw: unknown, refs: Map<string, TaskSource>, now: number, moduleCode: string): CleanTask[] | null {
+//
+// With the facts about each ref it also checks the model against them: a
+// quote that is not in its source is dropped (and the date it backed is only
+// an estimate; a task resting on nothing else goes), work cited from Canvas
+// takes Canvas's own date, and an assessment number no source names is only
+// anticipated.
+export function cleanPlan(raw: unknown, refs: Map<string, TaskSource>, now: number, moduleCode: string, facts?: Map<string, RefFact>): CleanTask[] | null {
   const top = PlanResult.safeParse(raw);
   if (!top.success) return null;
   const today = sgtDate(now);
@@ -144,25 +211,65 @@ export function cleanPlan(raw: unknown, refs: Map<string, TaskSource>, now: numb
     const p = PlannedTask.safeParse(r);
     if (!p.success) continue;
     const t = p.data;
+    const checks: string[] = [];
     const sources: TaskSource[] = [];
+    // Refs whose quote was checked and not found: cited, but no evidence.
+    const unsupported = new Set<string>();
+    const cited: { ref: string; source: TaskSource }[] = [];
     for (const s of t.sources) {
-      const base = refs.get(s.ref.replace(/[[\]\s]/g, ""));
+      const ref = s.ref.replace(/[[\]\s]/g, "");
+      const base = refs.get(ref);
       if (!base || sources.some((x) => x.label === base.label)) continue;
-      sources.push(s.quote ? { ...base, quote: clip(s.quote, 160) } : base);
+      const text = facts?.get(ref)?.text;
+      let source: TaskSource = base;
+      if (s.quote && text !== undefined && !quoteFound(s.quote, text)) {
+        unsupported.add(base.label);
+        checks.push(`quote not in [${ref}]: "${clip(s.quote, 60)}"`);
+      } else if (s.quote) source = { ...base, quote: clip(s.quote, 160) };
+      sources.push(source);
+      cited.push({ ref, source });
     }
     if (!sources.length) continue;                       // not grounded in anything we gave it
+    const grounded = cited.filter((c) => !unsupported.has(c.source.label));
+    if (!grounded.length) continue;                      // its only evidence was a quote that isn't there
     // Showing up is not a task, whatever the model thinks.
     if (ROUTINE_RE.test(t.title) && !["exam", "quiz", "presentation"].includes(t.kind)) continue;
     // A weighting says an assessment exists, never when: a task resting on
     // the weightage alone gets no date and only its first step.
-    const weightOnly = sources.every((x) => x.kind === "weightage");
+    const weightOnly = grounded.every((x) => x.source.kind === "weightage");
     if (weightOnly && ++weightOnlyCount > 2) continue;
     let key = slugKey(t.key);
     if (!key.startsWith(moduleCode.toLowerCase())) key = slugKey(`${moduleCode}-${key}`);
     if (seen.has(key)) continue;
     seen.add(key);
-    const parsed = t.due && !weightOnly ? Date.parse(t.due) : NaN;
-    const dueAt = Number.isNaN(parsed) ? null : parsed;
+    const parsed = t.due && !weightOnly ? parseSgt(t.due) : NaN;
+    let dueAt = Number.isNaN(parsed) ? null : parsed;
+    let dueConfidence: "exact" | "estimated" = dueAt === null ? "estimated" : t.dueConfidence;
+    let anticipated = t.anticipated || weightOnly;
+    // "Quiz 9" that no source names is the model's guess at most.
+    const n = assessmentNumber(t.title);
+    if (facts && n !== null && !anticipated
+      && !grounded.some((c) => assessmentNumbers(`${c.source.label} ${c.source.quote ?? ""} ${facts.get(c.ref)?.text ?? ""}`).includes(n))) {
+      anticipated = true;
+      dueConfidence = "estimated";
+      checks.push(`no source names "${t.title}"`);
+    }
+    // Canvas is the authority on its own work's date. A task citing an
+    // earlier quiz as its pattern keeps its own date.
+    let dueFromCanvas = false;
+    if (!anticipated && DATED_BY_ITEM.has(t.kind)) {
+      const own = grounded.map((c) => facts?.get(c.ref))
+        .filter((f): f is RefFact & { dueAt: number } => f?.dueAt !== undefined && ownWork(t.title, f.title ?? "", null, null))
+        .sort((a, b) => a.dueAt - b.dueAt)[0];
+      if (own) {
+        if (dueAt === null || Math.abs(dueAt - own.dueAt) >= 60_000) checks.push(`date from Canvas: the planner said ${dueAt === null ? "no date" : sgtStamp(dueAt)}, Canvas says ${sgtStamp(own.dueAt)}`);
+        dueAt = own.dueAt;
+        dueConfidence = "exact";
+        dueFromCanvas = true;
+      }
+    }
+    // A date resting on a quote we could not find is a guess.
+    if (!dueFromCanvas && unsupported.size && dueConfidence === "exact") dueConfidence = "estimated";
     if (dueAt !== null && dueAt < now - 12 * 3_600_000) continue;   // already past
     if (dueAt !== null && dueAt > now + 200 * 86_400_000) continue; // not this semester
     const lastDay = dueAt === null ? addDays(today, 42) : sgtDate(dueAt);
@@ -180,21 +287,22 @@ export function cleanPlan(raw: unknown, refs: Map<string, TaskSource>, now: numb
     if (weightOnly) steps.splice(1);
     out.push({
       key, title: clip(t.title, 80), kind: t.kind, dueAt,
-      dueConfidence: dueAt === null ? "estimated" : t.dueConfidence,
-      anticipated: t.anticipated || weightOnly, weightPct: t.weightPct, why: t.why ? clip(t.why, 120) : null, sources, steps,
+      dueConfidence: dueAt === null ? "estimated" : dueConfidence,
+      anticipated, weightPct: t.weightPct, why: t.why ? clip(t.why, 120) : null, sources, steps,
+      ...(dueFromCanvas ? { dueFromCanvas } : {}), ...(checks.length ? { checks } : {}),
     });
   }
   return out;
 }
 
 export async function planModuleTasks(
-  cfg: CompatConfig, input: ModuleTaskInput, refs: Map<string, TaskSource>, now: number, fetchFn: typeof fetch = fetch,
+  cfg: CompatConfig, input: ModuleTaskInput, refs: Map<string, TaskSource>, now: number, fetchFn: typeof fetch = fetch, facts?: Map<string, RefFact>,
 ): Promise<CleanTask[]> {
   // Some models now and then answer with nothing, or cut the JSON short;
   // one more try usually lands.
   let tasks: CleanTask[] | null = null;
   for (let attempt = 0; attempt < 2 && tasks === null; attempt++) {
-    tasks = cleanPlan(await chatJson(cfg, fetchFn, PLANNER_SYSTEM, plannerPrompt(input), 6000), refs, now, input.module.code);
+    tasks = cleanPlan(await chatJson(cfg, fetchFn, PLANNER_SYSTEM, plannerPrompt(input), 6000), refs, now, input.module.code, facts);
   }
   if (!tasks) throw new Error("the model's task plan was not in the expected shape");
   return tasks;
@@ -206,14 +314,43 @@ export type ExistingTask = {
 };
 export type MergeOps = {
   insert: CleanTask[];
-  update: { id: number; task: CleanTask; keepSteps: boolean }[];
+  // keepSteps: the student's steps stay as they are; addSteps are new ones
+  // the planner has for it since (more steps as it nears, a wider scope).
+  update: { id: number; task: CleanTask; keepSteps: boolean; addSteps: TaskStep[] }[];
   remove: number[];
 };
 
+const STEP_STOP = new Set(["the", "and", "for", "from", "with", "your", "this", "that", "all", "any"]);
+const stepWords = (s: string) => new Set(words(s).filter((w) => (w.length >= 3 || /\d/.test(w)) && !STEP_STOP.has(w)));
+const numbersIn = (s: string) => [...stepWords(s)].filter((w) => /\d/.test(w));
+// "Redo L4 examples" and "Redo the L4 worked examples" are one step.
+export function similarStep(a: string, b: string): boolean {
+  const x = stepWords(a), y = stepWords(b);
+  if (!x.size || !y.size) return a.trim().toLowerCase() === b.trim().toLowerCase();
+  const both = [...x].filter((w) => y.has(w)).length;
+  return both / (x.size + y.size - both) >= 0.5;
+}
+
+// The planner's steps a touched task does not have yet. Never more than the
+// planner itself now asks for in all (a far-out task given two steps gets the
+// rest as it nears), plus one that names material none of its steps do
+// ("Review L6-L7" once the quiz covers L1-L7). At most ten in all.
+export function newSteps(have: TaskStep[], planned: TaskStep[]): TaskStep[] {
+  const fresh = planned.filter((p) => !have.some((h) => h.id === p.id || similarStep(h.text, p.text)));
+  if (!fresh.length) return [];
+  const known = new Set(have.flatMap((h) => numbersIn(h.text)));
+  const widens = (p: TaskStep) => numbersIn(p.text).some((w) => !known.has(w));
+  const room = Math.min(10 - have.length, Math.max(planned.length - have.length, fresh.some(widens) ? 1 : 0));
+  if (room <= 0) return [];
+  // New material first, then in the planner's order.
+  return [...fresh].sort((a, b) => Number(widens(b)) - Number(widens(a))).slice(0, room);
+}
+
 // A rebuild never throws away the student's progress: a task they have
-// touched keeps its steps (only its date and sources refresh), a task they
-// finished or dismissed stays that way, and only untouched tasks the planner
-// no longer sees are removed.
+// touched keeps its steps (only its date and sources refresh, and the
+// planner may add steps it did not have), a task they finished or dismissed
+// stays that way, and only untouched tasks the planner no longer sees are
+// removed.
 export function mergeTasks(existing: ExistingTask[], planned: CleanTask[]): MergeOps {
   const byKey = new Map(existing.map((e) => [e.key, e]));
   const ops: MergeOps = { insert: [], update: [], remove: [] };
@@ -222,7 +359,8 @@ export function mergeTasks(existing: ExistingTask[], planned: CleanTask[]): Merg
     const e = byKey.get(t.key);
     kept.add(t.key);
     if (!e) { ops.insert.push(t); continue; }
-    ops.update.push({ id: e.id, task: t, keepSteps: e.status !== "open" || e.touchedAt !== null || e.steps.some((s) => s.done) });
+    const keepSteps = e.status !== "open" || e.touchedAt !== null || e.steps.some((s) => s.done);
+    ops.update.push({ id: e.id, task: t, keepSteps, addSteps: keepSteps && e.status === "open" ? newSteps(e.steps, t.steps) : [] });
   }
   for (const e of existing) {
     if (!kept.has(e.key) && e.status === "open" && e.touchedAt === null && !e.steps.some((s) => s.done)) ops.remove.push(e.id);
@@ -231,13 +369,19 @@ export function mergeTasks(existing: ExistingTask[], planned: CleanTask[]): Merg
 }
 
 // --- keeping the schedule honest ---------------------------------------------
+const dayDiff = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+// The last day for a task's steps: the day before it is due, or the due day
+// itself when the day before has gone.
+const lastStepDay = (today: string, dueAt: number | null) =>
+  dueAt === null ? addDays(today, 7) : addDays(sgtDate(dueAt), -1) < today ? sgtDate(dueAt) : addDays(sgtDate(dueAt), -1);
+
 // Steps the student did not get to slide forward instead of piling up as
 // overdue: spread from today to the day before the due date.
 export function rollForward(steps: TaskStep[], today: string, dueAt: number | null): TaskStep[] {
   const late = steps.filter((s) => !s.done && s.doBy < today);
   if (!late.length) return steps;
-  const last = dueAt === null ? addDays(today, 7) : addDays(sgtDate(dueAt), -1) < today ? sgtDate(dueAt) : addDays(sgtDate(dueAt), -1);
-  const span = Math.max(0, Math.round((Date.parse(`${last}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000));
+  const last = lastStepDay(today, dueAt);
+  const span = Math.max(0, dayDiff(today, last));
   let i = 0;
   return steps.map((s) => {
     if (s.done || s.doBy >= today) return s;
@@ -246,40 +390,153 @@ export function rollForward(steps: TaskStep[], today: string, dueAt: number | nu
   }).sort((a, b) => a.doBy.localeCompare(b.doBy));
 }
 
+// Whenever a due date moves — a replan, the bell, an undo, the student —
+// the steps follow it: done ones stay where they were, late ones roll
+// forward, and any planned for after the new due day are spread, in their
+// order, from where the others end to that day.
+export function fitSteps(steps: TaskStep[], today: string, dueAt: number | null): TaskStep[] {
+  const rolled = [...rollForward(steps, today, dueAt)].sort((a, b) => a.doBy.localeCompare(b.doBy));
+  if (dueAt === null) return rolled;
+  const last = sgtDate(dueAt) < today ? today : sgtDate(dueAt);
+  const over = rolled.filter((s) => !s.done && s.doBy > last).length;
+  if (!over) return rolled;
+  const before = rolled.filter((s) => !s.done && s.doBy <= last).map((s) => s.doBy);
+  const from = before.length ? before[before.length - 1]! : today;
+  const span = Math.max(0, dayDiff(from, last));
+  let i = 0;
+  return rolled.map((s) => (s.done || s.doBy <= last ? s
+    : { ...s, doBy: addDays(from, Math.min(span, Math.floor((++i * span) / over))) }));
+}
+
+export type Balanceable = { key: string; dueAt: number | null; weightPct?: number | null; steps: TaskStep[] };
+
 // No day should hold more than the student can do. Over the cap, the step
-// with the most slack (its task due latest) moves to the next day, as long as
-// that is still before its task is due. Returns the tasks whose steps moved.
-export function balanceDays<T extends { key: string; dueAt: number | null; steps: TaskStep[] }>(
-  tasks: T[], today: string, capFor: (date: string) => number, horizonDays = 21,
-): Set<string> {
+// with the most room moves to the next day: room is the days left before its
+// task is due, less a day for every 10% of the grade it carries, so a small
+// quiz gives way before a heavy exam due a little later. What cannot move
+// later goes to the nearest earlier day with room — never before an earlier
+// step of its own task. Returns the tasks whose steps moved.
+export function balanceDays<T extends Balanceable>(tasks: T[], today: string, capFor: (date: string) => number, horizonDays = 21): Set<string> {
   const moved = new Set<string>();
+  const end = addDays(today, horizonDays);
+  const deadline = (t: T) => (t.dueAt === null ? end : addDays(sgtDate(t.dueAt), -1));
+  const room = (t: T, day: string) => dayDiff(day, deadline(t)) - (t.weightPct ?? 0) / 10;
+  const load = new Map<string, number>();
+  for (const t of tasks) for (const s of t.steps) if (!s.done) load.set(s.doBy, (load.get(s.doBy) ?? 0) + s.minutes);
+  const over = (day: string) => (load.get(day) ?? 0) > capFor(day);
+  const move = (t: T, s: TaskStep, to: string) => {
+    load.set(s.doBy, (load.get(s.doBy) ?? 0) - s.minutes);
+    load.set(to, (load.get(to) ?? 0) + s.minutes);
+    s.doBy = to;
+    moved.add(t.key);
+  };
   for (let d = 0; d < horizonDays; d++) {
     const day = addDays(today, d);
+    if (!over(day)) continue;
     const todays = tasks.flatMap((t) => t.steps.filter((s) => !s.done && s.doBy === day).map((s) => ({ t, s })));
-    let load = todays.reduce((n, x) => n + x.s.minutes, 0);
-    const cap = capFor(day);
-    if (load <= cap) continue;
-    // Most slack first; an undated task has the most.
-    const slack = (x: { t: T }) => x.t.dueAt ?? Number.MAX_SAFE_INTEGER;
-    todays.sort((a, b) => slack(b) - slack(a));
+    // Most room first; an undated task has the most.
+    todays.sort((a, b) => room(b.t, day) - room(a.t, day));
     for (const x of todays) {
-      if (load <= cap) break;
+      if (!over(day)) break;
       const next = addDays(day, 1);
-      const deadline = x.t.dueAt === null ? addDays(today, horizonDays) : addDays(sgtDate(x.t.dueAt), -1);
-      if (next > deadline) continue;
-      x.s.doBy = next;
-      load -= x.s.minutes;
-      moved.add(x.t.key);
+      if (next > deadline(x.t)) continue;
+      move(x.t, x.s, next);
+    }
+    // Still too much: what cannot wait goes earlier, the least room first.
+    for (const x of [...todays].reverse()) {
+      if (!over(day)) break;
+      if (x.s.doBy !== day) continue;
+      const mine = [...x.t.steps].sort((a, b) => a.doBy.localeCompare(b.doBy));
+      const prev = mine.slice(0, mine.indexOf(x.s)).filter((s) => !s.done).pop();
+      const floor = prev && prev.doBy > today ? prev.doBy : today;
+      for (let e = addDays(day, -1); e >= floor; e = addDays(e, -1)) {
+        if ((load.get(e) ?? 0) + x.s.minutes <= capFor(e)) { move(x.t, x.s, e); break; }
+      }
     }
   }
   for (const t of tasks) if (moved.has(t.key)) t.steps.sort((a, b) => a.doBy.localeCompare(b.doBy));
   return moved;
 }
 
+// How full each of the next days is. overloaded = more planned than the
+// day's capacity even after balancing: nothing could move without missing a
+// deadline. Late steps count on today, where the Tasks page lists them.
+export type DayLoad = { date: string; minutes: number; cap: number; overloaded: boolean };
+export function dayLoads(tasks: { steps: TaskStep[] }[], today: string, capFor: (date: string) => number, days = 14): DayLoad[] {
+  const load = new Map<string, number>();
+  for (const t of tasks) for (const s of t.steps) if (!s.done) {
+    const day = s.doBy < today ? today : s.doBy;
+    load.set(day, (load.get(day) ?? 0) + s.minutes);
+  }
+  return Array.from({ length: days }, (_, d) => {
+    const date = addDays(today, d);
+    const minutes = load.get(date) ?? 0, cap = capFor(date);
+    return { date, minutes, cap, overloaded: minutes > cap };
+  });
+}
+
+// What a student can do on a day: three hours on a weekday, four at the
+// weekend.
 export const dailyCap = (date: string) => {
   const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
   return dow === 0 || dow === 6 ? 240 : 180;
 };
+
+// Less an hour for each class that day (the module's Canvas calendar
+// events: they carry a start but no end, so an hour each), never under one.
+export function capWithClasses(classesOn: Map<string, number>): (date: string) => number {
+  return (date) => Math.max(60, dailyCap(date) - 60 * (classesOn.get(date) ?? 0));
+}
+
+// --- revising what the quizzes showed ----------------------------------------
+// Slides the student keeps getting wrong in the chapter quizzes (weak-topics)
+// become study advice for the planner, and a short step before the module's
+// next quiz or exam.
+export type WeakGroup = { deck: string | null; from: number | null; to: number | null; topic: string | null; missed: number; lastMissedAt: number };
+
+const deckName = (d: string | null) => (d ? d.replace(/\.(pdf|pptx?|docx?)$/i, "") : null);
+
+// Missed slides next to each other are one thing to revise: slides 12, 13
+// and 14 of a deck are "slides 12-14". The most missed first, at most three.
+export function weakSpotGroups(spots: WeakSpot[], max = 3): WeakGroup[] {
+  const sorted = spots.filter((s) => s.missed > 0)
+    .sort((a, b) => (a.deck ?? "").localeCompare(b.deck ?? "") || (a.page ?? -1) - (b.page ?? -1) || (a.topicTitle ?? "").localeCompare(b.topicTitle ?? ""));
+  const groups: WeakGroup[] = [];
+  for (const s of sorted) {
+    const g = groups[groups.length - 1];
+    const joins = g && g.deck === s.deck && (s.page === null
+      ? g.from === null && g.topic === s.topicTitle
+      : g.to !== null && s.page - g.to <= 1);
+    if (g && joins) {
+      g.to = s.page;
+      g.missed += s.missed;
+      g.lastMissedAt = Math.max(g.lastMissedAt, s.lastMissedAt);
+      g.topic ??= s.topicTitle;
+    } else {
+      groups.push({ deck: s.deck, from: s.page, to: s.page, topic: s.topicTitle, missed: s.missed, lastMissedAt: s.lastMissedAt });
+    }
+  }
+  return groups.sort((a, b) => b.missed - a.missed || b.lastMissedAt - a.lastMissedAt).slice(0, max);
+}
+
+const slidesLabel = (g: WeakGroup) => (g.from === null ? null : g.from === g.to ? `slide ${g.from}` : `slides ${g.from}-${g.to}`);
+
+// "revise L5 Bayes slides 12-14 (Conditional probability): missed 4 quiz questions"
+export function weakSpotAdvice(groups: WeakGroup[]): string[] {
+  return groups.map((g) => {
+    const where = [deckName(g.deck), slidesLabel(g)].filter(Boolean).join(" ");
+    const what = where ? `${where}${g.topic ? ` (${g.topic})` : ""}` : g.topic ?? "what the chapter quizzes covered";
+    return `revise ${what}: missed ${g.missed} quiz question${g.missed === 1 ? "" : "s"}`;
+  });
+}
+
+// The step: "Revise L5 Bayes slides 12-14", under 70 characters.
+export function revisionStepText(g: WeakGroup): string {
+  const deck = deckName(g.deck), slides = slidesLabel(g);
+  if (deck && slides) return `Revise ${clip(deck, 70 - 8 - slides.length)} ${slides}`;
+  if (deck) return clip(`Revise ${deck}${g.topic ? ` (${g.topic})` : ""}`, 70);
+  return clip(`Revise ${g.topic ?? "what the chapter quizzes covered"}`, 70);
+}
 
 // --- hints from files --------------------------------------------------------
 // A line counts when it states an obligation outright, or when it pairs a
@@ -316,15 +573,9 @@ export function obligationLines(text: string, max = 12): { page: number; text: s
 // yet. When a module has run a numbered quiz series and the latest one is
 // done, the next is coming. This spots that without a model, so the Tasks
 // page anticipates it whatever the planner does.
-const QUIZ_NUM_RE = /\bquiz\s*[-#]?\s*(\d{1,2})\b/i;
 const DAY = 86_400_000;
 
 export type QuizSeries = { next: number; seen: number; lastId: number; lastDue: number | null; everyDays: number | null; estimate: number | null };
-
-export function quizNumber(title: string): number | null {
-  const m = QUIZ_NUM_RE.exec(title);
-  return m ? Number(m[1]) : null;
-}
 
 export function quizSeries(rows: { id: number; title: string; dueAt: number | null; submitted: boolean; canvasDone?: boolean }[], now: number): QuizSeries | null {
   const byNum = new Map<number, { ids: number[]; due: number | null; open: boolean }>();

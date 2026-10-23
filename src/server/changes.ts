@@ -2,6 +2,7 @@ import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { items, modules, taskChanges, taskFeedback, tasks } from "@/db/schema";
 import { sameAssessment } from "@/lib/own-work";
+import { fitSteps, sgtDate, type TaskStep } from "@/enrich/tasks";
 
 // The bell: what the courses changed. A proposal (a date the student set that
 // an announcement now contradicts) waits for "Use the new date" or "Keep
@@ -17,6 +18,10 @@ export type ChangeView = {
 };
 
 const D = 86_400_000;
+const parseSteps = (json: string): TaskStep[] => { try { const v = JSON.parse(json); return Array.isArray(v) ? v : []; } catch { return []; } };
+// A task's steps for its new date (see fitSteps): what was planned for after
+// it moves up; done ones stay.
+const stepsFor = (t: { stepsJson: string }, dueAt: number, now: number) => JSON.stringify(fitSteps(parseSteps(t.stepsJson), sgtDate(now), dueAt));
 
 // Notices that no longer apply settle themselves: a task that was deleted,
 // finished or dismissed since can't be asked about or undone. They become
@@ -70,7 +75,7 @@ export function resolveChange(db: Db, userId: number, id: number, action: Change
   if (action === "accept" && c.kind === "date_proposed") {
     if (!t || c.newDueAt === null) return false;
     // The course's date, which a later announcement may move again.
-    db.update(tasks).set({ dueAt: c.newDueAt, dueConfidence: c.newConfidence ?? "exact", dueLocked: false, dueLockedAt: null, touchedAt: now, updatedAt: now }).where(eq(tasks.id, t.id)).run();
+    db.update(tasks).set({ dueAt: c.newDueAt, dueConfidence: c.newConfidence ?? "exact", dueLocked: false, dueLockedAt: null, stepsJson: stepsFor(t, c.newDueAt, now), touchedAt: now, updatedAt: now }).where(eq(tasks.id, t.id)).run();
     // Their old correction is out of date; the planner must not be told it again.
     const stale = db.select().from(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.kind, "wrong_date"))).all()
       .filter((f) => f.moduleId === t.moduleId && (f.title === t.title || sameAssessment(f.title, t.title)));
@@ -86,7 +91,7 @@ export function resolveChange(db: Db, userId: number, id: number, action: Change
   }
   if (action === "undo" && c.kind === "date_moved") {
     if (!t || c.oldDueAt === null) return false;
-    db.update(tasks).set({ dueAt: c.oldDueAt, dueConfidence: "exact", dueLocked: true, dueLockedAt: now, touchedAt: now, updatedAt: now }).where(eq(tasks.id, t.id)).run();
+    db.update(tasks).set({ dueAt: c.oldDueAt, dueConfidence: "exact", dueLocked: true, dueLockedAt: now, stepsJson: stepsFor(t, c.oldDueAt, now), touchedAt: now, updatedAt: now }).where(eq(tasks.id, t.id)).run();
     done("undone");
     return true;
   }

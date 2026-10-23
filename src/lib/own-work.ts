@@ -1,6 +1,11 @@
-import { quizNumber } from "../enrich/tasks";
-
 const D = 86_400_000;
+
+// "Quiz 4", "Quiz-4", "Quiz10": the number of a quiz in a series.
+const QUIZ_NUM_RE = /\bquiz\s*[-#]?\s*(\d{1,2})\b/i;
+export function quizNumber(title: string): number | null {
+  const m = QUIZ_NUM_RE.exec(title);
+  return m ? Number(m[1]) : null;
+}
 
 // One spelling for the words courses write several ways: "Mid-term" and
 // "Midterm", "Final Examination" and "Final exam", "Quizzes" and "Quiz".

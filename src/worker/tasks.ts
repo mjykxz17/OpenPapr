@@ -7,22 +7,26 @@ import { moduleCodes } from "../connectors/nusmods/client";
 import type { CompatConfig } from "../enrich/openai-compat";
 import { ModuleProfile } from "../enrich/profiles";
 import {
-  balanceDays, dailyCap, mergeTasks, obligationLines, planModuleTasks, quizNumber, quizSeries, rollForward, sgtDate,
-  type ModuleTaskInput, type SignalItem, type TaskSource, type TaskStep,
+  balanceDays, capWithClasses, fitSteps, mergeTasks, obligationLines, planModuleTasks, quizNumber, quizSeries, refFacts, revisionStepText, sgtDate, stepId,
+  weakSpotAdvice, weakSpotGroups, type CleanTask, type ModuleTaskInput, type RefFact, type SignalItem, type TaskSource, type TaskStep,
 } from "../enrich/tasks";
 import { htmlToText } from "../lib/html-text";
 import { variantGroups } from "../lib/variants";
 import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
 import { calendarLines, classSlots, placeInWeek, refreshRoadmaps, roadmapSignals, weekNote, weeksNamed } from "./roadmap";
-import { assessmentNumber, KIND_WORD, ownWork, sameAssessment } from "../lib/own-work";
-import { isConcrete } from "../lib/concrete";
+import { assessmentNumber, KIND_WORD, ownWork, sameAssessment, sameTask } from "../lib/own-work";
+import { citedItemIds, concreteTasks, isConcrete } from "../lib/concrete";
+import { weakSpots } from "../server/weak-topics";
+import { classesOn } from "../server/tasks";
 export { ownWork };
 
 const H = 3_600_000;
 const D = 24 * H;
 export const TASK_TTL = 3 * H;
 const ERROR_BACKOFF = 30 * 60_000;
+// Even with nothing new, a module is planned afresh once a week.
+export const MAX_STALE = 7 * D;
 const MODULES_PER_RUN = 3;
 const FILES_PER_RUN = 3;
 const HINT_CATEGORIES = new Set(["slides", "tutorial", "assignment", "admin", "reading", "other"]);
@@ -80,7 +84,9 @@ async function harvestHints(deps: TaskDeps, userId: number, mods: (typeof module
 }
 
 // --- everything known about one module -----------------------------------------
-export function moduleSignals(db: Db, userId: number, mod: typeof modules.$inferSelect, now: number): { input: ModuleTaskInput; refs: Map<string, TaskSource> } {
+export function moduleSignals(db: Db, userId: number, mod: typeof modules.$inferSelect, now: number): {
+  input: ModuleTaskInput; refs: Map<string, TaskSource>; facts: Map<string, RefFact>; inputsHash: string;
+} {
   const refs = new Map<string, TaskSource>();
   const rows = db.select().from(items).where(and(eq(items.userId, userId), eq(items.moduleId, mod.id))).all();
   const due = (ms: number | null) => (ms === null ? "no due date" : `due ${sgtLabel(ms)}`);
@@ -196,6 +202,8 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     const p = ModuleProfile.safeParse(JSON.parse(getModuleProfileRow(db, mod.id)?.profileJson ?? "null"));
     if (p.success) studyAdvice = [...p.data.howToStudy, ...p.data.fit.gaps.map((g) => `gap: ${g}`)].slice(0, 7);
   } catch { /* no profile yet */ }
+  // What the student's own quiz answers say to revise comes first.
+  studyAdvice = [...weakSpotAdvice(weakSpotGroups(weakSpots(db, userId, mod.id, now))), ...studyAdvice];
 
   // A date the student set is theirs — unless the course has announced
   // something about that assessment since. Then the planner sees the date as
@@ -227,15 +235,24 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   const slots = classSlots(rows).map((s) => `${WEEKDAY[s.weekday]} ${s.time} — "${s.title}" (${s.count} on the calendar)`);
 
   const d = new Date(now + 8 * H);
-  return {
-    refs,
-    input: {
-      today: `${sgtDate(now)} (${WEEKDAY[d.getUTCDay()]})`,
-      module: { code: mod.code, name: mod.name },
-      canvas, past: pastRows, announcements, discussions, notes, fileHints: fileLines, weightage, examDate, studyAdvice, existing, feedback,
-      roadmap: road.lines, calendar: calendarLines(now, mod.term), classSlots: slots,
-    },
+  const input: ModuleTaskInput = {
+    today: `${sgtDate(now)} (${WEEKDAY[d.getUTCDay()]})`,
+    module: { code: mod.code, name: mod.name },
+    canvas, past: pastRows, announcements, discussions, notes, fileHints: fileLines, weightage, examDate, studyAdvice, existing, feedback,
+    roadmap: road.lines, calendar: calendarLines(now, mod.term), classSlots: slots,
   };
+  // Open Canvas work with its own date: the date a task citing it takes.
+  const canvasDue = new Map(open.filter((i) => i.dueAt !== null).map((i) => [`C${i.id}`, { dueAt: i.dueAt!, title: i.title }]));
+  // What the plan is made from, for knowing when to plan again: not today's
+  // date, nor how far the student has got through their steps — those move
+  // every day and are handled in code (rollForward, fitSteps, tidyTasks) —
+  // nor the dates and titles the planner itself wrote: of the tasks, only
+  // which there are and what the student decided (dismissed, done, a date or
+  // title they set).
+  const inputsHash = hash({ ...input, today: null, existing: existingRows.map((t) => ({
+    key: t.key, status: t.status, due: t.dueLocked && !reopened.has(t.title) ? t.dueAt : null, title: t.titleLocked ? t.title : null,
+  })) });
+  return { refs, facts: refFacts(input, canvasDue), input, inputsHash };
 }
 
 // An announcement or staff reply posted after `since` that names this
@@ -251,37 +268,67 @@ export function announcedSince(title: string, since: number, rows: { type: strin
 }
 
 // The planner sometimes counts weeks wrong. When the newest announcement it
-// cites for an assessment names it and exactly one "Week N", the date must
-// fall in that week: if it doesn't, it goes to the module's weekly class that
-// week (or the week's Friday).
-export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | null; dueConfidence: "exact" | "estimated"; sources: TaskSource[] }>(db: Db, moduleId: number, planned: T[], now: number): T[] {
+// cites for an assessment names it and exactly one "Week N" — or, failing
+// that, the quotes it cites name exactly one week — the date must fall in
+// that week: if it doesn't, it goes to the module's weekly class that week
+// (or the week's Friday). A date Canvas gave stays as it is.
+export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | null; dueConfidence: "exact" | "estimated"; sources: TaskSource[]; dueFromCanvas?: boolean }>(db: Db, moduleId: number, planned: T[], now: number): T[] {
   const rows = db.select().from(items).where(eq(items.moduleId, moduleId)).all();
   const term = db.select({ term: modules.term }).from(modules).where(eq(modules.id, moduleId)).get()?.term;
   const byId = new Map(rows.map((r) => [r.id, r]));
   const slots = classSlots(rows);
-  return planned.map((t) => {
+  const weekOf = (t: T): number | null => {
     const anns = t.sources.filter((x) => x.kind === "announcement" && x.itemId != null).map((x) => byId.get(x.itemId!)).filter((r) => r !== undefined)
       .sort((a, b) => (b.sourceCreatedAt ?? b.firstSeenAt) - (a.sourceCreatedAt ?? a.firstSeenAt));
     const a = anns[0];
-    if (!a) return t;
-    const text = `${a.title} ${htmlToText(a.body ?? "")}`;
-    const weeks = weeksNamed(text);
-    if (weeks.length !== 1 || !announcedSince(t.title, -1, [a])) return t;
-    const p = placeInWeek(weeks[0]!, now, slots, term);
-    if (!p || (t.dueAt !== null && t.dueAt >= p.from && t.dueAt < p.to)) return t;
+    if (a) {
+      const weeks = weeksNamed(`${a.title} ${htmlToText(a.body ?? "")}`);
+      if (weeks.length === 1 && announcedSince(t.title, -1, [a])) return weeks[0]!;
+    }
+    const quoted = weeksNamed(t.sources.map((x) => x.quote ?? "").join(" | "));
+    return quoted.length === 1 ? quoted[0]! : null;
+  };
+  return planned.map((t) => {
+    if (t.dueFromCanvas) return t;
+    const week = weekOf(t);
+    if (week === null) return t;
+    const p = placeInWeek(week, now, slots, term);
+    // A week already over is an old plan, not this task's date.
+    if (!p || p.to < now || (t.dueAt !== null && t.dueAt >= p.from && t.dueAt < p.to)) return t;
     return { ...t, dueAt: p.at, dueConfidence: p.inClass ? t.dueConfidence : "estimated" };
   });
 }
 
 // --- writing a module's plan ----------------------------------------------------
-export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: Awaited<ReturnType<typeof planModuleTasks>>, now: number) {
+export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: CleanTask[], now: number) {
   const current = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.moduleId, moduleId))).all();
+  // When each cited item was posted (announcements, staff replies) or first
+  // seen, and what it is.
+  const citedIds = [...new Set(plannedIn.flatMap((t) => t.sources.map((x) => x.itemId).filter((x): x is number => x != null)))];
+  const cited = citedIds.length
+    ? db.select({ id: items.id, type: items.type, at: items.sourceCreatedAt, seen: items.firstSeenAt }).from(items).where(and(eq(items.userId, userId), inArray(items.id, citedIds))).all()
+    : [];
+  const postedAt = new Map(cited.map((i) => [i.id, i.at ?? i.seen]));
+  const firstSeen = new Map(cited.map((i) => [i.id, i.seen]));
+  const typeOf = new Map(cited.map((i) => [i.id, i.type]));
+  // "Not a real task" holds in code, not only in the prompt (which sees the
+  // latest 15): whatever the student dismissed or said is not a task does
+  // not come back under a new key or a new wording. Work Canvas has posted
+  // since they said so is new evidence, and does. A placeholder the app
+  // dismissed itself (an expected quiz making way) never blocks anything.
+  const rejected = [
+    ...current.filter((t) => t.status === "dismissed" && t.touchedAt !== null && !t.key.includes("-series-quiz-")).map((t) => ({ title: t.title, since: t.touchedAt! })),
+    ...db.select().from(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, moduleId), eq(taskFeedback.kind, "not_task"))).all()
+      .map((f) => ({ title: f.title, since: f.createdAt })),
+  ];
+  const existingKeys = new Set(current.map((t) => t.key));
+  const postedSince = (p: CleanTask, since: number) => p.sources.some((x) => x.kind === "canvas" && x.itemId != null && (firstSeen.get(x.itemId) ?? 0) > since);
+  const wanted = plannedIn.filter((p) => existingKeys.has(p.key) || !rejected.some((r) => sameTask(r.title, p.title) && !postedSince(p, r.since)));
   // The planner sometimes names a new key for an assessment it already has
   // ("cs4238-quiz-3" next to "cs4238-series-quiz-3"). Same kind and number is
   // the same task: it keeps the existing one, with the student's progress.
-  const existingKeys = new Set(current.map((t) => t.key));
-  const claimed = new Set(plannedIn.map((p) => p.key).filter((k) => existingKeys.has(k)));
-  const planned = plannedIn.map((p) => {
+  const claimed = new Set(wanted.map((p) => p.key).filter((k) => existingKeys.has(k)));
+  const planned = wanted.map((p) => {
     if (existingKeys.has(p.key)) return p;
     const twin = current.find((t) => t.status !== "dismissed" && !claimed.has(t.key) && !t.key.startsWith("manual-") && sameAssessment(t.title, p.title));
     if (!twin) return p;
@@ -297,6 +344,7 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
   );
   const locked = new Set(current.filter((t) => t.dueLocked).map((t) => t.id));
   const renamed = new Set(current.filter((t) => t.titleLocked).map((t) => t.id));
+  const today = sgtDate(now);
   // A safety-net task goes only once the plan covers its Canvas item.
   const citedNow = new Set(planned.flatMap((t) => t.sources.map((x) => x.itemId).filter((x): x is number => x != null)));
   const byIdNow = new Map(current.map((t) => [t.id, t]));
@@ -304,13 +352,6 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
   // The newest announcement or staff reply a planned task cites.
   const newestNews = (sources: TaskSource[]) => sources.filter((x) => (x.kind === "announcement" || x.kind === "discussion") && x.itemId != null)
     .sort((a, b) => (postedAt.get(b.itemId!) ?? 0) - (postedAt.get(a.itemId!) ?? 0))[0] ?? null;
-  // When each cited announcement or staff reply was posted.
-  const citedIds = [...citedNow];
-  const cited = citedIds.length
-    ? db.select({ id: items.id, type: items.type, at: items.sourceCreatedAt, seen: items.firstSeenAt }).from(items).where(and(eq(items.userId, userId), inArray(items.id, citedIds))).all()
-    : [];
-  const postedAt = new Map(cited.map((i) => [i.id, i.at ?? i.seen]));
-  const typeOf = new Map(cited.map((i) => [i.id, i.type]));
   // The bell only tells of work the student will actually see (concrete.ts),
   // and of each thing once: the planner renames keys between runs, and a
   // second "added" for the same assessment is noise.
@@ -369,11 +410,17 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
           sourceItemId: news.itemId!, sourceLabel: news.label, quote: news.quote ?? null, createdAt: now }).run();
       }
       const date = locked.has(u.id) ? {} : { dueAt: t.dueAt, dueConfidence: t.dueConfidence };
+      // The student's steps stay, with any the planner has added; when the
+      // date moved they follow it (fitSteps). Untouched tasks take the plan's.
+      const dueNow = locked.has(u.id) ? was.dueAt : t.dueAt;
+      const steps = u.keepSteps
+        ? (was.status === "open" && (dueNow !== was.dueAt || u.addSteps.length) ? fitSteps([...parseList<TaskStep>(was.stepsJson), ...u.addSteps], today, dueNow) : null)
+        : t.steps;
       tx.update(tasks).set({
         // A title or type the student changed stays theirs too.
         ...(renamed.has(u.id) ? {} : { title: t.title, kind: t.kind }), ...date, anticipated: t.anticipated,
         weightPct: t.weightPct, why: t.why, sourcesJson: JSON.stringify(t.sources), updatedAt: now,
-        ...(u.keepSteps ? {} : { stepsJson: JSON.stringify(t.steps) }),
+        ...(steps ? { stepsJson: JSON.stringify(steps) } : {}),
       }).where(eq(tasks.id, u.id)).run();
     }
     if (ops.remove.length) {
@@ -421,7 +468,12 @@ export function tidyTasks(db: Db, userId: number, now: number): number {
   const finished = (id: number) => { const r = citedRows.get(id); return Boolean(r && (r.submitted || r.canvasDone)) || setOf.has(id); };
   const today = sgtDate(now);
   let changed = 0;
-  const live: { id: number; key: string; dueAt: number | null; steps: TaskStep[]; before: string }[] = [];
+  // Only what the Tasks page shows takes up the student's days: a hidden,
+  // only-expected task must not push the visible ones later.
+  const ids = citedItemIds(open);
+  const types = new Map(ids.length ? db.select({ id: items.id, type: items.type }).from(items).where(inArray(items.id, ids)).all().map((r) => [r.id, r.type]) : []);
+  const shown = new Set(concreteTasks(open, (id) => types.get(id)).map((t) => t.id));
+  const live: { id: number; key: string; dueAt: number | null; weightPct: number | null; steps: TaskStep[]; before: string }[] = [];
   for (const t of open) {
     const srcs = parseList<TaskSource>(t.sourcesJson).filter((s) => (s.kind === "canvas" || s.kind === "discussion" || s.kind === "planner") && s.itemId && obligation(s.itemId)
       && ownWork(t.title, citedRows.get(s.itemId)!.title, t.dueAt, citedRows.get(s.itemId)!.dueAt));
@@ -440,9 +492,9 @@ export function tidyTasks(db: Db, userId: number, now: number): number {
       continue;
     }
     const steps = parseList<TaskStep>(t.stepsJson);
-    live.push({ id: t.id, key: t.key, dueAt: t.dueAt, steps: t.dueAt !== null && t.dueAt < now ? steps : rollForward(steps, today, t.dueAt), before: t.stepsJson });
+    live.push({ id: t.id, key: t.key, dueAt: t.dueAt, weightPct: t.weightPct, steps: t.dueAt !== null && t.dueAt < now ? steps : fitSteps(steps, today, t.dueAt), before: t.stepsJson });
   }
-  balanceDays(live, today, dailyCap);
+  balanceDays(live.filter((t) => shown.has(t.id)), today, capWithClasses(classesOn(db, userId, today)));
   for (const t of live) {
     const after = JSON.stringify(t.steps);
     if (after !== t.before) { db.update(tasks).set({ stepsJson: after }).where(eq(tasks.id, t.id)).run(); changed++; }
@@ -514,6 +566,21 @@ export function ensureCanvasCovered(db: Db, userId: number, now: number): number
     if (!eligible || (!set && covered.has(r.id))) continue;
     const pair = gradedDiscussion.get(r.sourceId);
     if (pair && (covered.has(pair.id) || pair.submitted)) continue;
+    // The planner's task for the same assessment (it read of it before
+    // Canvas posted it) takes the item on, and Canvas's date with it, rather
+    // than a second task appearing beside it until the next plan.
+    const twin = set || r.type === "planner_note" ? undefined : all.find((t) => t.moduleId === r.moduleId && !t.key.startsWith("manual-") && !t.key.includes("-series-quiz-")
+      && (t.status === "open" || t.touchedAt !== null) && sameAssessment(t.title, r.title));
+    if (twin) {
+      const sources = [{ kind: "canvas" as const, label: r.title, itemId: r.id }, ...parseList<TaskSource>(twin.sourcesJson)];
+      const moveDate = twin.status === "open" && !twin.dueLocked && twin.dueAt !== r.dueAt;
+      const patch = { sourcesJson: JSON.stringify(sources), updatedAt: now,
+        ...(moveDate ? { dueAt: r.dueAt, dueConfidence: "exact" as const, stepsJson: JSON.stringify(fitSteps(parseList<TaskStep>(twin.stepsJson), sgtDate(now), r.dueAt)) } : {}) };
+      db.update(tasks).set(patch).where(eq(tasks.id, twin.id)).run();
+      Object.assign(twin, patch);
+      covered.add(r.id);
+      continue;
+    }
     const code = r.moduleId ? mods.get(r.moduleId)!.code : "note";
     const key = set ? `${code.toLowerCase()}-canvas-set-${r.id}` : `${code.toLowerCase()}-canvas-${r.id}`;
     if (keys.has(key)) continue;
@@ -571,11 +638,49 @@ export function ensureQuizSeries(db: Db, userId: number, now: number): number {
   return changed;
 }
 
-export type TaskRefreshResult = { files: number; planned: number; errors: string[] };
+// What the chapter quizzes say to revise (weakSpots) becomes a short
+// "Revise <deck> slides X-Y" step on the module's next quiz or exam — one the
+// student can see, if there is one — the day before it. A step this added
+// that the quizzes no longer call for, and that is not done, goes again.
+export function addRevisionSteps(db: Db, userId: number, moduleId: number, now: number): number {
+  const groups = weakSpotGroups(weakSpots(db, userId, moduleId, now), 2);
+  const rows = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.moduleId, moduleId), eq(tasks.status, "open"))).all();
+  if (!rows.length) return 0;
+  const ids = citedItemIds(rows);
+  const types = new Map(ids.length ? db.select({ id: items.id, type: items.type }).from(items).where(inArray(items.id, ids)).all().map((r) => [r.id, r.type]) : []);
+  const ahead = (list: typeof rows) => list.filter((t) => (t.kind === "quiz" || t.kind === "exam") && t.dueAt !== null && t.dueAt > now).sort((a, b) => a.dueAt! - b.dueAt!)[0];
+  const target = groups.length ? ahead(concreteTasks(rows, (id) => types.get(id))) ?? ahead(rows) : undefined;
+  const today = sgtDate(now);
+  let changed = 0;
+  for (const t of rows) {
+    const steps = parseList<TaskStep>(t.stepsJson);
+    const wanted = new Map<string, TaskStep>();
+    if (t === target) {
+      const dayBefore = sgtDate(t.dueAt! - D);
+      for (const g of groups) {
+        const text = revisionStepText(g);
+        const range = g.from === null ? null : g.from === g.to ? `${g.from}` : `${g.from}-${g.to}`;
+        // The planner may have planned this revision already.
+        if (range && steps.some((s) => !s.id.startsWith("rev-") && /revis/i.test(s.text) && s.text.includes(range))) continue;
+        const id = `rev-${stepId(t.key, text)}`;
+        wanted.set(id, steps.find((s) => s.id === id) ?? { id, text, minutes: 20, doBy: dayBefore < today ? today : dayBefore, done: false });
+      }
+    }
+    const next = [...steps.filter((s) => !s.id.startsWith("rev-") || s.done || wanted.has(s.id)), ...[...wanted.values()].filter((w) => !steps.some((s) => s.id === w.id))]
+      .sort((a, b) => a.doBy.localeCompare(b.doBy));
+    const after = JSON.stringify(next);
+    if (after !== JSON.stringify(steps)) { db.update(tasks).set({ stepsJson: after }).where(eq(tasks.id, t.id)).run(); changed++; }
+  }
+  return changed;
+}
+
+// checked: where code overrode the planner — a date Canvas gives, a quote
+// not in its source, an assessment no source names — for the logs.
+export type TaskRefreshResult = { files: number; planned: number; errors: string[]; checked: string[] };
 
 export async function refreshTasks(deps: TaskDeps, userId: number): Promise<TaskRefreshResult> {
   const { db } = deps;
-  const out: TaskRefreshResult = { files: 0, planned: 0, errors: [] };
+  const out: TaskRefreshResult = { files: 0, planned: 0, errors: [], checked: [] };
   const user = db.select().from(users).where(eq(users.id, userId)).get();
   if (!user) return out;
   const requested = user.tasksRequestedAt !== null;
@@ -590,19 +695,25 @@ export async function refreshTasks(deps: TaskDeps, userId: number): Promise<Task
   if (cfg) {
     const plans = new Map(db.select().from(taskPlans).where(inArray(taskPlans.moduleId, mods.map((m) => m.id).concat(-1))).all().map((p) => [p.moduleId, p]));
     const now = deps.now();
-    const candidates = mods.map((mod) => {
-      const { input, refs } = moduleSignals(db, userId, mod, now);
-      return { mod, input, refs, h: hash(input), plan: plans.get(mod.id) };
-    }).filter((c) => requested || (c.plan?.inputsHash !== c.h
-      && (!c.plan?.generatedAt || now - c.plan.generatedAt > TASK_TTL)
-      && (!c.plan?.errorAt || now - c.plan.errorAt > ERROR_BACKOFF)))
+    // A module is planned again when what it is planned from changed, or a
+    // week on regardless; never more often than the TTL, nor while an error
+    // backs off. The days passing alone are not a change: code moves late
+    // steps on (tidyTasks), so the model is not asked daily to reshuffle.
+    const candidates = mods.map((mod) => ({ mod, ...moduleSignals(db, userId, mod, now), plan: plans.get(mod.id) }))
+      .filter((c) => requested || ((c.plan?.inputsHash !== c.inputsHash || !c.plan?.generatedAt || now - c.plan.generatedAt > MAX_STALE)
+        && (!c.plan?.generatedAt || now - c.plan.generatedAt > TASK_TTL)
+        && (!c.plan?.errorAt || now - c.plan.errorAt > ERROR_BACKOFF)))
       .sort((a, b) => (a.plan?.generatedAt ?? 0) - (b.plan?.generatedAt ?? 0));
     for (const c of requested ? candidates : candidates.slice(0, MODULES_PER_RUN)) {
       try {
-        const planned = fitAnnouncedWeeks(db, c.mod.id, await planModuleTasks(cfg, c.input, c.refs, deps.now(), deps.fetchFn), deps.now());
+        const planned = fitAnnouncedWeeks(db, c.mod.id, await planModuleTasks(cfg, c.input, c.refs, deps.now(), deps.fetchFn, c.facts), deps.now());
+        out.checked.push(...planned.flatMap((t) => (t.checks ?? []).map((x) => `${c.mod.code} ${t.title}: ${x}`)));
         applyPlan(db, userId, c.mod.id, planned, deps.now());
-        db.insert(taskPlans).values({ moduleId: c.mod.id, inputsHash: c.h, generatedAt: deps.now(), error: null, errorAt: null })
-          .onConflictDoUpdate({ target: taskPlans.moduleId, set: { inputsHash: c.h, generatedAt: deps.now(), error: null, errorAt: null } }).run();
+        // Hashed after the plan is written, so the tasks it just made don't
+        // count as something new next time.
+        const h = moduleSignals(db, userId, c.mod, now).inputsHash;
+        db.insert(taskPlans).values({ moduleId: c.mod.id, inputsHash: h, generatedAt: deps.now(), error: null, errorAt: null })
+          .onConflictDoUpdate({ target: taskPlans.moduleId, set: { inputsHash: h, generatedAt: deps.now(), error: null, errorAt: null } }).run();
         out.planned++;
       } catch (err) {
         const e = errText(err);
@@ -615,6 +726,7 @@ export async function refreshTasks(deps: TaskDeps, userId: number): Promise<Task
 
   ensureCanvasCovered(db, userId, deps.now());
   ensureQuizSeries(db, userId, deps.now());
+  for (const mod of mods) addRevisionSteps(db, userId, mod.id, deps.now());
   tidyTasks(db, userId, deps.now());
   if (requested) db.update(users).set({ tasksRequestedAt: null }).where(eq(users.id, userId)).run();
   return out;

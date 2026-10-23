@@ -1,5 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { variantGroups } from "../lib/variants";
+import { citedItemIds, concreteTasks } from "@/lib/concrete";
 import type { Db } from "@/db/client";
 import { components, items, modules, tasks } from "@/db/schema";
 import { getNusmods } from "@/db/profiles-repo";
@@ -72,6 +73,15 @@ export function dueList(db: Db, userId: number, now: number): Due[] {
   return out;
 }
 
+// The open tasks the Tasks page shows (concrete.ts): Papi speaks of the same
+// plan the student sees, not of quizzes only the app expects.
+function shownTasks(db: Db, userId: number) {
+  const open = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.status, "open"))).all();
+  const ids = citedItemIds(open);
+  const types = new Map(ids.length ? db.select({ id: items.id, type: items.type }).from(items).where(inArray(items.id, ids)).all().map((r) => [r.id, r.type]) : []);
+  return concreteTasks(open, (id) => types.get(id));
+}
+
 export function recentlySaid(db: Db, userId: number, now: number): Said[] {
   const mods = new Map(db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all().map((m) => [m.id, m.code]));
   return db.select().from(items).where(eq(items.userId, userId)).all()
@@ -100,7 +110,7 @@ export function factSheet(db: Db, userId: number, now: number): string {
     lines.push(`- ${d.code ?? "personal"} | ${d.kind} | ${d.title} | due ${sgt(d.dueAt)} | ${state}${d.weightPct ? ` | counts toward ${d.weightName} (${d.weightPct}% of grade in total)` : ""}`);
   }
   if (!due.length) lines.push("- (nothing dated)");
-  const open = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.status, "open"))).all();
+  const open = shownTasks(db, userId);
   if (open.length) {
     lines.push("", "Planned tasks (OpenPapr's plan, with steps):");
     const codes = new Map(mods.map((m) => [m.id, m.code]));
@@ -174,7 +184,7 @@ export function reminders(db: Db, userId: number, now: number): string[] {
       : `Heads up: ${d.code ? `${d.code} ` : ""}${d.title} is due ${sgt(d.dueAt)}.${d.weightPct ? ` It counts toward ${d.weightName} (${d.weightPct}%).` : ""}`);
   }
   const today = new Date(now + 8 * H).toISOString().slice(0, 10);
-  const steps = db.select().from(tasks).where(and(eq(tasks.userId, userId), eq(tasks.status, "open"))).all().flatMap((t) => {
+  const steps = shownTasks(db, userId).flatMap((t) => {
     try { return (JSON.parse(t.stepsJson) as { text: string; doBy: string; done: boolean; minutes: number }[]).filter((s) => !s.done && s.doBy <= today); } catch { return []; }
   });
   if (steps.length) {
