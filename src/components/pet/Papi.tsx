@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import { PapiFace, type Mood } from "./PapiFace";
+import { answerMessage, isUngrounded, UNGROUNDED_NOTE, type Msg, type Source } from "./chat";
+import { bubbleBox, dockBottom, DOCK_ID, panelBox, petRect, PHONE_MAX, TAB_ID, type Rect } from "./placement";
 
 type Nudges = { reminders: string[]; quips: string[]; smart: boolean };
-type Source = { n: number; kind: string; title: string; code: string; moduleId: number; href: string; slide: { deck: string; page: number } | null };
-type Msg = { role: "user" | "assistant"; content: string; at?: number; sources?: Source[] };
 
 // Anything can open Papi on a question: the guide's "Ask" button sends this.
 export const OPEN_ASK = "openpapr:ask";
@@ -15,9 +16,10 @@ export const SHOW_SLIDE = "openpapr:slide";
 export type ShowSlideDetail = { moduleId: number; deck: string; page: number; handled: boolean };
 type Summary = { id: number; title: string; updatedAt: number; count: number; preview: string };
 
-const SIZES = { S: 44, M: 56, L: 76, XL: 104 } as const;
-type SizeKey = keyof typeof SIZES;
-const KEYS = { quiet: "papi-quiet", size: "papi-size", pos: "papi-pos", panel: "papi-panel", session: "papi-session" };
+// Papi's size in the rail (56px wide) and in a phone's tab bar.
+const RAIL_PX = 40;
+const TAB_PX = 22;
+const KEYS = { quiet: "papi-quiet", dock: "papi-dock", panel: "papi-panel", session: "papi-session" };
 const SUGGESTIONS = ["When's my next quiz?", "What's due this week?", "Is anything missing?", "Remind me to … by Friday"];
 const PET_LINES = ["hehe", "that tickles", "*happy paper noises*", "again!", "I'm crinkling with joy"];
 const DROP_LINES = ["Wheee!", "Nice view from here.", "I like it here.", "Moving day!"];
@@ -39,10 +41,11 @@ const ago = (ms: number) => {
   const d = Math.round(h / 24); return d < 7 ? `${d}d ago` : new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 };
 
-// Papi: a paper study buddy that lives on top of the page. Drag it anywhere,
-// pick its size, pat it, double-click it for a trick, shake it (gently).
-// It idles on its own, speaks up with reminders and one-liners, sleeps from
-// 1 to 7am, and opens a chat — with saved conversations — when clicked.
+// Papi: a paper study buddy that lives in the rail, never on the page. Drag
+// it up and down the rail, pat it, double-click it for a trick, shake it
+// (gently). On a phone it is the Ask tab. It idles on its own, speaks up with
+// reminders and one-liners, sleeps from 1 to 7am, and opens a chat — with
+// saved conversations — when clicked.
 export function Papi() {
   const router = useRouter();
   const pathname = usePathname();
@@ -58,7 +61,6 @@ export function Papi() {
   const [view, setView] = useState<"chat" | "history" | "settings">("chat");
   const [quiet, setQuiet] = useState(false);
   const [asleep, setAsleep] = useState(false);
-  const [size, setSize] = useState<SizeKey>("M");
   const [nudges, setNudges] = useState<Nudges | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [sessionId, setSessionId] = useState<number | null>(null);
@@ -69,11 +71,14 @@ export function Papi() {
   const [tilt, setTilt] = useState(0);
   const [gaze, setGaze] = useState<{ x: number; y: number } | null>(null);
   const [blush, setBlush] = useState(0);
-  // Offsets from the right and bottom edges, so the pet stays put when the
-  // window is resized.
-  const [pos, setPos] = useState({ right: 24, bottom: 24 });
+  // How far up the rail Papi sits, from the bottom of its dock, so it stays
+  // put when the window is resized.
+  const [dockY, setDockY] = useState(0);
   const [panel, setPanel] = useState({ w: 380, h: 500 });
   const [vw, setVw] = useState({ w: 1280, h: 800 });
+  // The rail's spot for Papi (or the phone's tab), and where it is on screen.
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const [slotRect, setSlotRect] = useState<Rect>({ left: 0, top: 0, width: 0, height: 0 });
 
   const said = useRef(new Set<string>());
   const petRef = useRef<HTMLButtonElement | null>(null);
@@ -81,21 +86,22 @@ export function Papi() {
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const bubbleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const drag = useRef<{ id: number; sx: number; sy: number; r0: number; b0: number; moved: boolean; lastX: number; lastT: number; flips: number; dir: number } | null>(null);
+  const drag = useRef<{ id: number; sx: number; sy: number; b0: number; moved: boolean; lastX: number; lastY: number; lastT: number; flips: number; dir: number } | null>(null);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const petTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPetLine = useRef(0);
 
-  const px = SIZES[size];
+  const phone = vw.w < PHONE_MAX;
+  const px = phone ? TAB_PX : RAIL_PX;
+  const petW = px + 8;
   const petH = Math.round(px * 70 / 64) + 8;
 
   // --- restore preferences --------------------------------------------------
   useEffect(() => {
     setQuiet(store.get(KEYS.quiet) === "1");
-    const s = store.get(KEYS.size) as SizeKey | null;
-    if (s && s in SIZES) setSize(s);
-    else if (window.innerWidth < 640) setSize("S");   // a phone has little room to share
-    try { const p = JSON.parse(store.get(KEYS.pos) ?? "null"); if (p && typeof p.right === "number") setPos(p); } catch { /* default */ }
+    setDockY(Number(store.get(KEYS.dock)) || 0);
+    // Left over from when Papi floated over the page and came in sizes.
+    store.del("papi-pos"); store.del("papi-size");
     try { const p = JSON.parse(store.get(KEYS.panel) ?? "null"); if (p && typeof p.w === "number") setPanel(p); } catch { /* default */ }
     const sid = Number(store.get(KEYS.session));
     if (sid) {
@@ -114,11 +120,22 @@ export function Papi() {
     return () => { clearInterval(t); window.removeEventListener("resize", onResize); };
   }, []);
 
-  // Keep the pet on screen whatever the window does — and, on a phone, above
-  // the tab bar.
-  const phone = vw.w < 640;
-  const floor = phone ? 76 : 4;
-  const safePos = { right: clamp(pos.right, 4, Math.max(4, vw.w - px - 12)), bottom: clamp(pos.bottom, floor, Math.max(floor, vw.h - petH - 4)) };
+  // Find the spot the rail (or the tab bar, on a phone) keeps for Papi, and
+  // follow it as the window changes.
+  useEffect(() => {
+    if (!ready) return;
+    const el = document.getElementById(phone ? TAB_ID : DOCK_ID);
+    setSlot(el);
+    if (!el) return;
+    const measure = () => { const r = el.getBoundingClientRect(); setSlotRect({ left: r.left, top: r.top, width: r.width, height: r.height }); };
+    measure();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [ready, phone, vw]);
+
+  const safeBottom = dockBottom(dockY, slotRect.height, petH);
+  const pet = petRect(phone, slotRect, safeBottom, petW, petH);
 
   useEffect(() => { listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" }); }, [messages, busy, open, view]);
   useEffect(() => { if (open && view === "chat") setTimeout(() => inputRef.current?.focus(), 50); }, [open, view]);
@@ -191,22 +208,25 @@ export function Papi() {
   function onPointerDown(e: React.PointerEvent<HTMLButtonElement>) {
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    drag.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, r0: safePos.right, b0: safePos.bottom, moved: false, lastX: e.clientX, lastT: performance.now(), flips: 0, dir: 0 };
+    drag.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, b0: safeBottom, moved: false, lastX: e.clientX, lastY: e.clientY, lastT: performance.now(), flips: 0, dir: 0 };
   }
   function onPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
     const d = drag.current;
-    if (!d || d.id !== e.pointerId) return;
+    // On a phone Papi is a tab: it can be tapped, not moved.
+    if (!d || d.id !== e.pointerId || phone) return;
     const dx = e.clientX - d.sx, dy = e.clientY - d.sy;
     if (!d.moved && Math.hypot(dx, dy) < 5) return;
     if (!d.moved) { d.moved = true; setDragging(true); setBubble(null); if (asleep) setAsleep(false); setMood("wheee"); }
-    setPos({ right: d.r0 - dx, bottom: d.b0 - dy });
-    // Lean into the motion; count sharp direction changes to notice shaking.
+    // It slides along the rail only, so it never lands on the page.
+    setDockY(dockBottom(d.b0 - dy, slotRect.height, petH));
+    // Lean into sideways pulls; count sharp up-and-down turns to notice shaking.
     const now = performance.now();
-    const vx = (e.clientX - d.lastX) / Math.max(1, now - d.lastT);
+    const dt = Math.max(1, now - d.lastT);
+    const vx = (e.clientX - d.lastX) / dt, vy = (e.clientY - d.lastY) / dt;
     setTilt(clamp(vx * 18, -18, 18));
-    const dir = Math.sign(vx);
-    if (Math.abs(vx) > 1.2 && dir !== 0 && dir !== d.dir) { d.flips++; d.dir = dir; }
-    d.lastX = e.clientX; d.lastT = now;
+    const dir = Math.sign(vy);
+    if (Math.abs(vy) > 1.2 && dir !== 0 && dir !== d.dir) { d.flips++; d.dir = dir; }
+    d.lastX = e.clientX; d.lastY = e.clientY; d.lastT = now;
   }
   function onPointerUp(e: React.PointerEvent<HTMLButtonElement>) {
     const d = drag.current;
@@ -217,7 +237,7 @@ export function Papi() {
       setTilt(0);
       setAnim("bounce");
       setTimeout(() => setAnim(""), 600);
-      store.set(KEYS.pos, JSON.stringify(safePos));
+      store.set(KEYS.dock, String(safeBottom));
       if (d.flips >= 6) { setMood("dizzy"); if (!open) say(pick(DIZZY_LINES), 3500); setTimeout(() => setMood((m) => (m === "dizzy" ? "idle" : m)), 2600); }
       else { setMood("happy"); setTimeout(() => setMood((m) => (m === "happy" ? "idle" : m)), 800); if (!open && Math.random() < 0.35) say(pick(DROP_LINES), 2500); }
       return;
@@ -252,14 +272,12 @@ export function Papi() {
     setMood((m) => (m === "happy" ? "idle" : m));
   }
   function onKey(e: React.KeyboardEvent<HTMLButtonElement>) {
-    const step = e.shiftKey ? 40 : 12;
-    const moves: Record<string, [number, number]> = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
-    const m = moves[e.key];
-    if (!m) return;
+    if (phone || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
     e.preventDefault();
-    const next = { right: safePos.right + m[0], bottom: safePos.bottom + m[1] };
-    setPos(next);
-    store.set(KEYS.pos, JSON.stringify(next));
+    const step = (e.shiftKey ? 40 : 12) * (e.key === "ArrowUp" ? 1 : -1);
+    const next = dockBottom(safeBottom + step, slotRect.height, petH);
+    setDockY(next);
+    store.set(KEYS.dock, String(next));
   }
 
   function toggleChat() {
@@ -302,9 +320,9 @@ export function Papi() {
     setMood("think");
     try {
       const res = await fetch("/api/pet/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: q, sessionId, moduleId: scope }) });
-      const body = (await res.json().catch(() => null)) as { reply?: string; sessionId?: number; added?: boolean; sources?: Source[] } | null;
+      const body = (await res.json().catch(() => null)) as { reply?: string; sessionId?: number; added?: boolean; sources?: Source[]; grounded?: boolean } | null;
       if (body?.added) router.refresh();
-      setMessages((m) => [...m, { role: "assistant", content: body?.reply ?? "Hmm, I couldn't reach my notes just now. Try again in a moment?", at: Date.now(), sources: body?.sources }]);
+      setMessages((m) => [...m, answerMessage(body, Date.now())]);
       if (body?.sessionId) { setSessionId(body.sessionId); store.set(KEYS.session, String(body.sessionId)); setSessions(null); }
     } catch {
       setMessages((m) => [...m, { role: "assistant", content: "I lost the connection for a second there. Try again?" }]);
@@ -344,26 +362,16 @@ export function Papi() {
     store.set(KEYS.quiet, q ? "1" : "0");
     if (q) setBubble(null);
   }
-  function chooseSize(s: SizeKey) { setSize(s); store.set(KEYS.size, s); setAnim("bounce"); setTimeout(() => setAnim(""), 600); }
-  function resetSpot() { const p = { right: 24, bottom: 24 }; setPos(p); store.set(KEYS.pos, JSON.stringify(p)); }
+  function resetSpot() { setDockY(0); store.set(KEYS.dock, "0"); setAnim("bounce"); setTimeout(() => setAnim(""), 600); }
 
-  // Where the panel and bubble go: above the pet if it sits low, below if
-  // high; aligned to whichever side has room.
-  const petLeft = vw.w - safePos.right - px - 8;
-  const petTop = vw.h - safePos.bottom - petH;
-  // On a phone the chat is a sheet across the bottom, above the tab bar.
-  const pw = phone ? vw.w - 16 : Math.min(panel.w, vw.w - 16);
-  const ph = phone ? Math.round(Math.min(vw.h * 0.78, vw.h - 96)) : Math.min(panel.h, vw.h - 24);
-  const above = petTop > vw.h / 2;
-  const alignRight = petLeft + px / 2 > vw.w / 2;
-  const panelLeft = phone ? 8 : clamp(alignRight ? petLeft + px + 8 - pw : petLeft, 8, vw.w - pw - 8);
-  const panelTop = phone ? vw.h - ph - 72 : clamp(above ? petTop - ph - 10 : petTop + petH + 10, 8, vw.h - ph - 8);
-  const bubbleStyle: React.CSSProperties = above
-    ? { bottom: vw.h - petTop + 6, ...(alignRight ? { right: vw.w - (petLeft + px + 8) } : { left: petLeft }) }
-    : { top: petTop + petH + 6, ...(alignRight ? { right: vw.w - (petLeft + px + 8) } : { left: petLeft }) };
+  // The chat opens beside the rail (a sheet above the tab bar on a phone),
+  // and the bubble next to Papi.
+  const box = panelBox(phone, pet, vw, panel);
+  const pw = box.width, ph = box.height;
+  const bubbleStyle: React.CSSProperties = bubbleBox(phone, pet, vw);
 
-  // The panel is resized from its far corner (the one away from Papi), and
-  // remembers its size.
+  // The panel grows up and to the right of Papi, so it is resized from its
+  // top-right corner, and remembers its size.
   const resize = useRef<{ id: number; sx: number; sy: number; w0: number; h0: number } | null>(null);
   function onGripDown(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -374,7 +382,7 @@ export function Papi() {
     const r = resize.current;
     if (!r || r.id !== e.pointerId) return;
     const dx = e.clientX - r.sx, dy = e.clientY - r.sy;
-    const next = { w: clamp(r.w0 + (alignRight ? -dx : dx), 300, vw.w - 16), h: clamp(r.h0 + (above ? -dy : dy), 320, vw.h - 24) };
+    const next = { w: clamp(r.w0 + dx, 300, vw.w - 16), h: clamp(r.h0 - dy, 320, vw.h - 16) };
     setPanel(next);
     store.set(KEYS.panel, JSON.stringify(next));
   }
@@ -388,13 +396,13 @@ export function Papi() {
     <div className="print:hidden">
       {open && (
         <section ref={panelRef} aria-label="Chat with Papi"
-          style={{ left: panelLeft, top: panelTop, width: pw, height: ph }}
+          style={{ left: box.left, top: box.top, width: pw, height: ph }}
           className="fixed z-40 flex flex-col overflow-hidden rounded-[14px] border border-line bg-panel shadow-[0_12px_40px_-12px_rgba(0,0,0,0.28)]">
           {/* resize grip, on the corner away from Papi */}
           {!phone && <div aria-hidden onPointerDown={onGripDown} onPointerMove={onGripMove} onPointerUp={onGripUp}
-            style={{ [above ? "top" : "bottom"]: 0, [alignRight ? "left" : "right"]: 0, cursor: (above === alignRight) ? "nwse-resize" : "nesw-resize", touchAction: "none" }}
+            style={{ top: 0, right: 0, cursor: "nesw-resize", touchAction: "none" }}
             className="absolute z-10 h-4 w-4">
-            <svg viewBox="0 0 10 10" width="10" height="10" className="m-[3px] text-ink-3" style={{ transform: `rotate(${above ? (alignRight ? 180 : 270) : (alignRight ? 90 : 0)}deg)` }}>
+            <svg viewBox="0 0 10 10" width="10" height="10" className="m-[3px] text-ink-3" style={{ transform: "rotate(270deg)" }}>
               <path d="M9 3 L3 9 M9 6 L6 9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
             </svg>
           </div>}
@@ -448,25 +456,18 @@ export function Papi() {
 
           {view === "settings" && (
             <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-4 text-[13.5px]">
-              <div>
-                <p className="mb-2 text-[12px] font-semibold uppercase tracking-[0.05em] text-ink-2">Size</p>
-                <div className="flex gap-1.5" role="radiogroup" aria-label="Papi's size">
-                  {(Object.keys(SIZES) as SizeKey[]).map((k) => (
-                    <button key={k} type="button" role="radio" aria-checked={size === k} onClick={() => chooseSize(k)}
-                      className={`h-9 w-11 rounded-md border text-[13px] ${size === k ? "border-ink text-ink" : "border-line-2 text-ink-2 hover:border-ink-3"}`}>{k}</button>
-                  ))}
-                </div>
-              </div>
               <label className="flex items-center justify-between gap-3">
                 <span><span className="text-ink">Speak up on its own</span><br /><span className="text-[12px] text-ink-3">Reminders and one-liners every minute or two</span></span>
                 <input type="checkbox" checked={!quiet} onChange={toggleQuiet} className="h-4 w-4 accent-[var(--ink)]" />
               </label>
-              <div>
-                <p className="mb-1 text-ink">Where Papi sits</p>
-                <p className="mb-2 text-[12px] text-ink-3">Drag Papi anywhere, or focus it and use the arrow keys.</p>
-                <button type="button" onClick={resetSpot} className="rounded-md border border-line-2 px-3 py-1.5 text-[13px] text-ink hover:border-ink-3">Put back in the corner</button>
-              </div>
-              <p className="text-[12px] leading-relaxed text-ink-3">Things to try: rest your pointer on Papi, double-click it, or give it a (gentle) shake.</p>
+              {!phone && (
+                <div>
+                  <p className="mb-1 text-ink">Where Papi sits</p>
+                  <p className="mb-2 text-[12px] text-ink-3">Drag Papi up or down the left rail, or focus it and use the arrow keys.</p>
+                  <button type="button" onClick={resetSpot} className="rounded-md border border-line-2 px-3 py-1.5 text-[13px] text-ink hover:border-ink-3">Put back at the bottom</button>
+                </div>
+              )}
+              <p className="text-[12px] leading-relaxed text-ink-3">{phone ? "Things to try: tap Papi twice, quickly." : "Things to try: rest your pointer on Papi, double-click it, or give it a (gentle) shake."}</p>
             </div>
           )}
 
@@ -486,6 +487,7 @@ export function Papi() {
                 {messages.map((m, i) => (
                   <div key={i} className={m.role === "user" ? "max-w-[85%] self-end rounded-[12px] rounded-br-[4px] bg-ink px-3 py-2 text-[14px] leading-[1.45] text-panel" : "max-w-[92%] self-start whitespace-pre-line text-[14px] leading-[1.55] text-ink"}>
                     {m.role === "assistant" && m.sources?.length ? <Cited text={m.content} sources={m.sources} onOpen={openSource} /> : m.content}
+                    {isUngrounded(m) && <p className="mt-1.5 text-[12px] leading-snug text-ink-3">{UNGROUNDED_NOTE}</p>}
                     {m.role === "assistant" && m.sources && m.sources.length > 0 && (
                       <ol className="mt-2 flex flex-col gap-1 border-t border-line pt-2 text-[12.5px] leading-snug">
                         {m.sources.map((src) => (
@@ -529,21 +531,31 @@ export function Papi() {
         </button>
       )}
 
-      {/* On a phone the chat is a sheet over the page; the pet would sit on its Ask button. */}
-      {!(phone && open) && <button ref={petRef} type="button"
-        onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
-        onPointerCancel={() => { drag.current = null; setDragging(false); setTilt(0); }}
-        onPointerEnter={onEnter} onPointerLeave={onLeave} onKeyDown={onKey}
-        onClick={(e) => { if (e.detail === 0) toggleChat(); /* keyboard Enter/Space */ }}
-        aria-label={open ? "Close chat with Papi" : "Papi, your study buddy. Open chat. Arrow keys move it."}
-        aria-expanded={open}
-        style={{ right: safePos.right, bottom: safePos.bottom, transform: `rotate(${tilt}deg)`, touchAction: "none" }}
-        className={`papi fixed z-40 select-none rounded-full p-1 outline-none focus-visible:ring-2 focus-visible:ring-ink-3 ${dragging ? "cursor-grabbing" : "cursor-grab"} ${asleep || dragging ? "" : "papi-bob"}`}>
-        <span className={`block ${anim === "hop" ? "papi-hop" : anim === "spin" ? "papi-spin" : anim === "bounce" ? "papi-bounce" : ""}`}>
-          <PapiFace mood={open && mood === "sleep" ? "idle" : mood} size={px} gaze={dragging ? null : gaze} blush={blush} />
-        </span>
-        {asleep && !open && !dragging && <span aria-hidden className="papi-z absolute -top-2 right-0 text-[13px] font-semibold text-ink-3">z<span className="text-[10px]">z</span></span>}
-      </button>}
+      {/* Papi itself lives in the rail (or the tab bar), drawn into the spot
+          it keeps, so it is in the rail's tab order and never on the page. */}
+      {slot && createPortal(
+        <button ref={petRef} type="button"
+          onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+          onPointerCancel={() => { drag.current = null; setDragging(false); setTilt(0); }}
+          onPointerEnter={onEnter} onPointerLeave={onLeave} onKeyDown={onKey}
+          onClick={(e) => { if (e.detail === 0) toggleChat(); /* keyboard Enter/Space */ }}
+          title={phone ? undefined : "Ask Papi"}
+          aria-label={phone ? undefined : open ? "Close chat with Papi" : "Ask Papi, your study buddy. Arrow keys move it up and down."}
+          aria-expanded={open}
+          style={phone ? { touchAction: "manipulation" } : { bottom: safeBottom, transform: `translateX(-50%) rotate(${tilt}deg)`, touchAction: "none" }}
+          className={phone
+            ? `papi relative flex h-full w-full select-none flex-col items-center justify-center gap-0.5 text-[11px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ink-3 ${open ? "text-accent" : "text-ink-3"}`
+            : `papi absolute left-1/2 select-none rounded-full p-1 outline-none focus-visible:ring-2 focus-visible:ring-ink-3 ${dragging ? "cursor-grabbing" : "cursor-grab"}`}>
+          <span className={`relative block ${asleep || dragging ? "" : "papi-bob"}`}>
+            <span className={`block ${anim === "hop" ? "papi-hop" : anim === "spin" ? "papi-spin" : anim === "bounce" ? "papi-bounce" : ""}`}>
+              <PapiFace mood={open && mood === "sleep" ? "idle" : mood} size={px} gaze={dragging ? null : gaze} blush={blush} />
+            </span>
+            {asleep && !open && !dragging && <span aria-hidden className="papi-z absolute -top-2 -right-1 text-[13px] font-semibold text-ink-3">z<span className="text-[10px]">z</span></span>}
+          </span>
+          {phone && <span>{open ? "Close" : "Ask"}</span>}
+        </button>,
+        slot,
+      )}
     </div>
   );
 }
