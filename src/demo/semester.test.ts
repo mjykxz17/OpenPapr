@@ -5,7 +5,7 @@ import { items, taskChanges, tasks, users, weeklyPlans } from "../db/schema";
 import { semesterView } from "../lib/acad-week";
 import { htmlToText } from "../lib/html-text";
 import { ensureCanvasCovered, ensureQuizSeries, tidyTasks } from "../worker/tasks";
-import { seedSemester } from "./semester";
+import { isHoliday, seedSemester } from "./semester";
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -17,7 +17,10 @@ const nextMidnight = (t: number) => Math.floor((t + SGT) / D) * D - SGT + D;
 
 // "Friday 30 Oct" or "Fri 30 Oct", optionally followed by "(Week 11)".
 const DATE_RE = /\b(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b(?:\s*\(([^)]+)\))?/g;
-const WEEKDAY_RE = /\b(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun|Mon|Tue|Wed|Thu|Fri|Sat)\b/g;
+// Singapore's public holidays from August 2026 to August 2027, as days off
+// (a Sunday holiday moves to the Monday).
+const HOLIDAYS = ["2026-08-10", "2026-11-09", "2026-12-25", "2027-01-01", "2027-02-08", "2027-03-10", "2027-03-26", "2027-05-01", "2027-05-17", "2027-05-20", "2027-08-09"];
+const WEEKDAY_RE =/\b(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sun|Mon|Tue|Wed|Thu|Fri|Sat)\b/g;
 
 // Everything one seeding says, with what it is due at.
 function seeded(db: ReturnType<typeof createDb>, u: number) {
@@ -60,8 +63,37 @@ function check(db: ReturnType<typeof createDb>, u: number, now: number, labels: 
     const v = semesterView(x.dueAt!);
     if (v.phase !== "teaching" || v.week !== Number(m[1])) bad.push(`${at}: "${x.title}" is due in ${v.title}`);
   }
-  // A midterm is never in reading or exam week.
-  for (const t of ts.filter((x) => /midterm/i.test(x.title))) if (["reading", "exams"].includes(semesterView(t.dueAt!).phase)) bad.push(`${at}: a midterm in ${semesterView(t.dueAt!).title}`);
+  // A test sits where the calendar has room for it, on its own date and on
+  // the one the bell proposes: a midterm in teaching weeks up to Week 12,
+  // after the last lecture it covers; a final in the exam weeks; a practice
+  // test between semesters. None is on a public holiday.
+  for (const t of ts.filter((x) => x.kind === "exam")) {
+    labels.add(t.key);
+    const when = [t.dueAt!, ...cs.filter((c) => c.taskId === t.id).flatMap((c) => [c.oldDueAt, c.newDueAt])].filter((x): x is number => x !== null);
+    for (const d of when) {
+      const v = semesterView(d);
+      const where = `${at}: ${t.key} on ${sgtDay(d)} (${v.title})`;
+      if (HOLIDAYS.includes(sgtDay(d))) bad.push(`${where} is a public holiday`);
+      if (new Date(d + SGT).getUTCDay() % 6 === 0) bad.push(`${where} is a weekend`);
+      if (t.title === "Midterm") {
+        const lastLecture = Number(/Lectures 1 to (\d+)/.exec(t.why ?? "")?.[1]);
+        if (v.phase !== "teaching" || v.week! > 12 || !(v.week! > lastLecture)) bad.push(`${where}: a midterm on Lectures 1 to ${lastLecture}`);
+      } else if (t.title === "Final exam") {
+        if (v.phase !== "exams") bad.push(`${where}: a final out of the exam weeks`);
+      } else if (t.title === "Practice test") {
+        if (v.phase !== "vacation") bad.push(`${where}: a practice test in term`);
+      } else bad.push(`${where}: an exam called "${t.title}"`);
+    }
+  }
+  // The two modules' tests are on different days.
+  const testDays = ts.filter((x) => x.kind === "exam").map((x) => sgtDay(x.dueAt!));
+  if (new Set(testDays).size !== testDays.length) bad.push(`${at}: two tests on one day`);
+  // Other teams review v1.2 pull requests after they are opened and before
+  // the milestone is due.
+  const v12 = ts.find((x) => x.key === "cs2103t-v1-2")!;
+  const review = ts.find((x) => x.key === "cs2103t-v1-2-peer-review")!;
+  const opened = (JSON.parse(v12.stepsJson) as { text: string; doBy: string }[]).find((s) => s.text === "Open the pull request")!.doBy;
+  if (!(opened < sgtDay(review.dueAt!) && review.dueAt! < v12.dueAt!)) bad.push(`${at}: pull requests opened ${opened}, reviewed by ${sgtDay(review.dueAt!)}, due ${sgtDay(v12.dueAt!)}`);
   for (const text of texts) {
     if (/\b(today|tomorrow|yesterday|tonight)\b/i.test(text)) bad.push(`${at}: relative day in "${text}"`);
     if (/https?:\/\//.test(text)) bad.push(`${at}: a link in "${text}"`);
@@ -107,9 +139,11 @@ describe("demo semester", () => {
         bad.push(...check(db, u, now, labels));
       }
     }
-    expect(bad.slice(0, 20)).toEqual([]);
+    expect(bad.slice(0, 200)).toEqual([]);
     // It did meet every kind of week on the way.
     for (const l of ["Week 1", "Week 13", "recess week", "reading week", "exam week 1", "orientation week", "none"]) expect(labels).toContain(l);
+    // And every kind of test, in both modules that set one.
+    for (const code of ["cs3230", "cs2105"]) for (const k of ["midterm", "final-exam", "practice-test"]) expect(labels).toContain(`${code}-${k}`);
   }, 60_000);
 
   it("names this week's quiz for this week, and dates the midterm on the Friday it says", () => {
@@ -142,5 +176,31 @@ describe("demo semester", () => {
     const exam = db.select().from(tasks).where(eq(tasks.userId, u)).all().find((t) => t.key === "cs3230-final-exam")!;
     expect(exam).toMatchObject({ title: "Final exam", weightPct: 50 });
     expect(semesterView(exam.dueAt!).title).toBe("Exam week 1");
+  });
+
+  it("sets each test where the calendar has room for it", () => {
+    const testOn = (date: string, key: string) => {
+      const db = createDb(":memory:");
+      const u = db.insert(users).values({ name: "demo" }).returning().get().id;
+      seedSemester(db, u, Date.parse(`${date}T00:00:30+08:00`));
+      const t = db.select().from(tasks).where(eq(tasks.userId, u)).all().find((x) => x.key.startsWith(key) && x.kind === "exam")!;
+      return { title: t.title, day: sgtDay(t.dueAt!), week: semesterView(t.dueAt!).title };
+    };
+    // Week 1: the midterm waits until Week 7, after the six lectures it covers.
+    expect(testOn("2026-08-12", "cs3230")).toEqual({ title: "Midterm", day: "2026-10-02", week: "Week 7" });
+    expect(testOn("2026-08-12", "cs2105")).toMatchObject({ title: "Midterm", week: "Week 6" });
+    // Week 13: the final is in the exam weeks, not reading week.
+    expect(testOn("2026-11-12", "cs3230")).toMatchObject({ title: "Final exam", week: "Exam week 1" });
+    // Late in the exams it is the last weekday left, never the vacation.
+    expect(testOn("2026-11-28", "cs3230")).toEqual({ title: "Final exam", day: "2026-11-30", week: "Exam week 2" });
+    // Over the December break: a practice test, and not on New Year's Day.
+    const xmas = testOn("2026-12-24", "cs3230");
+    expect(xmas).toMatchObject({ title: "Practice test", week: "Vacation" });
+    expect(xmas.day).not.toBe("2027-01-01");
+  });
+
+  it("knows Singapore's public holidays", () => {
+    for (const d of HOLIDAYS) expect(isHoliday(d), d).toBe(true);
+    for (const d of ["2026-08-11", "2026-11-10", "2027-01-04", "2027-03-25", "2027-03-29"]) expect(isHoliday(d), d).toBe(false);
   });
 });

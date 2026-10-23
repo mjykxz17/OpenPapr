@@ -1,8 +1,8 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { components, courseHistory, files, guideQuizzes, items, moduleProfiles, modules, studyGuides, syncRuns, taskChanges, taskPlans, tasks, users, weeklyPlans } from "../db/schema";
 import { weekStartSgt } from "../db/profiles-repo";
-import { dailyCap } from "../enrich/tasks";
+import { balanceDays, dailyCap } from "../enrich/tasks";
 import { semesterView } from "../lib/acad-week";
 import { citedPagesByDeck } from "../lib/slide-citation";
 import { splitGuideIntoChapters } from "../lib/study-chapters";
@@ -48,6 +48,29 @@ const teachingWeek = (t: number) => { const v = semesterView(t); return v.phase 
 // " (Week 11)" after a date, or nothing between semesters.
 const inWeek = (t: number) => { const w = weekName(t); return w ? ` (${w})` : ""; };
 
+// Singapore's public holidays, so no test is set on one. The fixed ones and
+// Good Friday are worked out for any year; the lunar ones are listed for 2026
+// and 2027. A holiday on a Sunday is also off on the Monday.
+const LUNAR_HOLIDAYS = [
+  "2026-02-17", "2026-02-18", "2026-03-21", "2026-05-27", "2026-05-31", "2026-11-08",
+  "2027-02-06", "2027-02-07", "2027-03-10", "2027-05-17", "2027-05-20", "2027-10-28",
+];
+function goodFriday(y: number): string {
+  // Easter Sunday by the anonymous Gregorian algorithm, less two days.
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31), dayOfMonth = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(Date.UTC(y, month - 1, dayOfMonth) - 2 * D).toISOString().slice(0, 10);
+}
+const holidaysIn = (y: number) => [...LUNAR_HOLIDAYS, goodFriday(y), ...["01-01", "05-01", "08-09", "12-25"].map((md) => `${y}-${md}`)];
+export function isHoliday(date: string): boolean {
+  const before = new Date(Date.parse(`${date}T12:00:00Z`) - D);
+  const beforeDate = before.toISOString().slice(0, 10);
+  return holidaysIn(Number(date.slice(0, 4))).includes(date)
+    || (before.getUTCDay() === 0 && holidaysIn(Number(beforeDate.slice(0, 4))).includes(beforeDate));
+}
+
 export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { moduleIds: number[] } {
   // Midnight (Singapore) starting the day `n` days from now, and that day.
   const dayStart = (n: number) => Math.floor((now + SGT) / D) * D - SGT + n * D;
@@ -83,22 +106,72 @@ export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { 
   ]).run();
 
   // --- when things happen -----------------------------------------------------
-  // Weekly quizzes fall on weekdays; the CS3230 midterm is a Friday 7 to 13
-  // days out, and the CS2105 midterm a Wednesday evening, which an
-  // announcement has just pushed back a week. Near the end of term they are
-  // the finals instead.
+  // Weekly quizzes fall on weekdays. The tests keep to the academic calendar:
+  // a midterm only in Weeks 7 to 12 (CS2105's from Week 6), after the
+  // lectures it covers; a final only in the exam weeks; between semesters a
+  // practice test. None is on a public holiday. CS3230's is a Friday at least
+  // a week out where it can be. CS2105's is a Wednesday evening the student
+  // typed in, which an announcement has just moved, a week later where that
+  // still fits.
   const ps3Due = at(2);
   const pa2Due = at(6);
   const quizDue = at(nextOn(1, WEEKDAYS), 12, 0);
   const tutDue = at(nextOn(2, WEEKDAYS), 9, 0);
-  const v12Due = at(9);
-  const midDay = nextOn(7, [5]);
-  const midAt = at(midDay, 10, 0);
-  const netMidDay = nextOn(5, [3]);
-  const netMidSet = at(netMidDay, 18, 30);
-  const netMidNew = at(netMidDay + 7, 18, 30);
-  const reviewDay = nextOn(3, [0]);
+  // Other teams review the v1.2 pull requests on a Sunday, three days after
+  // they are opened and three days before the milestone is due.
+  const reviewDay = nextOn(6, [0]);
   const reviewDue = at(reviewDay);
+  const v12Day = reviewDay + 3;
+  const v12Due = at(v12Day);
+
+  const sv = semesterView(now);
+  const noon = (n: number) => dayStart(n) + 12 * H;
+  const termOf = (t: number) => { const v = semesterView(t); return `${v.year} ${v.sem}`; };
+  const thisTerm = sv.phase === "vacation" ? null : termOf(now);
+  const nextTerm = sv.phase === "vacation" ? termOf(sv.nextSemStart!) : null;
+  type Fits = (n: number) => boolean;
+  const teaching = (lo: number, hi: number, term: string | null): Fits => (n) => {
+    const v = semesterView(noon(n));
+    return termOf(noon(n)) === term && v.phase === "teaching" && v.week! >= lo && v.week! <= hi;
+  };
+  const exams = (term: string | null): Fits => (n) => termOf(noon(n)) === term && semesterView(noon(n)).phase === "exams";
+  const vacation: Fits = (n) => semesterView(noon(n)).phase === "vacation";
+  const free = (n: number, weekdays: number[], fits: Fits) => weekdays.includes(sgt(dayStart(n)).getUTCDay()) && !isHoliday(day(n)) && fits(n);
+  // The first free day `from` to `to` days out.
+  const first = (from: number, to: number, weekdays: number[], fits: Fits) => { for (let n = from; n <= to; n++) if (free(n, weekdays, fits)) return n; return null; };
+  // A free day and the one an announcement moves it to: a week later where
+  // that fits, else a week earlier or a day or two either side.
+  const moved = (from: number, to: number, weekdays: number[], fits: Fits) => {
+    for (let n = from; n <= to; n++) {
+      if (!free(n, weekdays, fits)) continue;
+      for (const k of [7, -7, 2, -2, 1, -1]) if (n + k >= 1 && free(n + k, WEEKDAYS, fits)) return { set: n, moved: n + k };
+    }
+    return null;
+  };
+  type Kind = "midterm" | "final" | "practice";
+  const on = (kind: Kind, n: number | null) => (n === null ? null : { kind, day: n });
+  const pair = (kind: Kind, p: { set: number; moved: number } | null) => (p === null ? null : { kind, ...p });
+  // The next test the calendar allows; just before a semester starts, that
+  // semester's midterm.
+  const algoTest = (
+    on("midterm", first(7, 120, [5], teaching(7, 12, thisTerm)))
+    ?? on("final", first(7, 60, WEEKDAYS, exams(thisTerm)) ?? first(1, 60, WEEKDAYS, exams(thisTerm)))
+    ?? on("practice", first(7, 60, WEEKDAYS, vacation) ?? first(1, 60, WEEKDAYS, vacation))
+    ?? on("midterm", first(1, 200, [5], teaching(7, 12, nextTerm)))
+  )!;
+  // Never on the same day as CS3230's.
+  const apart = (fits: Fits): Fits => (n) => n !== algoTest.day && fits(n);
+  const netTest = (
+    pair("midterm", moved(5, 120, [3], apart(teaching(6, 12, thisTerm))))
+    ?? pair("final", moved(5, 60, [3], apart(exams(thisTerm))) ?? moved(1, 60, WEEKDAYS, apart(exams(thisTerm))))
+    ?? pair("practice", moved(5, 60, [3], apart(vacation)) ?? moved(1, 60, WEEKDAYS, apart(vacation)))
+    ?? pair("midterm", moved(1, 200, [3], apart(teaching(6, 12, nextTerm))))
+  )!;
+  const midDay = algoTest.day;
+  const midAt = at(midDay, 10, 0);
+  const netMidDay = netTest.set;
+  const netMidSet = at(netMidDay, 18, 30);
+  const netMidNew = at(netTest.moved, 18, 30);
 
   // A weekly quiz is named for its week, and the week before's is done. Out
   // of term there is no week to name it by.
@@ -111,14 +184,17 @@ export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { 
   const tutTitle = tutNo(tutDue) ? `Tutorial ${tutNo(tutDue)} quiz` : "Tutorial quiz";
   const lastTutDue = tutDue - 7 * D;
   const lastTutNo = tutNo(lastTutDue);
-  // A test in reading or exam week is the final, not a midterm.
-  const isFinal = (t: number) => ["reading", "exams"].includes(semesterView(t).phase);
-  const algoExam = isFinal(midAt)
-    ? { title: "Final exam", covers: "every lecture", weight: 50 }
-    : { title: "Midterm", covers: "Lectures 1 to 6", weight: 20 };
-  const netExam = isFinal(netMidSet) || isFinal(netMidNew)
-    ? { title: "Final exam", covers: "every lecture", weight: 40 }
-    : { title: "Midterm", covers: "Lectures 1 to 5", weight: 25 };
+  const algoExam = {
+    midterm: { title: "Midterm", covers: "Lectures 1 to 6", weight: 20 },
+    final: { title: "Final exam", covers: "every lecture", weight: 50 },
+    practice: { title: "Practice test", covers: "Lectures 1 to 6", weight: null },
+  }[algoTest.kind];
+  const netExam = {
+    midterm: { title: "Midterm", covers: "Lectures 1 to 5", weight: 25, length: "one-hour test", ends: "7.30pm" },
+    final: { title: "Final exam", covers: "every lecture", weight: 40, length: "two-hour paper", ends: "8.30pm" },
+    practice: { title: "Practice test", covers: "Lectures 1 to 5", weight: null, length: "one-hour test", ends: "7.30pm" },
+  }[netTest.kind];
+  const ungraded = (w: number | null) => (w === null ? " It is not graded." : "");
 
   // --- what the courses posted ------------------------------------------------
   const it = (v: Partial<typeof items.$inferInsert> & { moduleId: number | null; type: typeof items.$inferInsert.type; sourceId: string; title: string }) =>
@@ -135,16 +211,16 @@ export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { 
   const v11 = it({ moduleId: se.id, type: "assignment", sourceId: "assignment:209", title: "Project milestone v1.1", dueAt: at(-2), submitted: true, firstSeenAt: now - 16 * D, sourceCreatedAt: now - 16 * D });
 
   const midAnn = it({ moduleId: algo.id, type: "announcement", sourceId: "announcement:31", title: `${algoExam.title} covers ${algoExam.covers}`, sender: "Dr Lim", sourceCreatedAt: now - 2 * D, firstSeenAt: now - 2 * D,
-    body: `<p>The ${algoExam.title.toLowerCase()} is on ${longDate(midAt)}${inWeek(midAt)} at 10am. It covers ${algoExam.covers}, including the master theorem and amortised analysis. One A4 cheat sheet allowed.</p>` });
+    body: `<p>The ${algoExam.title.toLowerCase()} is on ${longDate(midAt)}${inWeek(midAt)} at 10am. It covers ${algoExam.covers}, including the master theorem and amortised analysis. One A4 cheat sheet allowed.${ungraded(algoExam.weight)}</p>` });
   it({ moduleId: net.id, type: "announcement", sourceId: "announcement:41", title: "PA2 skeleton code updated", body: "<p>We fixed a bug in the checksum helper. Please pull the latest skeleton before you submit.</p>", sender: "Prof Wong", sourceCreatedAt: now - 6 * H, firstSeenAt: now - 6 * H });
   const venueAnn = it({ moduleId: net.id, type: "announcement", sourceId: "announcement:40", title: `${netExam.title} format`, sender: "Prof Wong", sourceCreatedAt: now - 20 * D, firstSeenAt: now - 20 * D,
-    body: `<p>The ${netExam.title.toLowerCase()} is a one-hour written test in the evening, on ${netExam.covers}. We will confirm the date once the venue is booked.</p>` });
-  const netMidQuote = `The ${netExam.title.toLowerCase()} will be on ${longDate(netMidNew)}${inWeek(netMidNew)}, 6.30pm to 7.30pm, in the MPSH.`;
+    body: `<p>The ${netExam.title.toLowerCase()} is a ${netExam.length} in the evening, on ${netExam.covers}.${ungraded(netExam.weight)} We will confirm the date once the venue is booked.</p>` });
+  const netMidQuote = `The ${netExam.title.toLowerCase()} will be on ${longDate(netMidNew)}${inWeek(netMidNew)}, 6.30pm to ${netExam.ends}, in the MPSH.`;
   const netMidAnn = it({ moduleId: net.id, type: "announcement", sourceId: "announcement:42", title: `${netExam.title} date confirmed`, sender: "Prof Wong", sourceCreatedAt: now - 8 * H, firstSeenAt: now - 8 * H,
     body: `<p>${netMidQuote} Bring your student card. It covers ${netExam.covers}.</p>` });
   const reviewQuote = `Leave at least three comments by ${longDate(reviewDue)}${inWeek(reviewDue)}, 23:59.`;
   const reviewAnn = it({ moduleId: se.id, type: "announcement", sourceId: "announcement:21", title: "Peer review for v1.2", sender: "Dr Nair", sourceCreatedAt: now - 3 * H, firstSeenAt: now - 3 * H,
-    body: `<p>Each team reviews another team's v1.2 pull requests on GitHub. ${reviewQuote} Your tutor will tell you which team you have.</p>` });
+    body: `<p>Each team reviews another team's v1.2 pull requests on GitHub. Open yours at least three days before the review deadline. ${reviewQuote} Your tutor will tell you which team you have.</p>` });
   it({ moduleId: se.id, type: "discussion", sourceId: "discussion:77", title: "Can we use Gradle 9?", sourceCreatedAt: now - 2 * D, firstSeenAt: now - 2 * D,
     body: "<p>Our team wants to upgrade the build. Is Gradle 9 allowed for the project?</p>",
     metaJson: JSON.stringify({ replies: 3, unread: 0, lastReplyAt: now - D, requireInitialPost: false, graded: false, assignmentId: null, posted: false, locked: false, staffReplies: 1, seenThread: true }) });
@@ -180,16 +256,18 @@ export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { 
     [step("a", "Pull the updated skeleton", 10, 0), step("b", "Implement the sender window", 90, 2), step("c", "Handle timeouts and retransmission", 90, 3), step("d", "Test against the lossy channel script", 60, 5)]);
   task({ moduleId: algo.id, key: keyOf("CS3230", algoExam.title), title: algoExam.title, kind: "exam", dueAt: midAt, weightPct: algoExam.weight, why: `Covers ${algoExam.covers}; one A4 cheat sheet`,
     sourcesJson: JSON.stringify([{ kind: "announcement", label: midAnn.title, itemId: midAnn.id }, { kind: "weightage", label: "Assessment weightage" }]) },
-    [step("a", "Make the cheat sheet: recurrences and bounds", 60, midDay - 5), step("b", "Past paper, timed", 90, midDay - 3), step("c", "Review mistakes on amortised analysis", 45, midDay - 1)]);
+    // A test only a day or two out keeps just the steps there is still time for.
+    ([["a", "Make the cheat sheet: recurrences and bounds", 60, midDay - 5], ["b", "Past paper, timed", 90, midDay - 3], ["c", "Review mistakes on amortised analysis", 45, midDay - 1]] as const)
+      .filter(([, , , n]) => n >= 0).map(([id, text, minutes, n]) => step(id, text, minutes, n)));
   task({ moduleId: stats.id, key: keyOf("ST2334", tutTitle), title: tutTitle, kind: "quiz", dueAt: tutDue, why: "Conditional probability and Bayes' theorem",
     sourcesJson: JSON.stringify([canvasSrc(tq)]) },
     [step("a", "Do the tutorial questions on Bayes' theorem", 40, nextOn(2, WEEKDAYS) - 1)]);
   task({ moduleId: se.id, key: "cs2103t-v1-2", title: "Project milestone v1.2", kind: "project", dueAt: v12Due, weightPct: 5, why: "Your feature merged, with tests",
     sourcesJson: JSON.stringify([canvasSrc(v12)]) },
-    [step("a", "Write tests for your feature", 60, 4), step("b", "Open the pull request", 30, 6), step("c", "Fix review comments and merge", 45, 8)]);
+    [step("a", "Write tests for your feature", 60, reviewDay - 5), step("b", "Open the pull request", 30, reviewDay - 3), step("c", "Fix review comments and merge", 45, v12Day - 1)]);
   // The student typed in this date themselves; the bell now asks about the
   // announced one (see below).
-  const netMid = task({ moduleId: net.id, key: keyOf("CS2105", netExam.title), title: netExam.title, kind: "exam", dueAt: netMidSet, dueLocked: true, dueLockedAt: now - 6 * D, touchedAt: now - 6 * D, weightPct: netExam.weight, why: `Covers ${netExam.covers}; ${netExam.weight}% of the grade`,
+  const netMid = task({ moduleId: net.id, key: keyOf("CS2105", netExam.title), title: netExam.title, kind: "exam", dueAt: netMidSet, dueLocked: true, dueLockedAt: now - 6 * D, touchedAt: now - 6 * D, weightPct: netExam.weight, why: `Covers ${netExam.covers}; ${netExam.weight === null ? "not graded" : `${netExam.weight}% of the grade`}`,
     sourcesJson: JSON.stringify([{ kind: "announcement", label: venueAnn.title, itemId: venueAnn.id }, { kind: "weightage", label: "Assessment weightage" }]) },
     [step("a", "Trace Go-Back-N and Selective Repeat by hand", 45, netMidDay - 1)]);
   // Found in this afternoon's announcement: in the bell as new work.
@@ -201,6 +279,16 @@ export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { 
   if (lastQ) task({ moduleId: se.id, key: keyOf("CS2103T", lastQ.title), title: lastQ.title, kind: "quiz", dueAt: lastQ.dueAt, sourcesJson: JSON.stringify([canvasSrc(lastQ)]) }, [step("a", "Review the lecture on testing", 20, -8, true)], "done");
   task({ moduleId: se.id, key: "cs2103t-v1-1", title: "Project milestone v1.1", kind: "project", dueAt: v11.dueAt, sourcesJson: JSON.stringify([canvasSrc(v11)]) }, [step("a", "Merge feature branches", 40, -3, true)], "done");
   if (lastTq) task({ moduleId: stats.id, key: keyOf("ST2334", lastTq.title), title: lastTq.title, kind: "quiz", dueAt: lastTq.dueAt, sourcesJson: JSON.stringify([canvasSrc(lastTq)]) }, [step("a", "Revise counting and probability rules", 30, -8, true)], "done");
+
+  // With a test a day or two out, today can still be over the cap, since
+  // its steps have nowhere earlier to go. Move what has the most slack on,
+  // the way the planner itself would, so it has nothing left to move.
+  const open = db.select().from(tasks).where(and(eq(tasks.userId, u), eq(tasks.status, "open"))).all()
+    .map((t) => ({ id: t.id, key: t.key, dueAt: t.dueAt, steps: JSON.parse(t.stepsJson) as ReturnType<typeof step>[] }));
+  for (const key of balanceDays(open, day(0), dailyCap)) {
+    const t = open.find((x) => x.key === key)!;
+    db.update(tasks).set({ stepsJson: JSON.stringify(t.steps) }).where(eq(tasks.id, t.id)).run();
+  }
 
   // --- the bell ---------------------------------------------------------------------
   db.insert(taskChanges).values([
@@ -271,7 +359,9 @@ export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { 
     { userId: u, source: "enrich", startedAt: now - 10 * 60_000, finishedAt: now - 9 * 60_000, ok: true },
   ]).run();
   db.update(users).set({
-    lastSyncStartedAt: syncStart, canvasVerifiedAt: syncEnd, canvasTokenFailedAt: null, syncRequestedAt: null,
+    // No token, so nothing for the Account page to call verified: the
+    // "synced" the module headers show comes from the sync run alone.
+    lastSyncStartedAt: syncStart, canvasVerifiedAt: null, canvasTokenFailedAt: null, syncRequestedAt: null,
     profileJson: JSON.stringify(DEMO_USER_PROFILE), profileAt: now - D, profileError: null, profileRequestedAt: null, courseHistoryAt: now - D,
   }).where(eq(users.id, u)).run();
 
