@@ -10,8 +10,14 @@ describe("guideEntry", () => {
   });
   it("says the guide writes itself when slides arrive, when nothing is written yet", () => {
     expect(guideEntry(none)).toEqual({
-      label: "Guide: writes itself when slides arrive", primary: false, note: "No guide yet · writes itself when slides arrive",
+      label: "Guide: writes itself when slides arrive", primary: false, note: "No guide yet · writes itself when slides arrive", tile: "Writes itself as slides arrive",
     });
+  });
+  // The module page shows the button and the Study guide tile side by side.
+  it("gives the tile the same answer as the button", () => {
+    expect(guideEntry({ ...none, demo: true }).tile).toBe("Not in the demo");
+    expect(guideEntry({ ...none, canWrite: false }).tile).toBe("Needs AI turned on in Account");
+    expect(guideEntry({ ...none, writing: "Graphs" }).tile).toBe("Writing “Graphs”");
   });
   it("is honest about work in progress and about a missing AI model", () => {
     expect(guideEntry({ ...none, writing: "Graphs" }).note).toBe("No guide yet · writing “Graphs”");

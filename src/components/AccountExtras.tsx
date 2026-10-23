@@ -102,8 +102,9 @@ function CalendarFeed({ url: initial }: { url: string | null }) {
 }
 
 // --- your data -----------------------------------------------------------------
-// The demo can download what it holds but not delete itself: it is shared,
-// and the server refuses.
+// The demo gets neither: it is shared, so a download would hand out what
+// other visitors typed and deleting it would take it from everyone, and the
+// server refuses both. It says so instead of offering them.
 export function DataSection({ locked = false }: { locked?: boolean }) {
   const [asking, setAsking] = useState(false);
   const [typed, setTyped] = useState("");
@@ -126,6 +127,17 @@ export function DataSection({ locked = false }: { locked?: boolean }) {
     setBusy(false);
   }
 
+  if (locked) {
+    return (
+      <Card id="acct-data" title="Your data">
+        <p className="max-w-2xl text-[14px] leading-relaxed text-ink-2">
+          In an account of your own, everything OpenPapr keeps about you — modules, tasks, guides, notes, chats with Papi — is yours to download as a file or to delete.
+          The shared demo holds nothing of yours, so there is nothing to download, and it can&apos;t be deleted: it goes back to its sample data every night at midnight.
+        </p>
+      </Card>
+    );
+  }
+
   return (
     <Card id="acct-data" title="Your data">
       <p className="max-w-2xl text-[14px] leading-relaxed text-ink-2">
@@ -134,9 +146,8 @@ export function DataSection({ locked = false }: { locked?: boolean }) {
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         <a href="/api/account/export" className={`${secondary} inline-flex items-center no-underline`}>Download my data</a>
-        {!asking && !locked && <button type="button" onClick={() => setAsking(true)} className={`${secondary} text-danger hover:border-danger`}>Delete my account</button>}
+        {!asking && <button type="button" onClick={() => setAsking(true)} className={`${secondary} text-danger hover:border-danger`}>Delete my account</button>}
       </div>
-      {locked && <p className="mt-3 text-[13px] text-ink-3">The shared demo can&apos;t be deleted — it goes back to its sample data every night at midnight.</p>}
       {asking && (
         <div className="mt-4 max-w-md rounded-md border border-danger/40 bg-danger/[0.04] p-4">
           <p className="text-[14px] text-ink">This deletes your account and everything in it, for good. Type <span className="font-mono font-semibold">DELETE</span> to confirm.</p>

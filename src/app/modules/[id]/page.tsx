@@ -192,7 +192,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
           </>
         ) : guide ? (
           <><span className={big}>Ready</span><span className={small}>updated {shortDate(guide.generatedAt)}</span></>
-        ) : <span className={`${small} mt-2`}>Writes itself as slides arrive</span>}
+        ) : <span className={`${small} mt-2`}>{entry.tile}</span>}
       </Link>
       {isCanvas ? (
         <a href="#updates" className={tile}>
@@ -336,7 +336,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
       </section>
     ),
     materials: <Materials files={files} moduleId={mod.id} />,
-    about: <ModuleProfileCard moduleId={mod.id} {...profileView} focus={focus} hasModel={canGenerateGuides(db, userId)} />,
+    about: <ModuleProfileCard moduleId={mod.id} {...profileView} focus={focus} hasModel={canGenerateGuides(db, userId)} locked={Boolean(me?.isDemo)} />,
   };
 
   return (

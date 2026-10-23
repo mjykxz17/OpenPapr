@@ -12,8 +12,8 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  // The Account page reaches this through a plain link, so the refusal opens
-  // in its own tab: a sentence reads better there than a JSON error.
+  // The Account page doesn't offer the demo this link, but the address can
+  // still be opened by hand, and a sentence reads better there than JSON.
   if (isDemoUser(userId)) {
     return new Response(DEMO_NO_EXPORT, { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" } });
   }
