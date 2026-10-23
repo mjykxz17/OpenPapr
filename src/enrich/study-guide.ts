@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { chatJson, chatText, type CompatConfig } from "./openai-compat";
 import { repairMermaidBlocks } from "../lib/mermaid-fix";
+import { decodeDeck } from "../lib/slide-citation";
 
 // Generates a study-guide chapter from one lecture deck.
 //
@@ -45,6 +46,54 @@ export function labelPages(deckText: string): string {
 // are identified here and named in the prompt.
 export function figureSlides(deckText: string, maxChars = 180): number[] {
   return slidePages(deckText).filter((p) => p.text.length > 0 && p.text.length <= maxChars).map((p) => p.page);
+}
+
+// The slides a section draws on, from the outline's "4-11" (or "4, 6, 9–12",
+// "slides 4 to 11"), inside the deck. Empty when nothing usable was given.
+export function parseSlideRange(slides: string, pageCount: number): number[] {
+  const out = new Set<number>();
+  const max = pageCount > 0 ? pageCount : Infinity;
+  for (const m of slides.matchAll(/(\d+)(?:\s*(?:-|–|—|to)\s*(\d+))?/g)) {
+    const a = Number(m[1]), b = m[2] ? Number(m[2]) : a;
+    const [lo, hi] = a <= b ? [a, b] : [b, a];
+    if (hi - lo > 400) continue;
+    for (let n = Math.max(1, lo); n <= Math.min(hi, max); n++) out.add(n);
+  }
+  return [...out].sort((x, y) => x - y);
+}
+
+const SECTION_CONTEXT = 2;          // slides either side of a section's own
+const SECTION_CHARS = 40_000;       // at most this much deck text per section
+const OUTLINE_CHARS = 30_000;       // and per outline
+
+// What one section is shown: its own slides plus a couple either side, so a
+// 300-slide deck is not sent eight times over. Without a usable range, the
+// whole deck, clipped. Neighbours go first when it is still too long.
+export function sectionText(deckText: string, slides: string, pageCount: number, budget = SECTION_CHARS): { text: string; pages: number[] } {
+  const pages = slidePages(deckText);
+  const own = parseSlideRange(slides, pageCount);
+  if (!pages.length) return { text: deckText.slice(0, budget), pages: [] };
+  if (!own.length) return { text: clipPages(pages, budget), pages: pages.map((p) => p.page) };
+  const wanted = new Set<number>();
+  for (const n of own) for (let k = n - SECTION_CONTEXT; k <= n + SECTION_CONTEXT; k++) wanted.add(k);
+  let shown = pages.filter((p) => wanted.has(p.page));
+  if (size(shown) > budget) shown = pages.filter((p) => own.includes(p.page));
+  if (!shown.length) return { text: clipPages(pages, budget), pages: pages.map((p) => p.page) };
+  return { text: clipPages(shown, budget), pages: shown.map((p) => p.page) };
+}
+
+// The outline only needs the deck's shape: every slide, each cut short once
+// the whole would not fit.
+export function outlineText(deckText: string, budget = OUTLINE_CHARS): string {
+  const pages = slidePages(deckText);
+  return pages.length ? clipPages(pages, budget) : deckText.slice(0, budget);
+}
+
+const size = (pages: { page: number; text: string }[]) => pages.reduce((n, p) => n + p.text.length + 12, 0);
+
+function clipPages(pages: { page: number; text: string }[], budget: number): string {
+  const each = size(pages) <= budget ? Infinity : Math.max(80, Math.floor(budget / pages.length) - 12);
+  return pages.map((p) => `[Slide ${p.page}]\n${p.text.length > each ? `${p.text.slice(0, each).trimEnd()}…` : p.text}`).join("\n\n");
 }
 
 const OUTLINE_SYSTEM = `You are planning one chapter of a university study guide, from the text of a single lecture deck.
@@ -125,7 +174,7 @@ export function createGuideGenerator(cfg: CompatConfig, reader: string | null = 
     async outline(deckName: string, deckText: string, pageCount: number): Promise<GuideOutline | null> {
       const raw = await chatJson(
         cfg, fetch, OUTLINE_SYSTEM,
-        `Deck: ${deckName} (${pageCount} slides)\n\n=== DECK TEXT ===\n${labelPages(deckText)}`,
+        `Deck: ${deckName} (${pageCount} slides)\n\n=== DECK TEXT ===\n${outlineText(deckText)}`,
         4000,
       );
       const parsed = Outline.safeParse(raw);
@@ -141,17 +190,20 @@ export function createGuideGenerator(cfg: CompatConfig, reader: string | null = 
       slides: string,
       figures: number[] = [],
     ): Promise<string> {
+      const shown = sectionText(deckText, slides, pageCount);
+      const near = shown.pages.length ? figures.filter((n) => shown.pages.includes(n)) : figures;
+      const whole = shown.pages.length === 0 || shown.pages.length === slidePages(deckText).length;
       const body = await withRetry(() => chatText(
         cfg,
-        styleSystem(deckName, pageCount, figures, reader),
+        styleSystem(deckName, pageCount, near, reader),
         `Write this section in full depth.
 
 Heading (use it verbatim as your first line): ### ${heading}
 What it must teach: ${covers}
-It draws mainly on slides ${slides}, but read the whole deck for context.
+It draws mainly on slides ${slides}. ${whole ? "Read the whole deck for context." : "Below are those slides and a couple either side for context; cite only slides shown here."}
 
-=== DECK TEXT (${deckName}, ${pageCount} slides) ===
-${labelPages(deckText)}`,
+=== DECK TEXT (${deckName}, ${pageCount} slides${whole ? "" : `, ${shown.pages.length} of them shown`}) ===
+${shown.text}`,
         { maxTokens: 8000, temperature: 0.3 },
       ));
       return repairMermaidBlocks(normalizeFences(body.trim()));
@@ -170,7 +222,7 @@ Heading (use it verbatim as your first line): ### ${heading}
 For each task or question on the sheet: say in one line what it asks, name the idea from this topic it exercises, and give a short approach — where to start, what to watch out for. Do NOT give final answers or full solutions. Skip "Explain like I'm a beginner" here; keep it brisk. Cite the sheet's pages as [p. N](slide:${sheetName}#N).
 
 === SHEET TEXT (${sheetName}, ${pageCount} pages) ===
-${labelPages(sheetText)}`,
+${outlineText(sheetText, SECTION_CHARS)}`,
         { maxTokens: 5000, temperature: 0.3 },
       ));
       return repairMermaidBlocks(normalizeFences(body.trim()));
@@ -212,6 +264,73 @@ export function validateChapter(markdown: string, deckName: string, pageCount: n
   if (wrongDeck.length) problems.push(`citations to unknown deck(s): ${[...new Set(wrongDeck)].join(", ")}`);
 
   return problems;
+}
+
+// --- citations ---------------------------------------------------------------
+// The model's citations are checked against the decks it was given before a
+// chapter is stored: a near-miss deck name ("L1 asymptotics.pdf" for
+// L1-asymptotics) is repaired, and a citation to a deck that is not there or
+// a slide past the end is taken out. Every remaining link's text is then
+// written from where it points, so "slide 18" can never open slide 81.
+
+// "L1" from "L1-asymptotics", "U3" from "U3-memerr1", "Lect 1" from
+// "IFS4103-Lect-1-v1": the short name a lecture goes by. The module code and
+// version marks are skipped; with nothing better, the name itself.
+export function deckShort(deck: string): string {
+  const stem = decodeDeck(deck).replace(/\.(pdf|pptx?|docx?)$/i, "");
+  const tokens = stem.split(/[-_\s.]+/).filter(Boolean);
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i]!;
+    if (/^[a-z]{2,4}\d{4}[a-z]{0,2}$/i.test(t) || /^v\d+$/i.test(t)) continue;
+    if (/^[a-z]{1,6}\d{1,3}[a-z]?$/i.test(t)) return t;
+    if (/^[a-z]{2,10}$/i.test(t) && /^\d{1,3}[a-z]?$/i.test(tokens[i + 1] ?? "")) return `${t} ${tokens[i + 1]}`;
+  }
+  return stem.length <= 18 ? stem : `${stem.slice(0, 17)}…`;
+}
+
+const CITE_RE = /(!?)\[([^\]\n]*)\]\((slide(?:-img)?):([^)#\n]+)#(\d+)\)/g;
+const deckKey = (d: string) => decodeDeck(d).toLowerCase().replace(/\.(pdf|pptx?|docx?)$/, "").replace(/[\s_-]+/g, "");
+
+// decks: each deck as it is written in a citation (citeDeck form), with its
+// page count (0 when unknown, which skips the range check).
+export function cleanCitations(markdown: string, decks: Map<string, number>): { markdown: string; repaired: number; removed: number } {
+  const known = [...decks.keys()];
+  const resolve = (raw: string): string | null => {
+    if (decks.has(raw)) return raw;
+    const k = deckKey(raw);
+    const same = known.filter((d) => deckKey(d) === k);
+    if (same.length === 1) return same[0]!;
+    const near = k.length >= 3 ? known.filter((d) => deckKey(d).includes(k) || k.includes(deckKey(d))) : [];
+    return near.length === 1 ? near[0]! : null;
+  };
+  // Two decks that would both be "L1" are named in full.
+  const shorts = new Map(known.map((d) => [d, deckShort(d)]));
+  const clash = (d: string) => known.some((o) => o !== d && shorts.get(o)!.toLowerCase() === shorts.get(d)!.toLowerCase());
+  const label = (d: string, page: number) => `${clash(d) ? decodeDeck(d).replace(/\[/g, "(").replace(/\]/g, ")") : shorts.get(d)} p${page}`;
+
+  let repaired = 0, removed = 0, inFence = false, gap = false;
+  const lines = markdown.split("\n").flatMap((line, i, all) => {
+    // A line that was only a bad figure leaves one blank line, not two.
+    if (gap) { gap = false; if (line.trim() === "" && (all[i - 2] ?? "").trim() === "") return []; }
+    if (/^\s*```/.test(line)) { inFence = !inFence; return [line]; }
+    if (inFence || !line.includes("slide")) return [line];
+    let dropped = false;
+    const out = line.replace(CITE_RE, (_m, bang: string, text: string, scheme: string, rawDeck: string, n: string) => {
+      const deck = resolve(rawDeck.trim());
+      const page = Number(n);
+      const pages = deck ? decks.get(deck)! : 0;
+      if (!deck || page < 1 || (pages > 0 && page > pages)) { removed++; dropped = true; return ""; }
+      if (deck !== rawDeck) repaired++;
+      return bang ? `![${text}](${scheme}:${deck}#${page})` : `[${label(deck, page)}](${scheme}:${deck}#${page})`;
+    });
+    if (!dropped) return [out];
+    // What taking a link out leaves behind: "(see )", a space before a full stop.
+    const tidy = out.replace(/\(\s*(?:see|cf\.?)?\s*[,;]?\s*\)/gi, "").replace(/[ \t]+([.,;:])/g, "$1").replace(/[,;]\s*(?=[.;:)])/g, "").replace(/(\S)[ \t]{2,}/g, "$1 ").trimEnd();
+    if (tidy.trim()) return [tidy];
+    gap = true;
+    return [];
+  });
+  return { markdown: lines.join("\n"), repaired, removed };
 }
 
 // Lecturers commonly publish a colour deck and a printable one that differ
