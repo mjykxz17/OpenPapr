@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDb } from "../db/client";
 import { syncRuns, users } from "../db/schema";
-import { BackoffSkipError, computeBackoffMs, createGuard, runUserSync } from "./sync";
+import { BackoffSkipError, computeBackoffMs, createGuard, recordRun, runUserSync } from "./sync";
 
 const setup = () => {
   const db = createDb(":memory:");
@@ -16,6 +16,21 @@ describe("runUserSync", () => {
     const runs = db.select().from(syncRuns).all();
     expect(runs.map((r) => [r.source, r.ok])).toEqual([["canvas", true], ["graph", true], ["enrich", true]]);
     expect(runs.every((r) => r.finishedAt === 5)).toBe(true);
+  });
+  it("leaves enrichment out when the worker runs it in its own lane", async () => {
+    const db = setup();
+    await runUserSync({ db, now: () => 5, canvasSync: async () => {}, mailSync: async () => {} }, 1);
+    expect(db.select().from(syncRuns).all().map((r) => r.source)).toEqual(["canvas", "graph"]);
+  });
+  it("recordRun shows a job running until it ends, and records a failure instead of throwing", async () => {
+    const db = setup();
+    let release: () => void = () => {};
+    const running = recordRun({ db, now: () => 7 }, 1, "enrich", () => new Promise<void>((r) => { release = r; }));
+    expect(db.select().from(syncRuns).get()!.finishedAt).toBeNull();
+    release();
+    expect(await running).toBe(true);
+    expect(await recordRun({ db, now: () => 8 }, 1, "enrich", async () => { throw new Error("model down"); })).toBe(false);
+    expect(db.select().from(syncRuns).all().map((r) => [r.ok, r.error])).toEqual([[true, null], [false, "Error: model down"]]);
   });
   it("isolates failures: canvas throwing still runs graph and enrich", async () => {
     const db = setup();
