@@ -1,15 +1,23 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { petChats } from "@/db/schema";
-import type { SourceRef } from "./ask";
+import { sourceLabel, type SourceRef } from "./ask";
 
-export type PetMsg = { role: "user" | "assistant"; content: string; at: number; sources?: SourceRef[] };
+// `grounded` (answers only): whether the answer cites the student's material.
+export type PetMsg = { role: "user" | "assistant"; content: string; at: number; sources?: SourceRef[]; grounded?: boolean };
 export type PetChatSummary = { id: number; title: string; updatedAt: number; count: number; preview: string };
 
 const MAX_CHATS = 50;
 const MAX_MESSAGES = 200;
 
-const parse = (json: string): PetMsg[] => { try { const v = JSON.parse(json); return Array.isArray(v) ? v : []; } catch { return []; } };
+// Answers saved before `grounded` and `label` existed get them here, so every
+// message the chat reads back has both.
+const filled = (m: PetMsg): PetMsg => m.role !== "assistant" ? m : {
+  ...m,
+  ...(m.sources ? { sources: m.sources.map((s) => (s.label ? s : { ...s, label: sourceLabel(s.kind) })) } : {}),
+  grounded: m.grounded ?? !!m.sources?.length,
+};
+const parse = (json: string): PetMsg[] => { try { const v = JSON.parse(json); return Array.isArray(v) ? (v as PetMsg[]).map(filled) : []; } catch { return []; } };
 const titleFrom = (q: string) => { const t = q.replace(/\s+/g, " ").trim(); return t.length > 60 ? `${t.slice(0, 57).trimEnd()}…` : t || "New chat"; };
 
 export function listChats(db: Db, userId: number): PetChatSummary[] {
@@ -27,9 +35,12 @@ export function getChat(db: Db, userId: number, id: number): { id: number; title
 
 // Adds a question and its answer, creating the conversation on its first
 // question. Old conversations beyond the cap are dropped, oldest first.
-export function appendToChat(db: Db, userId: number, id: number | null, question: string, answer: string, now: number, sources?: SourceRef[]): { id: number; title: string } {
+export function appendToChat(db: Db, userId: number, id: number | null, question: string, answer: string, now: number, sources?: SourceRef[], grounded?: boolean): { id: number; title: string } {
   const existing = id !== null ? getChat(db, userId, id) : null;
-  const add: PetMsg[] = [{ role: "user", content: question, at: now }, { role: "assistant", content: answer, at: now, ...(sources?.length ? { sources } : {}) }];
+  const add: PetMsg[] = [
+    { role: "user", content: question, at: now },
+    { role: "assistant", content: answer, at: now, ...(sources?.length ? { sources } : {}), ...(grounded !== undefined ? { grounded } : {}) },
+  ];
   if (existing) {
     const messages = [...existing.messages, ...add].slice(-MAX_MESSAGES);
     db.update(petChats).set({ messagesJson: JSON.stringify(messages), updatedAt: now }).where(eq(petChats.id, existing.id)).run();

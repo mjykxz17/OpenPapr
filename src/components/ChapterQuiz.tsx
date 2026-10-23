@@ -3,18 +3,59 @@
 import { useEffect, useRef, useState } from "react";
 import { useSlidePanel } from "@/components/slide-panel-context";
 
-type Q = { q: string; options: string[]; answer: number; why: string; slide: { deck: string; page: number } | null };
+type Q = { q: string; options: string[]; answer: number; why: string; slide: { deck: string; page: number } | null; missedBefore?: boolean };
+type Saved = { question: number; chosen: number; correct: boolean };
+type QuizSet = { questions: Q[]; set: string; answers: Saved[] };
+
+// Which questions to flag "Missed last time", and the order to show them in,
+// flagged first: answered wrong in this set, or carried over from the last set
+// by "New questions" and not answered yet.
+export function missedFirst(d: Pick<QuizSet, "questions" | "answers">): { missed: number[]; order: number[] } {
+  const answered = new Map(d.answers.filter((a) => a.question < d.questions.length).map((a) => [a.question, a.correct]));
+  const all = d.questions.map((_, i) => i);
+  const missed = all.filter((i) => answered.get(i) === false || (!!d.questions[i]!.missedBefore && !answered.has(i)));
+  return { missed, order: [...missed, ...all.filter((i) => !missed.includes(i))] };
+}
+
+// Takes back an answer that could not be saved, unless another was picked since.
+export const unpick = (p: Record<number, number>, i: number, j: number): Record<number, number> =>
+  p[i] === j ? Object.fromEntries(Object.entries(p).filter(([k]) => Number(k) !== i)) : p;
 
 // "Test yourself" at the end of a chapter: a handful of multiple-choice
 // questions written from this chapter, each with why and the slide it is on.
-// `start` changes when the toolbar's Quiz button is pressed.
+// Answers are saved as they are given, so coming back shows them and the
+// score; the ones missed last time come first. `start` changes when the
+// toolbar's Quiz button is pressed.
 export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: number; chapter: number; label: string; start: number }) {
   const [qs, setQs] = useState<Q[] | null>(null);
+  const [set, setSet] = useState("");
   const [picked, setPicked] = useState<Record<number, number>>({});
+  const [order, setOrder] = useState<number[]>([]);           // missed-last-time first
+  const [missedBefore, setMissedBefore] = useState<number[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const box = useRef<HTMLElement | null>(null);
   const panel = useSlidePanel();
+
+  function show(d: QuizSet) {
+    const { missed, order: o } = missedFirst(d);
+    setQs(d.questions);
+    setSet(d.set);
+    setPicked(Object.fromEntries(d.answers.filter((a) => a.question < d.questions.length).map((a) => [a.question, a.chosen])));
+    setMissedBefore(missed);
+    setOrder(o);
+  }
+
+  // Coming back to a chapter: its saved questions, if the student answered
+  // any or some are back from last time. Never makes new ones.
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/modules/${moduleId}/guide/quiz?chapter=${chapter}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: Partial<QuizSet> | null) => { if (live && d?.questions && d.set && (d.answers?.length || d.questions.some((q) => q.missedBefore))) show({ questions: d.questions, set: d.set, answers: d.answers ?? [] }); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [moduleId, chapter]);
 
   async function load(fresh = false) {
     setBusy(true);
@@ -22,10 +63,28 @@ export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: num
     const r = await fetch(`/api/modules/${moduleId}/guide/quiz`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter, fresh }),
     }).catch(() => null);
-    const d = (await r?.json().catch(() => null)) as { questions?: Q[]; error?: string } | null;
-    if (r?.ok && d?.questions) { setQs(d.questions); setPicked({}); }
+    const d = (await r?.json().catch(() => null)) as (Partial<QuizSet> & { error?: string }) | null;
+    if (r?.ok && d?.questions && d.set) show({ questions: d.questions, set: d.set, answers: d.answers ?? [] });
     else setError(d?.error ?? "Couldn't make questions just now. Try again.");
     setBusy(false);
+  }
+
+  // Shows the answer straight away; if it can't be saved, it is taken back
+  // so the student can answer again rather than think it was kept.
+  function choose(i: number, j: number) {
+    setError(null);
+    setPicked((p) => ({ ...p, [i]: j }));
+    const undo = (message: string) => {
+      setPicked((p) => unpick(p, i, j));
+      setError(message);
+    };
+    void fetch(`/api/modules/${moduleId}/guide/quiz/answer`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter, set, question: i, chosen: j }),
+    }).then(async (r) => {
+      if (r.ok) return;
+      const d = (await r.json().catch(() => null)) as { error?: string } | null;
+      undo(d?.error ?? "Couldn't save that answer. Try again.");
+    }).catch(() => undo("Couldn't save that answer — you seem to be offline."));
   }
 
   // Only a press made while this chapter is showing starts it.
@@ -40,6 +99,12 @@ export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: num
 
   const answered = qs ? Object.keys(picked).length : 0;
   const right = qs ? qs.filter((q, i) => picked[i] === q.answer).length : 0;
+  const wrong = qs ? qs.map((_, i) => i).filter((i) => picked[i] !== undefined && picked[i] !== qs[i]!.answer) : [];
+
+  function retryMissed() {
+    setPicked((p) => Object.fromEntries(Object.entries(p).filter(([i]) => !wrong.includes(Number(i)))));
+    box.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <section ref={box} id="chapter-quiz" aria-label="Test yourself" className="guide mt-12 scroll-mt-20 rounded-[10px] border border-line bg-panel px-5 py-5">
@@ -59,18 +124,22 @@ export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: num
       ) : (
         <>
           <ol className="mt-4 flex flex-col gap-6">
-            {qs.map((q, i) => {
+            {order.map((i, n) => {
+              const q = qs[i]!;
               const chosen = picked[i];
               const done = chosen !== undefined;
               return (
                 <li key={i} className="flex flex-col gap-2">
-                  <p className="text-[15px] font-medium leading-snug text-ink"><span className="mr-1.5 tabular-nums text-ink-3">{i + 1}.</span>{q.q}</p>
-                  <div className="flex flex-col gap-1.5" role="group" aria-label={`Question ${i + 1} options`}>
+                  {missedBefore.includes(i) && (
+                    <span className="self-start rounded bg-danger/[0.08] px-1.5 py-px text-[11.5px] font-medium text-danger">Missed last time</span>
+                  )}
+                  <p className="text-[15px] font-medium leading-snug text-ink"><span className="mr-1.5 tabular-nums text-ink-3">{n + 1}.</span>{q.q}</p>
+                  <div className="flex flex-col gap-1.5" role="group" aria-label={`Question ${n + 1} options`}>
                     {q.options.map((o, j) => {
                       const isRight = j === q.answer;
                       const tone = !done ? "border-line-2 hover:border-accent" : isRight ? "border-ok bg-ok/[0.08] text-ink" : j === chosen ? "border-danger bg-danger/[0.06] text-ink" : "border-line text-ink-3";
                       return (
-                        <button key={j} type="button" disabled={done} onClick={() => setPicked((p) => ({ ...p, [i]: j }))}
+                        <button key={j} type="button" disabled={done} onClick={() => choose(i, j)}
                           className={`flex items-start gap-2.5 rounded-md border px-3 py-2 text-left text-[14px] leading-snug transition-colors disabled:cursor-default ${tone}`}>
                           <span className="shrink-0 font-mono text-[12px] text-ink-3">{"ABCD"[j]}</span>
                           <span>{o}</span>
@@ -94,7 +163,12 @@ export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: num
             })}
           </ol>
           <div className="mt-6 flex flex-wrap gap-2">
-            <button type="button" onClick={() => setPicked({})} className="h-9 rounded-md border border-line-2 px-3 text-[13px] text-ink hover:border-ink-3">Try again</button>
+            {wrong.length > 0 && (
+              <button type="button" onClick={retryMissed} className="h-9 rounded-md bg-accent px-3 text-[13px] font-medium text-on-accent hover:bg-accent-strong">
+                Try the ones I missed again
+              </button>
+            )}
+            <button type="button" onClick={() => setPicked({})} className="h-9 rounded-md border border-line-2 px-3 text-[13px] text-ink hover:border-ink-3">Start over</button>
             <button type="button" onClick={() => load(true)} disabled={busy} className="h-9 rounded-md border border-line-2 px-3 text-[13px] text-ink hover:border-ink-3 disabled:opacity-60">
               {busy ? "Writing…" : "New questions"}
             </button>

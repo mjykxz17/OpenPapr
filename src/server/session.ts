@@ -6,7 +6,6 @@ import { loadEnv, sessionSigningKey } from "@/lib/env";
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { users } from "@/db/schema";
-import type { Db } from "@/db/client";
 import { getDb } from "./db";
 
 // The account a session cookie belongs to, or null. A signed cookie outlives

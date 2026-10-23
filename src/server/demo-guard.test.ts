@@ -45,6 +45,7 @@ const AUDIT: Record<string, "open" | "locked"> = {
   "account/llm": "locked", // accountRequest
   "account/onboarded": "locked", // accountRequest
   "account/password": "locked", // accountRequest
+  "account/sessions/revoke": "locked", // accountRequest; would sign every visitor out
   "calendar": "locked", // a feed link would outlive the reset
   "changes": "open",
   "changes/[id]": "open",
@@ -57,7 +58,9 @@ const AUDIT: Record<string, "open" | "locked"> = {
   "login": "open",
   "logout": "open",
   "modules/[id]/guide": "open", // the worker never spends a model call on the demo
+  "modules/[id]/guide/progress": "open", // chapters read; the reset clears them
   "modules/[id]/guide/quiz": "open",
+  "modules/[id]/guide/quiz/answer": "open", // quiz answers; the reset clears them
   "modules/[id]/hidden": "open",
   "modules/[id]/lecturers": "locked", // accountRequest; the worker would fetch the page
   "modules/[id]/notes": "open",
