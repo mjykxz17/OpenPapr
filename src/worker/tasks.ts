@@ -137,7 +137,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
         return { ref: `R${i.id}`, line: `${i.sender ?? "A lecturer"} replied in the discussion “${meta?.topicTitle ?? i.title}” (${posted})`, body: text.slice(0, 600) };
       }
       refs.set(`A${i.id}`, { kind: "announcement", label: i.title, itemId: i.id });
-      return { ref: `A${i.id}`, line: `${i.title} (posted ${posted})${weekNote(`${i.title} ${text}`, now, weeklyClasses)}`, body: text.slice(0, 1200) };
+      return { ref: `A${i.id}`, line: `${i.title} (posted ${posted})${weekNote(`${i.title} ${text}`, now, weeklyClasses, mod.term)}`, body: text.slice(0, 1200) };
     });
 
   // Discussions that ask something of the student: graded, "post first", or
@@ -233,7 +233,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
       today: `${sgtDate(now)} (${WEEKDAY[d.getUTCDay()]})`,
       module: { code: mod.code, name: mod.name },
       canvas, past: pastRows, announcements, discussions, notes, fileHints: fileLines, weightage, examDate, studyAdvice, existing, feedback,
-      roadmap: road.lines, calendar: calendarLines(now), classSlots: slots,
+      roadmap: road.lines, calendar: calendarLines(now, mod.term), classSlots: slots,
     },
   };
 }
@@ -256,6 +256,7 @@ export function announcedSince(title: string, since: number, rows: { type: strin
 // week (or the week's Friday).
 export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | null; dueConfidence: "exact" | "estimated"; sources: TaskSource[] }>(db: Db, moduleId: number, planned: T[], now: number): T[] {
   const rows = db.select().from(items).where(eq(items.moduleId, moduleId)).all();
+  const term = db.select({ term: modules.term }).from(modules).where(eq(modules.id, moduleId)).get()?.term;
   const byId = new Map(rows.map((r) => [r.id, r]));
   const slots = classSlots(rows);
   return planned.map((t) => {
@@ -266,7 +267,7 @@ export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | nul
     const text = `${a.title} ${htmlToText(a.body ?? "")}`;
     const weeks = weeksNamed(text);
     if (weeks.length !== 1 || !announcedSince(t.title, -1, [a])) return t;
-    const p = placeInWeek(weeks[0]!, now, slots);
+    const p = placeInWeek(weeks[0]!, now, slots, term);
     if (!p || (t.dueAt !== null && t.dueAt >= p.from && t.dueAt < p.to)) return t;
     return { ...t, dueAt: p.at, dueConfidence: p.inClass ? t.dueConfidence : "estimated" };
   });
