@@ -97,8 +97,15 @@ export function Rail({ showMail = true, changes = null }: { showMail?: boolean; 
           </Link>
         );
       })}
-      {/* Papi draws itself here (src/components/pet/Papi.tsx). */}
-      <div id={TAB_ID} className="flex h-[60px] flex-1" />
+      {/* Papi draws itself here (src/components/pet/Papi.tsx) once the page
+          is running. Until then the tab shows what it will be, so the bar
+          has no gap in it; globals.css hides this stand-in when Papi lands. */}
+      <div id={TAB_ID} className="papi-tab flex h-[60px] flex-1">
+        <span aria-hidden className="papi-tab-stub flex h-full w-full flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-ink-3">
+          <PapiMark size={22} />
+          <span>Ask</span>
+        </span>
+      </div>
       <button type="button" onClick={openSearch} className="flex h-[60px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-ink-3">
         <SearchIcon />
         <span>Search</span>
