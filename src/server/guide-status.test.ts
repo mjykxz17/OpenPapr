@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { createDb } from "../db/client";
 import { files, guidePlans, guideTopics, modules, users } from "../db/schema";
 import {
-  MAX_TRIES, buildState, deckUnreadable, guideStatus, missingSections, partialHash, readFailure, requestGuideRefresh, retryDue, retryWait, writeFailure,
+  MAX_TRIES, buildState, deckUnreadable, gapText, gapWorse, guideStatus, missingParts, missingSections, partialHash, readFailure, requestGuideRefresh,
+  retryDue, retryWait, scannedDecks, writeFailure,
 } from "./guide-status";
 
 const H = 3_600_000;
@@ -34,6 +35,17 @@ describe("buildState", () => {
     expect(buildState(t(partialHash("h0", 2)))).toBe("stale");
     expect(buildState(t(null, null))).toBe("none");
   });
+
+  it("counts a deck that could not be planned apart from sections", () => {
+    const h = partialHash("h1", { sections: 1, decks: 1 });
+    expect(buildState(t(h))).toBe("partial");
+    expect(missingParts(t(h))).toEqual({ sections: 1, decks: 1 });
+    expect(missingParts(t(partialHash("h1", 3)))).toEqual({ sections: 3, decks: 0 });
+    expect(gapText({ sections: 1, decks: 1 })).toBe("1 section and 1 lecture deck");
+    expect(gapText({ sections: 0, decks: 2 })).toBe("2 lecture decks");
+    expect(gapWorse({ sections: 0, decks: 1 }, { sections: 5, decks: 0 })).toBe(true);
+    expect(gapWorse({ sections: 1, decks: 0 }, { sections: 2, decks: 0 })).toBe(false);
+  });
 });
 
 describe("deckUnreadable", () => {
@@ -43,6 +55,10 @@ describe("deckUnreadable", () => {
     expect(deckUnreadable(JSON.stringify({ failed: true, reason: "unreadable", at: 1 }))).toBe("unreadable");
     expect(deckUnreadable(JSON.stringify({ pages: 30, words: 900, hash: "x" }))).toBeNull();
     expect(deckUnreadable(null)).toBeNull();
+  });
+
+  it("does not call a short handout with real text a scan", () => {
+    expect(deckUnreadable(JSON.stringify({ pages: 3, words: 40, hash: "x" }))).toBeNull();
   });
 });
 
@@ -68,17 +84,36 @@ describe("guideStatus", () => {
       { moduleId: 1, canvasFileId: 2, displayName: "L6.pdf", category: "slides", discoveredAt: 1, textSigJson: JSON.stringify({ failed: true, reason: "unreadable", at: 1 }) },
     ]).run();
     expect(guideStatus(db, 1)).toMatchObject({
-      total: 4, ready: 2, queued: 2, incomplete: 2,
+      total: 4, ready: 2, queued: 2, incomplete: 2, incompleteText: "2 sections",
       failed: ["retrying"], stuck: [{ title: "stuck", error: "llm 500" }], scanned: ["L5-scan"],
     });
+    // The reasons, for the menu.
+    expect(guideStatus(db, 1).problems.map((p) => p.title).sort()).toEqual(["partial", "retrying", "stuck"]);
+  });
+
+  it("does not name a scan whose deck is in the guide through a readable copy", () => {
+    const db = setup();
+    const sig = (v: object) => JSON.stringify(v);
+    db.insert(files).values([
+      { moduleId: 1, canvasFileId: 1, displayName: "U3-memerr1.pdf", category: "slides", discoveredAt: 1, textSigJson: sig({ pages: 40, words: 3000, hash: "a" }) },
+      { moduleId: 1, canvasFileId: 2, displayName: "U3-memerr1-BW.pdf", category: "slides", discoveredAt: 1, textSigJson: sig({ failed: true, reason: "empty", at: 1 }) },
+      { moduleId: 1, canvasFileId: 3, displayName: "Lab2-scan.pdf", category: "tutorial", discoveredAt: 1, textSigJson: sig({ pages: 4, words: 3, hash: "b" }) },
+      { moduleId: 1, canvasFileId: 4, displayName: "photo.png", category: "slides", discoveredAt: 1, textSigJson: sig({ failed: true, reason: "empty", at: 1 }) },
+    ]).run();
+    expect(scannedDecks(db, 1)).toEqual(["Lab2-scan"]);
+    expect(guideStatus(db, 1).scanned).toEqual(["Lab2-scan"]);
   });
 
   it("asking again clears the tries and reads failed decks again", () => {
     const db = setup();
     db.insert(guideTopics).values({ moduleId: 1, key: "k", title: "k", ord: 0, inputHash: "h", error: writeFailure(MAX_TRIES, "x"), errorAt: 5 }).run();
-    db.insert(files).values({ moduleId: 1, canvasFileId: 1, displayName: "L5.pdf", category: "slides", discoveredAt: 1, textSigJson: JSON.stringify({ failed: true, reason: "empty", at: 1 }) }).run();
+    db.insert(files).values([
+      { moduleId: 1, canvasFileId: 1, displayName: "L5.pdf", category: "slides", discoveredAt: 1, textSigJson: JSON.stringify({ failed: true, reason: "empty", at: 1 }) },
+      { moduleId: 1, canvasFileId: 2, displayName: "L6.pdf", category: "slides", discoveredAt: 1, textSigJson: JSON.stringify({ pages: 30, words: 4, hash: "x", ocr: true, ocrTries: 3 }) },
+      { moduleId: 1, canvasFileId: 3, displayName: "L7.pdf", category: "slides", discoveredAt: 1, textSigJson: JSON.stringify({ pages: 30, words: 900, hash: "y" }) },
+    ]).run();
     requestGuideRefresh(db, 1, false);
     expect(db.select().from(guideTopics).get()).toMatchObject({ error: null, errorAt: null });
-    expect(db.select().from(files).get()!.textSigJson).toBeNull();
+    expect(db.select().from(files).all().map((f) => f.textSigJson === null)).toEqual([true, true, false]);
   });
 });

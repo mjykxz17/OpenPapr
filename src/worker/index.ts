@@ -582,7 +582,7 @@ async function tickOnce(): Promise<void> {
     // Generation takes minutes; it runs beside the tick rather than inside
     // it, so "Sync now" and everyone's syncs keep flowing meanwhile.
     // A guide someone asked for by hand first, then the automatic guides:
-    // new slides read, topics planned, at most one chapter written.
+    // new slides read, topics planned, a couple of chapters written.
     if (!guideJob) guideJob = keepAwake(runGuideJob(), awake)
       .then(() => (Date.now() - lastAutoGuideAt >= AUTO_GUIDE_EVERY ? (lastAutoGuideAt = Date.now(), runAutoGuides(guideDeps)) : undefined))
       .catch((err) => console.error("guide job crashed", err)).finally(() => { guideJob = null; });

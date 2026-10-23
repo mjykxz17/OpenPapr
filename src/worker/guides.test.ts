@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { files, guideTopics, items, modules, studyGuides, users } from "../db/schema";
-import { guideStatus, nextTopics, requestGuideRefresh, runAutoGuides, type GuideDeps } from "./guides";
+import { assembleGuide, guideStatus, nextTopics, requestGuideRefresh, runAutoGuides, type GuideDeps } from "./guides";
 import { MAX_TRIES, partialHash, writeFailure } from "../server/guide-status";
+import { chapterHash } from "../lib/guide-chapters";
+import { splitGuideIntoChapters } from "../lib/study-chapters";
 
 const NOW = Date.UTC(2026, 9, 1, 2);
 const D = 86_400_000;
@@ -288,6 +290,58 @@ describe("automatic study guide, when things go wrong", () => {
     db.update(files).set({ sizeBytes: 2000 }).where(eq(files.id, 6)).run();  // a new copy on Canvas
     await run(NOW + 5 * D, { ocrReady: () => true });
     expect(reads.filter((n) => n === "U5-scan.pdf")).toHaveLength(3);
+
+    // OCR read nothing from it (or lost pages): a couple more tries, a day
+    // apart, then it is left until the file changes or someone asks.
+    await run(NOW + 6 * D + 1, { ocrReady: () => true });
+    await run(NOW + 7 * D + 2, { ocrReady: () => true });
+    expect(reads.filter((n) => n === "U5-scan.pdf")).toHaveLength(5);
+    await run(NOW + 30 * D, { ocrReady: () => true });
+    expect(reads.filter((n) => n === "U5-scan.pdf")).toHaveLength(5);
+    requestGuideRefresh(db, 1, false);
+    await run(NOW + 30 * D, { ocrReady: () => true });
+    expect(reads.filter((n) => n === "U5-scan.pdf")).toHaveLength(6);
+  });
+
+  it("keeps a complete chapter showing when the rewrite for new slides loses half of it", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    const db = setup();
+    const opts = { broken: false };
+    vi.stubGlobal("fetch", switchModel([], opts));
+    await settle(runAutoGuides(deps(db)));
+    await settle(runAutoGuides(deps(db)));
+    const old = byOrd(db)[1]!;
+    expect(old.builtHash).toBe(old.inputHash);
+
+    db.insert(files).values({ id: 5, moduleId: 1, canvasFileId: 105, displayName: "U4-CFG.pdf", category: "slides", discoveredAt: NOW + D }).run();
+    const d = deps(db, NOW + D);
+    const fixed = deck("cfg", 30, "corrected dominator example");
+    d.fileText = async (_u, f) => (f.id === 5 ? fixed : texts[f.displayName]) ?? null;
+    opts.broken = true;                                                     // "Fixes" fails: one of two sections
+    await settle(runAutoGuides(d));
+    const cfgTopic = byOrd(db)[1]!;
+    expect(cfgTopic.body).toBe(old.body);                                   // the complete one stays
+    expect(cfgTopic.builtHash).toBe(old.builtHash);
+    expect(cfgTopic.error).toMatch(/1 section couldn't be written/);
+    expect(db.select().from(studyGuides).get()!.markdown).toContain("Newer slides are out for this topic.");
+
+    opts.broken = false;
+    await settle(runAutoGuides({ ...d, now: () => NOW + D + 31 * M }));
+    expect(byOrd(db)[1]!.builtHash).toBe(byOrd(db)[1]!.inputHash);
+  });
+
+  it("gives the quiz the same key from the guide as from the stored chapter", async () => {
+    const db = setup();
+    vi.stubGlobal("fetch", switchModel([], {}));
+    await runAutoGuides(deps(db));
+    await runAutoGuides(deps(db));
+    const [mem] = byOrd(db);
+    const body = "### 1.1 Code\n\n```python\nx = 1\n\n\n\ny = 2\n```\n\nText [U3 p1](slide:U3-memerr1#1).";
+    db.update(guideTopics).set({ body }).where(eq(guideTopics.id, mem!.id)).run();
+    assembleGuide(db, db.select().from(modules).get()!, NOW);
+    const chapter = splitGuideIntoChapters(db.select().from(studyGuides).get()!.markdown).chapters[0]!;
+    expect(chapter.markdown).toContain("x = 1\n\n\n\ny = 2");               // code shown as written
+    expect(chapterHash(chapter.markdown)).toBe(chapterHash(body));
   });
 });
 

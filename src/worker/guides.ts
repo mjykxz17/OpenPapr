@@ -6,13 +6,13 @@ import type { CompatConfig } from "../enrich/openai-compat";
 import { planGuide, type PlanInput, type PlanRef } from "../enrich/guide-plan";
 import { generateTopicChapter } from "../enrich/generate-guide";
 import { deckSignature, groupVersions, type DeckSig, type VersionGroup } from "../lib/deck-versions";
-import { fileKind } from "../lib/file-kind";
 import { htmlToText } from "../lib/html-text";
 import { dayLabel, shortDate } from "../lib/format-date";
 import { renumber, splitChapters } from "../lib/guide-chapters";
 import { shortModuleName } from "../lib/module-name";
 import {
-  MAX_TRIES, MIN_DECK_WORDS, buildState, deckUnreadable, missingSections, partialHash, readFailure, retryDue, writeFailure,
+  MAX_TRIES, MIN_DECK_WORDS, buildState, deckUnreadable, gapText, gapWorse, isGuideFile, missingParts, partialHash, readFailure,
+  retryDue, scannedDecks, wasComplete, writeFailure,
 } from "../server/guide-status";
 
 // The automatic study guide. Nobody presses "generate": as slides land on
@@ -31,6 +31,7 @@ const MIN_LECTURE_SLIDES = 8;
 const FINGERPRINTS_PER_PASS = 6;
 const REPLAN_EVERY = 6 * H;          // when only quizzes or announcements changed
 const UNREADABLE_TRIES = 3;          // a deck that would not download or convert, once a day
+const OCR_TRIES = 3;                 // a scan OCR read nothing from, once a day
 const CONCURRENT_CHAPTERS = 2;       // chapters written at once, across everyone
 const AUTO_PREFIX = "auto";          // study_guides.sourceNote of an automatic guide
 
@@ -63,16 +64,17 @@ const readSig = (json: string | null): DeckSig | null | "failed" => {
 // Files a guide can be written from: slides and tutorial sheets that are, or
 // convert to, PDF.
 function guideFiles(db: Db, moduleId: number): FileRow[] {
-  return db.select().from(files).where(eq(files.moduleId, moduleId)).all()
-    .filter((f) => (f.category === "slides" || f.category === "tutorial") && ["pdf", "office"].includes(fileKind(f.displayName)));
+  return db.select().from(files).where(eq(files.moduleId, moduleId)).all().filter(isGuideFile);
 }
 
 // --- 1. fingerprints --------------------------------------------------------
 // Each file is read once. It is read again when it changes on Canvas (its
 // size moves), when it is a scan and OCR has since been installed, and — a
-// few times, a day apart — when it would not download or convert. A scan is
-// not retried on a timer: the same pages give the same nothing.
-type ReadMark = { failed?: boolean; reason?: string; at?: number; tries?: number; size?: number | null; ocr?: boolean };
+// few times, a day apart — when it would not download or convert, or when
+// OCR read nothing from it (OCR keeps no result that lost pages, so a page
+// that timed out is read again). A scan without OCR is not retried on a
+// timer: the same pages give the same nothing.
+type ReadMark = { failed?: boolean; reason?: string; at?: number; tries?: number; size?: number | null; ocr?: boolean; ocrTries?: number };
 
 export function needsRead(f: FileRow, now: number, ocrReady: boolean): boolean {
   if (!f.textSigJson) return true;
@@ -84,7 +86,9 @@ export function needsRead(f: FileRow, now: number, ocrReady: boolean): boolean {
   // Recorded before reads noted the file's size: once more, to find out why.
   if (v.failed && v.size === undefined) return true;
   if (unreadable === "unreadable") return (v.tries ?? 1) < UNREADABLE_TRIES && now - (v.at ?? 0) > D;
-  return ocrReady && !v.ocr;
+  if (!ocrReady) return false;
+  if (!v.ocr) return true;
+  return (v.ocrTries ?? 1) < OCR_TRIES && now - (v.at ?? 0) > D;
 }
 
 export async function fingerprint(deps: GuideDeps, userId: number, mod: Mod, budget: number): Promise<number> {
@@ -98,7 +102,10 @@ export async function fingerprint(deps: GuideDeps, userId: number, mod: Mod, bud
     try { text = await deps.fileText(userId, f, mod); } catch { text = null; }
     let prior: ReadMark = {};
     try { prior = JSON.parse(f.textSigJson ?? "{}") as ReadMark; } catch { /* first read */ }
-    const mark = { size: f.sizeBytes ?? null, ocr };
+    // Reads with OCR are counted, per copy of the file, so a scan it cannot
+    // read is tried a few times and then left.
+    const sameFile = prior.size === (f.sizeBytes ?? null);
+    const mark = { size: f.sizeBytes ?? null, ocr, ...(ocr ? { at: now, ocrTries: sameFile && prior.ocr ? (prior.ocrTries ?? 1) + 1 : 1 } : {}) };
     const sig = text === null
       ? { failed: true, reason: "unreadable", at: now, tries: prior.reason === "unreadable" ? (prior.tries ?? 1) + 1 : 1, ...mark }
       : !text.trim() ? { failed: true, reason: "empty", at: now, ...mark }
@@ -332,19 +339,23 @@ export function assembleGuide(db: Db, mod: Mod, now: number): boolean {
     const again = "Use “Check for new slides now” on the guide page to try again.";
     if (built === "stale") lines.push(`> *Newer slides are out for this topic. This chapter is being updated and will change here on its own.*`);
     if (built === "partial") {
-      const n = missingSections(t);
-      lines.push(`> *${n === 1 ? "One section" : `${n} sections`} of this chapter couldn't be written yet. ${gaveUp ? again : `${n === 1 ? "It is" : "They are"} being retried and will appear here on their own.`}*`);
+      const gap = missingParts(t);
+      const one = gap.sections + gap.decks === 1;
+      const what = one ? (gap.sections ? "One section" : "One lecture deck") : gapText(gap);
+      lines.push(`> *${what} of this chapter couldn't be written yet. ${gaveUp ? again : `${one ? "It is" : "They are"} being retried and will appear here on their own.`}*`);
     }
-    if (t.body) lines.push("", t.body);
-    else lines.push("", `*This chapter is being written from ${decks.join(", ") || "the slides"}. ${gaveUp ? `Writing it failed several times. ${again}` : `It will appear here on its own${t.error ? " (the last attempt failed and will be retried)" : ""}.`}*`);
-    return { deck: null, markdown: lines.join("\n\n").replace(/\n{3,}/g, "\n\n") };
+    if (!t.body) lines.push(`*This chapter is being written from ${decks.join(", ") || "the slides"}. ${gaveUp ? `Writing it failed several times. ${again}` : `It will appear here on its own${t.error ? " (the last attempt failed and will be retried)" : ""}.`}*`);
+    // The body goes in exactly as stored, blank lines in code and all, so a
+    // chapter's quiz key (chapterHash) is the same from either.
+    const head = lines.join("\n\n").replace(/\n{3,}/g, "\n\n");
+    return { deck: null, markdown: t.body ? `${head}\n\n${t.body}` : head };
   });
 
   const ready = topics.filter((t) => t.body).length;
   const latest = Math.max(0, ...topics.map((t) => t.builtAt ?? 0));
   const title = plan?.title || `${shortModuleName(mod.code, mod.name)} study guide`;
   // Decks that are only pictures are said to be missing, not silently left out.
-  const scans = guideFiles(db, mod.id).filter((f) => f.category === "slides" && deckUnreadable(f.textSigJson) === "scanned").map((f) => stem(f.displayName));
+  const scans = scannedDecks(db, mod.id);
   const scanNote = scans.length ? `\n\n*Not in this guide: ${scans.join(", ")} — ${scans.length === 1 ? "this deck is" : "these decks are"} scanned images, with no text to read.*` : "";
   const preamble = `# ${title}\n\n*${mod.code}. Written from the newest copy of each lecture deck and kept up to date on its own: when slides change on Canvas, only the chapters they touch are rewritten. ${ready} of ${topics.length} chapters ready${latest ? `, last updated ${shortDate(latest)}` : ""}.*${scanNote}`;
   const markdown = [preamble, ...renumber(chapters).map((c) => c.markdown)].join("\n\n");
@@ -397,10 +408,6 @@ export function nextTopics(db: Db, now: number, hasModel: (userId: number) => bo
   return out;
 }
 
-export function nextTopic(db: Db, now: number, hasModel: (userId: number) => boolean): { topic: Topic; mod: Mod } | null {
-  return nextTopics(db, now, hasModel, 1)[0] ?? null;
-}
-
 export async function writeTopic(deps: GuideDeps, topic: Topic, mod: Mod): Promise<boolean> {
   const { db } = deps;
   const cfg = deps.cfgFor(mod.userId);
@@ -423,21 +430,28 @@ export async function writeTopic(deps: GuideDeps, topic: Topic, mod: Mod): Promi
     };
     const lectures = await load(list(topic.lectureIdsJson));
     const practice = await load(list(topic.practiceIdsJson));
-    const { body, problems, missing } = await generateTopicChapter({
-      cfg, reader: deps.readerFor(mod.userId, mod.id), title: topic.title, lectures, practice,
+    // The module's other decks, so a short link name is never shared with one.
+    const mine = new Set([...list(topic.lectureIdsJson), ...list(topic.practiceIdsJson)]);
+    const otherDecks = guideFiles(db, mod.id).filter((f) => !mine.has(f.id)).map((f) => stem(f.displayName));
+    const { body, problems, missing, planned } = await generateTopicChapter({
+      cfg, reader: deps.readerFor(mod.userId, mod.id), title: topic.title, lectures, practice, otherDecks,
       onStage: (s) => setStage(s),
     });
     const now = deps.now();
-    if (missing > 0) {
-      // Some sections could not be written. What was written shows now, and
-      // the chapter stays on the list to finish. A retry that did worse than
-      // the version already showing keeps that one.
+    if (missing.sections + missing.decks > 0) {
+      // Some parts could not be written. What was written shows now, and the
+      // chapter stays on the list to finish. The version already showing is
+      // kept instead when it is better: a partial one from these same slides
+      // that is missing less, or a complete one from older slides when this
+      // attempt lost a whole deck or half its sections.
       const current = db.select().from(guideTopics).where(eq(guideTopics.id, topic.id)).get() ?? topic;
-      const keep = current.inputHash === target && buildState(current) === "partial" && missingSections(current) < missing;
-      const error = writeFailure(tries, `${missing} section${missing === 1 ? "" : "s"} couldn't be written: ${problems.slice(0, 2).join("; ")}`);
+      const keep = current.inputHash === target && (
+        (buildState(current) === "partial" && gapWorse(missing, missingParts(current))) ||
+        (buildState(current) === "stale" && wasComplete(current) && (missing.decks > 0 || missing.sections * 2 >= planned)));
+      const error = writeFailure(tries, `${gapText(missing)} couldn't be written: ${problems.slice(0, 2).join("; ")}`);
       db.update(guideTopics).set({ ...(keep ? {} : { body, builtHash: partialHash(target, missing), builtAt: now }), stage: null, error, errorAt: now })
         .where(eq(guideTopics.id, topic.id)).run();
-      deps.log?.(`guide chapter partly written: ${mod.code} "${topic.title}" (${missing} missing, try ${tries})`);
+      deps.log?.(`guide chapter partly written: ${mod.code} "${topic.title}" (${gapText(missing)} missing, try ${tries}${keep ? ", kept the version showing" : ""})`);
     } else {
       db.update(guideTopics).set({ body, builtHash: target, builtAt: now, stage: null, error: problems.length ? problems.slice(0, 3).join("; ").slice(0, 300) : null, errorAt: null })
         .where(eq(guideTopics.id, topic.id)).run();

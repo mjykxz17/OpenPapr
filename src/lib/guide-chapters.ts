@@ -89,6 +89,8 @@ export function chapterBody(markdown: string): string {
 // it (quiz_attempts) are stored under. It depends on the slide-written body
 // only, so handing in an assessment, a new lecturer note or a reordered
 // guide leaves the quiz and its history alone; a rewritten chapter gets a
-// new one.
+// new one. Runs of blank lines count as one, so a chapter as the guide shows
+// it and the body as stored (guide_topics.body) give the same key even where
+// one of them was tidied.
 export const chapterHash = (markdown: string): string =>
-  createHash("sha256").update(chapterBody(markdown)).digest("hex").slice(0, 32);
+  createHash("sha256").update(chapterBody(markdown).replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, "\n\n")).digest("hex").slice(0, 32);

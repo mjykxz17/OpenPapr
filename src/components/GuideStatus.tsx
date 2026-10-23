@@ -8,12 +8,15 @@ type Status = {
   total: number; ready: number; queued: number;
   writing: { title: string; stage: string | null } | null;
   incomplete?: number;
+  incompleteText?: string | null;
   failed: string[];
   stuck?: { title: string; error: string }[];
+  problems?: { title: string; error: string }[];
   scanned?: string[];
 };
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+const clip = (s: string, n = 60) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 // What the page shows: changes when a chapter or a missing section lands.
 const shown = (x: Status) => `${x.ready}:${x.incomplete ?? 0}`;
 
@@ -43,7 +46,7 @@ export function GuideStatus({ moduleId, initial, canGenerate }: { moduleId: numb
   async function ask(rewrite: boolean) {
     setMenu(false);
     const r = await fetch(`/api/modules/${moduleId}/guide`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rewrite }) }).catch(() => null);
-    setNote(r?.ok ? (rewrite ? "Every chapter will be rewritten, one at a time." : "Checking the slides again.") : "Could not reach the server.");
+    setNote(r?.ok ? (rewrite ? "Every chapter will be rewritten, a couple at a time." : "Checking the slides again.") : "Could not reach the server.");
     setS((x) => ({ ...x, queued: rewrite ? x.total : x.queued }));
   }
 
@@ -82,17 +85,26 @@ export function GuideStatus({ moduleId, initial, canGenerate }: { moduleId: numb
                 Rewrite every chapter
                 <span className="block text-[12px] text-ink-3">Uses about 5–10 AI calls per chapter.</span>
               </button>
+              {(s.problems?.length ?? 0) > 0 && (
+                // Why things are waiting, readable without a hover.
+                <div className="mt-1 border-t border-line px-3 py-2">
+                  <span className="block text-[12px] font-medium text-ink-2">What went wrong</span>
+                  {s.problems!.slice(0, 5).map((p, i) => (
+                    <span key={i} className="mt-1 block break-words text-[12px] text-ink-3">{p.title}: {p.error}</span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </>
       )}
       {s.failed.length > 0 && !s.writing && <span className="text-[12px] text-warn-ink" title={s.failed.join(", ")}>{s.failed.length} will retry</span>}
       {(s.incomplete ?? 0) > 0 && (
-        <span className="text-[12px] text-warn-ink">{plural(s.incomplete!, "section", "sections")} couldn’t be written yet — retrying</span>
+        <span className="text-[12px] text-warn-ink">{s.incompleteText ?? plural(s.incomplete!, "section", "sections")} couldn’t be written yet — retrying</span>
       )}
       {(s.stuck?.length ?? 0) > 0 && (
         <span className="text-[12px] text-warn-ink" title={s.stuck!.map((x) => `${x.title}: ${x.error}`).join("\n")}>
-          {plural(s.stuck!.length, "chapter", "chapters")} couldn’t be written — try “Check for new slides now”
+          {plural(s.stuck!.length, "chapter", "chapters")} couldn’t be written ({clip(s.stuck![0]!.error)}) — try “Check for new slides now”
         </span>
       )}
       {(s.scanned?.length ?? 0) > 0 && (

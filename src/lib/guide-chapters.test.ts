@@ -89,6 +89,11 @@ describe("chapterHash", () => {
     expect(chapterHash(wrapped(4, ["> **Counts toward:** Quiz 3 — Fri 9 Oct", "> **Lecturer, 2 Oct:** Scope", "> *Newer slides are out for this topic.*"]))).toBe(before);
   });
 
+  it("is the same for a chapter however its blank lines were tidied", () => {
+    const code = "### 1.1 Code\n\n```python\nx = 1\n\n\n\ny = 2\n```\n\nText";
+    expect(chapterHash(`## 2. Code\n\n> **Counts toward:** Lab 1\n\n${code.replace(/\n{3,}/g, "\n\n")}`)).toBe(chapterHash(code));
+  });
+
   it("changes when the chapter is rewritten", () => {
     expect(chapterHash(wrapped(1, []))).not.toBe(chapterHash(wrapped(1, []).replace("More.", "More, and new.")));
   });
