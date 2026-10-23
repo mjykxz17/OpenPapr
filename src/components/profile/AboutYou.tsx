@@ -14,6 +14,8 @@ type Props = {
   historyCount: number;
   status: { builtAt: number | null; pending: boolean; error: string | null };
   hasModel: boolean;
+  // The shared demo account: shown, but the server refuses changes to it.
+  locked?: boolean;
 };
 
 const MAJORS = [
@@ -61,14 +63,16 @@ export function AboutYou(p: Props) {
     <section aria-labelledby="acct-about" className="rounded-[10px] border border-line bg-panel">
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line px-6 py-4">
         <h2 id="acct-about" className="text-[15px] font-semibold text-ink">About you</h2>
-        {p.hasModel && <RebuildButton scope="me" status={p.status} />}
+        {p.hasModel && !p.locked && <RebuildButton scope="me" status={p.status} />}
       </div>
       <div className="px-6 py-5">
         <p className="max-w-2xl text-[14px] leading-relaxed text-ink-2">
           Study guides, module profiles and your weekly plan are pitched to you from this, {p.historyCount ? `the ${p.historyCount} course${p.historyCount === 1 ? "" : "s"} you have taken on Canvas` : "the courses you have taken on Canvas"} and, if you allow it, how you write your notes.
         </p>
 
-        <form onSubmit={save} className="mt-5 grid max-w-xl grid-cols-1 gap-4 sm:grid-cols-[1fr_8rem]">
+        {p.locked && <p className="mt-3 text-[13px] text-ink-3">These are the demo student&apos;s details, so they can&apos;t be changed here.</p>}
+        <form onSubmit={save} className="mt-5 max-w-xl">
+          <fieldset disabled={p.locked} className="grid min-w-0 grid-cols-1 gap-4 disabled:opacity-60 sm:grid-cols-[1fr_8rem]">
           <label className={label}>
             Major
             <input list="nus-majors" value={major} onChange={(e) => setMajor(e.target.value)} placeholder="e.g. Information Security" className={field} />
@@ -92,6 +96,7 @@ export function AboutYou(p: Props) {
             <button type="submit" disabled={saving} className="h-10 whitespace-nowrap rounded-md bg-accent px-4 text-sm font-medium text-on-accent hover:bg-accent-strong disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
             {msg && <span role={msg.ok ? "status" : "alert"} className={`text-[13px] ${msg.ok ? "text-accent" : "text-danger"}`}>{msg.text}</span>}
           </div>
+          </fieldset>
         </form>
 
         {(p.profile || p.style) && (

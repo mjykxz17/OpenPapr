@@ -1,18 +1,12 @@
 import { NextResponse } from "next/server";
+import { clearSessionCookie } from "@/server/session";
 
-// Clears the session cookie. There is no server-side session store to purge:
-// sessions are stateless signed cookies, so signing out is entirely a matter
-// of removing the client's copy. To invalidate sessions everywhere at once —
-// after a leak, say — rotate SESSION_KEY, which leaves stored Canvas and
-// Microsoft credentials intact.
+// Clears this device's session cookie. Sessions are signed cookies with no
+// server-side store, so this signs out only here; "Sign out everywhere" on
+// the Account page (/api/account/sessions/revoke) retires every copy by
+// bumping the account's session version. Rotating SESSION_KEY signs out
+// every account at once and leaves stored Canvas and Microsoft credentials
+// intact.
 export async function POST() {
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set("session", "", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: true,
-    path: "/",
-    maxAge: 0,
-  });
-  return res;
+  return clearSessionCookie(NextResponse.json({ ok: true }));
 }

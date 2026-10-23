@@ -4,7 +4,7 @@
 // Canvas token never has to be pasted again. Credentials are read from the
 // environment rather than argv so they do not land in shell history or in the
 // process list; only the resulting scrypt hash is written to the database.
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { createDb } from "../src/db/client";
 import { users } from "../src/db/schema";
 import { loadEnv } from "../src/lib/env";
@@ -29,7 +29,12 @@ function main(): void {
   if (!setCredentials(db, userId, username, hashPassword(password))) {
     throw new Error(`username "${username}" already belongs to another account`);
   }
-  console.log(`set username "${username}" for user ${userId} (${row.name}); password stored as a scrypt hash`);
+  // A reset is what someone needs when the old password leaked or the account
+  // is locked: sign out every device and lift the lockout. (session.ts does
+  // the same, but pulls in Next, so it is spelled out here.)
+  db.update(users).set({ sessionVersion: sql`${users.sessionVersion} + 1`, failedLogins: 0, lockedUntil: null })
+    .where(eq(users.id, userId)).run();
+  console.log(`set username "${username}" for user ${userId} (${row.name}); password stored as a scrypt hash; every device signed out`);
 }
 
 main();

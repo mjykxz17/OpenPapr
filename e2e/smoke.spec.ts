@@ -22,7 +22,7 @@ test("anonymous visitors are sent to sign in", async ({ page }) => {
   await expect(page.getByLabel("Password")).toBeVisible();
   await expect(page.getByLabel("Canvas access token")).toBeHidden();
 
-  await page.getByRole("button", { name: "First time" }).click();
+  await page.getByRole("tab", { name: "First time" }).click();
   await expect(page.getByLabel("Invite code")).toBeVisible();
   // Canvas is optional at sign-up, one click away.
   await page.getByRole("button", { name: /Canvas access token\? Add it now/ }).click();
@@ -42,7 +42,7 @@ test("a wrong username or password is refused", async ({ page }) => {
 
 test("a wrong invite code is refused before Canvas is ever contacted", async ({ page }) => {
   await page.goto("/login");
-  await page.getByRole("button", { name: "First time" }).click();
+  await page.getByRole("tab", { name: "First time" }).click();
   await page.getByLabel("Username").fill("someone");
   await page.getByLabel("Password").fill("a-password");
   await page.getByLabel("Invite code").fill("not-the-code");

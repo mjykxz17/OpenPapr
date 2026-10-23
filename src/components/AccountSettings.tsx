@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { LLM_PRESETS, presetFor } from "@/lib/llm-presets";
 import { relativeDay, shortTime } from "@/lib/format-date";
+import { clearOfflineCaches } from "@/lib/offline";
 import { CalendarSection, DataSection } from "./AccountExtras";
 import { AboutYou } from "./profile/AboutYou";
 import type { ComponentProps } from "react";
@@ -20,7 +21,10 @@ type Props = {
   usage: { calls: number; sharedCalls: number; limit: number };
   calendarUrl: string | null;
   signIn: { username: string | null; hasPassword: boolean };
-  about: ComponentProps<typeof AboutYou>;
+  about: Omit<ComponentProps<typeof AboutYou>, "locked">;
+  // Set for the shared demo account, whose settings can't be changed: the
+  // model it borrows (null when this server has none) and its daily cap.
+  demo: { aiModel: string | null; dailyCalls: number } | null;
 };
 
 const field = "h-10 w-full rounded-md border border-line-2 bg-surface px-3 text-[14px] text-ink outline-none placeholder:text-ink-3 focus:border-accent focus:ring-2 focus:ring-accent-soft disabled:opacity-60";
@@ -144,6 +148,21 @@ function CanvasSection({ canvas, canvasBaseUrl }: Pick<Props, "canvas" | "canvas
           </form>
         )}
       </div>
+    </Section>
+  );
+}
+
+// The demo's courses are made up and loaded by the server, so there is no
+// token to show or replace.
+function DemoCanvasSection({ name }: { name: string }) {
+  return (
+    <Section id="acct-canvas" title="Canvas" status={<span><Dot tone="ok" />Sample Canvas data</span>}>
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-[14px]">
+        <dt className="text-ink-2">Account</dt><dd className="text-ink">{name}</dd>
+      </dl>
+      <p className="mt-4 max-w-2xl text-[13px] leading-relaxed text-ink-2">
+        The demo&apos;s courses, files and deadlines are sample data, not a real Canvas account. Your own account syncs from your Canvas.
+      </p>
     </Section>
   );
 }
@@ -356,6 +375,25 @@ function LlmSection({ llm, fallback, sharedModel, usage }: Pick<Props, "llm" | "
   );
 }
 
+// The demo runs on this server's AI (see cfgForUser), shared by every
+// visitor up to a daily cap; there is no key of its own to add.
+function DemoLlmSection({ demo, calls }: { demo: NonNullable<Props["demo"]>; calls: number }) {
+  const used = Math.min(calls, demo.dailyCalls);
+  const status = demo.aiModel
+    ? <span><Dot tone="ok" />This server&apos;s AI</span>
+    : <span className="text-warn"><Dot tone="warn" />Off on this server</span>;
+  return (
+    <Section id="acct-llm" title="AI provider" status={status}>
+      <p className="max-w-2xl text-[14px] leading-relaxed text-ink-2">
+        {demo.aiModel
+          ? <>The demo uses this server&apos;s AI ({demo.aiModel}), shared by everyone trying it: {used} of {demo.dailyCalls} calls used today. It starts again at midnight.</>
+          : <>This server has no AI set up for the demo, so study guides and Papi&apos;s answers are switched off here.</>}
+      </p>
+      <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-ink-3">With your own account you can add your own key and pick the model.</p>
+    </Section>
+  );
+}
+
 // --- Sign-in --------------------------------------------------------------
 
 function SignInSection({ signIn }: Pick<Props, "signIn">) {
@@ -374,7 +412,9 @@ function SignInSection({ signIn }: Pick<Props, "signIn">) {
     setPending(false);
     if (!r.ok) { setError(String(r.data.error ?? "Could not save.")); return; }
     setCurrent(""); setNext("");
-    setOk(signIn.hasPassword ? "Password changed." : "Saved. Sign in with these from now on — no token needed.");
+    setOk(signIn.hasPassword
+      ? "Password changed. Your other devices are signed out."
+      : "Saved. Sign in with these from now on — no token needed. Your other devices are signed out.");
     router.refresh();
   }
 
@@ -416,25 +456,78 @@ function SignInSection({ signIn }: Pick<Props, "signIn">) {
           </button>
         </div>
       </form>
+      <SignOutEverywhere hasPassword={signIn.hasPassword} />
+    </Section>
+  );
+}
+
+// Retires every session the account has. Getting back in afterwards takes
+// the password, so an account without one is warned first.
+function SignOutEverywhere({ hasPassword }: { hasPassword: boolean }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onClick() {
+    setPending(true); setError(null);
+    const r = await send("/api/account/sessions/revoke", "POST", {});
+    if (!r.ok) { setPending(false); setError(String(r.data.error ?? "Could not sign out everywhere.")); return; }
+    // Saved guides belong to this account; the next person on this device should not see them.
+    await clearOfflineCaches();
+    router.push("/login");
+    router.refresh();
+  }
+
+  return (
+    <div className="mt-7 border-t border-line pt-5">
+      <h3 className="text-[14px] font-semibold text-ink">Sign out everywhere</h3>
+      <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-ink-2">
+        Signs this account out on every phone and computer, this one too — for a lost phone, or a shared computer you forgot to sign out of.
+        {!hasPassword && " Set a password above first, or you will need your invite code and Canvas token to get back in."}
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <button type="button" onClick={onClick} disabled={pending} className={secondary}>
+          {pending ? "Signing out…" : "Sign out everywhere"}
+        </button>
+        <Feedback error={error} ok={null} />
+      </div>
+    </div>
+  );
+}
+
+function DemoSignInSection() {
+  return (
+    <Section id="acct-signin" title="Sign-in" status={<span><Dot tone="off" />Shared demo</span>}>
+      <p className="max-w-2xl text-[14px] leading-relaxed text-ink-2">
+        The demo has no username or password — anyone can open it from the sign-in page, so there is nothing to change here.
+      </p>
     </Section>
   );
 }
 
 export function AccountSettings(props: Props) {
+  const { demo } = props;
   return (
     <div className="flex max-w-3xl flex-col gap-6">
-      {props.welcome && (
+      {demo && (
+        <p role="status" className="rounded-[10px] border border-line bg-panel px-4 py-3 text-[14px] leading-relaxed text-ink">
+          This is the shared demo, so its settings are read-only. Create your own account to connect Canvas and an AI key.
+        </p>
+      )}
+      {props.welcome && !demo && (
         <p role="status" className="rounded-[10px] border border-line bg-panel px-4 py-3 text-[14px] leading-relaxed text-ink">
           You’re in. Your Canvas token is saved, so you won’t need it again.
           {!props.llm && " Add an AI key below to generate study guides with your own model."}
         </p>
       )}
-      <AboutYou {...props.about} />
-      <CanvasSection canvas={props.canvas} canvasBaseUrl={props.canvasBaseUrl} />
-      <LlmSection llm={props.llm} fallback={props.fallback} sharedModel={props.sharedModel} usage={props.usage} />
-      <CalendarSection url={props.calendarUrl} />
-      <SignInSection signIn={props.signIn} />
-      <DataSection />
+      <AboutYou {...props.about} locked={Boolean(demo)} />
+      {demo ? <DemoCanvasSection name={props.canvas.name} /> : <CanvasSection canvas={props.canvas} canvasBaseUrl={props.canvasBaseUrl} />}
+      {demo
+        ? <DemoLlmSection demo={demo} calls={props.usage.calls} />
+        : <LlmSection llm={props.llm} fallback={props.fallback} sharedModel={props.sharedModel} usage={props.usage} />}
+      <CalendarSection url={props.calendarUrl} locked={Boolean(demo)} />
+      {demo ? <DemoSignInSection /> : <SignInSection signIn={props.signIn} />}
+      <DataSection locked={Boolean(demo)} />
     </div>
   );
 }

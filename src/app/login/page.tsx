@@ -10,6 +10,7 @@ export const dynamic = "force-dynamic";
 
 export default function LoginPage() {
   const CANVAS_BASE_URL = process.env.CANVAS_BASE_URL ?? "https://canvas.nus.edu.sg";
+  const demo = process.env.DEMO_ENABLED !== "0";
   return (
     <div className="flex min-h-svh items-center justify-center bg-surface px-6">
       <div className="w-full max-w-sm rounded-[10px] border border-line bg-panel p-8">
@@ -20,8 +21,8 @@ export default function LoginPage() {
         <p className="mb-6 text-sm leading-relaxed text-ink-2">
           Your Canvas semester, planned: study guides from your slides, deadlines as daily steps, and answers from your own material.
         </p>
-        <LoginForm canvasBaseUrl={CANVAS_BASE_URL} />
-        {process.env.DEMO_ENABLED !== "0" && (
+        <LoginForm canvasBaseUrl={CANVAS_BASE_URL} demoEnabled={demo} />
+        {demo && (
           <>
             <div className="my-5 flex items-center gap-3 text-[12px] text-ink-3"><span className="h-px flex-1 bg-line" />or<span className="h-px flex-1 bg-line" /></div>
             <DemoButton />

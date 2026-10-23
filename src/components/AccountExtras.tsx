@@ -21,8 +21,22 @@ const secondary = "h-10 whitespace-nowrap rounded-md border border-line-2 px-4 t
 
 // --- calendar feed ------------------------------------------------------------
 // A private link calendar apps subscribe to. Deadlines and expected quizzes
-// always; each day's study steps if the student wants them too.
-export function CalendarSection({ url: initial }: { url: string | null }) {
+// always; each day's study steps if the student wants them too. The shared
+// demo account cannot make one (the server refuses), so it gets a note instead.
+export function CalendarSection({ url, locked = false }: { url: string | null; locked?: boolean }) {
+  if (locked) {
+    return (
+      <Card id="acct-calendar" title="Calendar" status="Off">
+        <p className="max-w-2xl text-[14px] leading-relaxed text-ink-2">
+          With your own account you can put your deadlines into Google Calendar, Apple Calendar or Outlook. The shared demo has no calendar link.
+        </p>
+      </Card>
+    );
+  }
+  return <CalendarFeed url={url} />;
+}
+
+function CalendarFeed({ url: initial }: { url: string | null }) {
   const [path, setPath] = useState(initial);
   const [steps, setSteps] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -88,7 +102,9 @@ export function CalendarSection({ url: initial }: { url: string | null }) {
 }
 
 // --- your data -----------------------------------------------------------------
-export function DataSection() {
+// The demo can download what it holds but not delete itself: it is shared,
+// and the server refuses.
+export function DataSection({ locked = false }: { locked?: boolean }) {
   const [asking, setAsking] = useState(false);
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
@@ -118,8 +134,9 @@ export function DataSection() {
       </p>
       <div className="mt-4 flex flex-wrap gap-2">
         <a href="/api/account/export" className={`${secondary} inline-flex items-center no-underline`}>Download my data</a>
-        {!asking && <button type="button" onClick={() => setAsking(true)} className={`${secondary} text-danger hover:border-danger`}>Delete my account</button>}
+        {!asking && !locked && <button type="button" onClick={() => setAsking(true)} className={`${secondary} text-danger hover:border-danger`}>Delete my account</button>}
       </div>
+      {locked && <p className="mt-3 text-[13px] text-ink-3">The shared demo can&apos;t be deleted — it goes back to its sample data every night at midnight.</p>}
       {asking && (
         <div className="mt-4 max-w-md rounded-md border border-danger/40 bg-danger/[0.04] p-4">
           <p className="text-[14px] text-ink">This deletes your account and everything in it, for good. Type <span className="font-mono font-semibold">DELETE</span> to confirm.</p>
