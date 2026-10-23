@@ -79,6 +79,12 @@ export const users = sqliteTable("users", {
   // and is wiped and re-seeded every night at midnight (Singapore time).
   isDemo: integer("is_demo", { mode: "boolean" }).notNull().default(false),
   demoResetAt: integer("demo_reset_at"),
+  // Bumped on password change and "sign out everywhere": a session cookie
+  // signed with an older version is no longer accepted.
+  sessionVersion: integer("session_version").notNull().default(0),
+  // Failed sign-ins in a row, and the time the account is locked until.
+  failedLogins: integer("failed_logins").notNull().default(0),
+  lockedUntil: integer("locked_until"),
 }, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId), uniqueIndex("users_username").on(t.username)]);
 
 export const modules = sqliteTable("modules", {
@@ -494,3 +500,39 @@ export const passages = sqliteTable("passages", {
   embedModel: text("embed_model"),
   updatedAt: integer("updated_at").notNull(),
 }, (t) => [uniqueIndex("passages_source").on(t.moduleId, t.sourceKey), index("passages_user").on(t.userId, t.moduleId)]);
+
+// One answer to one practice question. Kept so missed questions can come
+// back, and so the slides behind them can be planned as revision.
+export const quizAttempts = sqliteTable("quiz_attempts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  chapterHash: text("chapter_hash").notNull(),
+  topicTitle: text("topic_title"),
+  question: integer("question").notNull(),          // index within the set
+  chosen: integer("chosen").notNull(),
+  correct: integer("correct", { mode: "boolean" }).notNull(),
+  deck: text("deck"),                                // the slide the question is from
+  page: integer("page"),
+  answeredAt: integer("answered_at").notNull(),
+}, (t) => [index("quiz_attempts_user").on(t.userId, t.moduleId), uniqueIndex("quiz_attempts_answer").on(t.userId, t.moduleId, t.chapterHash, t.question)]);
+
+// A chapter the student has marked as read.
+export const guideProgress = sqliteTable("guide_progress", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  topicKey: text("topic_key").notNull(),
+  readAt: integer("read_at").notNull(),
+}, (t) => [uniqueIndex("guide_progress_topic").on(t.userId, t.moduleId, t.topicKey)]);
+
+// A Canvas page body, kept until Canvas says the page changed, so a sync
+// does not fetch every page again.
+export const canvasPageCache = sqliteTable("canvas_page_cache", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  courseId: integer("course_id").notNull(),
+  pageUrl: text("page_url").notNull(),
+  updatedAt: text("updated_at"),
+  body: text("body").notNull(),
+  fetchedAt: integer("fetched_at").notNull(),
+}, (t) => [uniqueIndex("canvas_page_cache_page").on(t.courseId, t.pageUrl)]);
