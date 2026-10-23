@@ -20,7 +20,7 @@ const D = 24 * H;
 // Made-up Canvas course ids, far from real ones: cached decks are filed by course id.
 export const DEMO_COURSE_BASE = 9_900_000;
 
-export const demoEnabled = () => process.env.DEMO_ENABLED !== "0";
+export { demoEnabled } from "@/lib/env";
 
 // The most recent midnight in Singapore, as a timestamp.
 export function lastMidnightSgt(now: number): number {

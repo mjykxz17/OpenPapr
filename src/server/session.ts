@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { NextResponse } from "next/server";
 import { SESSION_TTL_MS, readSession, signSession } from "./auth";
-import { loadEnv, sessionSigningKey } from "@/lib/env";
+import { demoEnabled, loadEnv, sessionSigningKey } from "@/lib/env";
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { users } from "@/db/schema";
@@ -11,11 +11,15 @@ import { getDb } from "./db";
 // The account a session cookie belongs to, or null. A signed cookie outlives
 // a deleted account, and one signed before the account's last password change
 // or "sign out everywhere" carries an older version — neither is accepted.
+// Nor is a demo session once the demo is switched off: turning it off is
+// meant to stop visitors using it (and the owner's AI key it borrows) now,
+// not when their cookies run out a day later.
 export function sessionUserId(db: Db, value: string | undefined, secretHex: string): number | null {
   const s = readSession(value, secretHex);
   if (!s) return null;
-  const row = db.select({ version: users.sessionVersion }).from(users).where(eq(users.id, s.userId)).get();
-  return row && row.version === s.version ? s.userId : null;
+  const row = db.select({ version: users.sessionVersion, isDemo: users.isDemo }).from(users).where(eq(users.id, s.userId)).get();
+  if (!row || row.version !== s.version) return null;
+  return row.isDemo && !demoEnabled() ? null : s.userId;
 }
 
 // The authenticated user, or null. The proxy already turns anonymous traffic

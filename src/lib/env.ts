@@ -52,3 +52,7 @@ export function loadEnv(raw: NodeJS.ProcessEnv = process.env): Env {
 export function sessionSigningKey(env: Pick<Env, "SECRET_KEY" | "SESSION_KEY">): string {
   return env.SESSION_KEY ?? env.SECRET_KEY;
 }
+
+// DEMO_ENABLED=0 switches the public demo off: no new demo sign-ins, no
+// nightly reset, and the demo sessions already handed out stop working.
+export const demoEnabled = () => process.env.DEMO_ENABLED !== "0";
