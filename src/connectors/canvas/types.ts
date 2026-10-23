@@ -11,7 +11,9 @@ export interface CanvasAnnouncement { id: number; title: string; message: string
 export interface CanvasCalendarEvent { id: number; title: string; start_at: string | null; html_url: string; description: string | null; }
 // updated_at moves whenever the page is edited, which is what lets a page's
 // body be kept between syncs instead of fetched again (see page-cache).
-export interface CanvasPage { url: string; title: string; updated_at?: string | null; }
+// locked_for_user is this student's view: a page behind a module's unlock
+// date or prerequisites comes back with no body until it opens for them.
+export interface CanvasPage { url: string; title: string; updated_at?: string | null; locked_for_user?: boolean; }
 // NB: the Canvas files API returns the MIME type under the HYPHENATED key
 // "content-type", not snake_case like every other field.
 export interface CanvasFile { id: number; display_name: string; url: string; "content-type"?: string; size?: number; hidden?: boolean; }

@@ -43,6 +43,27 @@ describe("cachedPageBody", () => {
     expect(canvas.getPageBody).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps no empty body, so a page that unlocks later is read then", async () => {
+    const db = createDb(":memory:");
+    let text = "";   // locked for the student: Canvas sends no body
+    const canvas = fakeCanvas(() => text);
+    const page = { url: "week-5", title: "Week 5", updated_at: "t" };
+    expect(await cachedPageBody(db, canvas, 7, page, 0)).toBe("");
+    expect(db.select().from(canvasPageCache).all()).toHaveLength(0);
+    text = "<a href='/files/9'>L5</a>";   // the unlock date passes; updated_at does not move
+    expect(await cachedPageBody(db, canvas, 7, page, H)).toBe(text);
+    expect(canvas.getPageBody).toHaveBeenCalledTimes(2);
+  });
+
+  it("never serves a body to a student the page is still locked for", async () => {
+    const db = createDb(":memory:");
+    const canvas = fakeCanvas(() => "secret links");
+    const page = { url: "week-9", title: "Week 9", updated_at: "t" };
+    await cachedPageBody(db, canvas, 7, { ...page, locked_for_user: false }, 0);   // a classmate it is open to
+    expect(await cachedPageBody(db, canvas, 7, { ...page, locked_for_user: true }, 0)).toBe("");
+    expect(canvas.getPageBody).toHaveBeenCalledTimes(1);   // and nothing asked of Canvas either
+  });
+
   it("caches nothing when the fetch fails", async () => {
     const db = createDb(":memory:");
     const canvas = { getPageBody: vi.fn(async () => { throw new Error("Canvas 404"); }) };
