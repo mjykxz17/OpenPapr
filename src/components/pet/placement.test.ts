@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bubbleBox, dockBottom, panelBox, petRect, RAIL_W, TAB_BAR_H } from "./placement";
+import { bubbleBox, dockBottom, isPhone, panelBox, petRect, RAIL_W, TAB_BAR_H } from "./placement";
 
 // The rail's free stretch at 1440×900: below the nav icons, above Account.
 const dock = { left: 0, top: 360, width: RAIL_W, height: 380 };
@@ -69,5 +69,23 @@ describe("bubbleBox", () => {
     expect(right.right).toBe(phoneVw.w - (tab.left + tab.width));
     const left = bubbleBox(true, { ...tab, left: 4 }, phoneVw);
     expect(left.left).toBe(8);
+  });
+});
+
+describe("isPhone", () => {
+  // A stand-in matchMedia that resolves rem against the browser's font size.
+  const media = (width: number, rootPx: number) => (q: string) => {
+    const m = /min-width:\s*([\d.]+)rem/.exec(q);
+    return { matches: m ? width >= Number(m[1]) * rootPx : false };
+  };
+  it("switches where the rail does, at Tailwind's sm", () => {
+    expect(isPhone(media(390, 16))).toBe(true);
+    expect(isPhone(media(640, 16))).toBe(false);
+    expect(isPhone(media(1440, 16))).toBe(false);
+  });
+  it("follows a larger browser font size, as the rail does", () => {
+    // At 20px, sm is 800px: a 700px window shows the tab bar, so Papi is the Ask tab.
+    expect(isPhone(media(700, 20))).toBe(true);
+    expect(isPhone(media(800, 20))).toBe(false);
   });
 });

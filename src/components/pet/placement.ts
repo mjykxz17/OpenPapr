@@ -14,7 +14,14 @@ export const TAB_ID = "papi-tab";
 
 export const RAIL_W = 56;      // the rail's width (w-14)
 export const TAB_BAR_H = 72;    // the tab bar plus a little room above it
-export const PHONE_MAX = 640;   // below this the rail is a tab bar (Tailwind's sm)
+// Tailwind's sm, the query the rail itself switches on (sm:flex / sm:hidden).
+// Asked as a media query rather than compared with innerWidth, so the two
+// agree when the browser's font size isn't 16px (40rem is then not 640px).
+export const WIDE_QUERY = "(min-width: 40rem)";
+
+export function isPhone(matchMedia: (query: string) => { matches: boolean }): boolean {
+  return !matchMedia(WIDE_QUERY).matches;
+}
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
@@ -47,7 +54,9 @@ export function panelBox(phone: boolean, pet: Rect, vw: Viewport, want: { w: num
 }
 
 // A speech bubble: beside Papi in the rail, or above its tab on a phone,
-// leaning towards the middle of the screen.
+// leaning towards the middle of the screen. It sits over the page, so Papi
+// only speaks when someone has just touched it; lines it has on its own wait
+// as a dot on Papi (see note.ts).
 export function bubbleBox(phone: boolean, pet: Rect, vw: Viewport): BubbleBox {
   if (!phone) return { left: RAIL_W + 8, bottom: Math.max(8, vw.h - (pet.top + pet.height)) };
   const bottom = vw.h - pet.top + 6;

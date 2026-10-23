@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import { PapiFace, type Mood } from "./PapiFace";
 import { answerMessage, isUngrounded, UNGROUNDED_NOTE, type Msg, type Source } from "./chat";
-import { bubbleBox, dockBottom, DOCK_ID, panelBox, petRect, PHONE_MAX, TAB_ID, type Rect } from "./placement";
+import { bubbleBox, dockBottom, DOCK_ID, isPhone, panelBox, petRect, TAB_ID, WIDE_QUERY, type Rect } from "./placement";
+import { noteArrived, noteSeen, noteToSay, noteWaiting, type Note } from "./note";
 
 type Nudges = { reminders: string[]; quips: string[]; smart: boolean };
 
@@ -43,9 +44,9 @@ const ago = (ms: number) => {
 
 // Papi: a paper study buddy that lives in the rail, never on the page. Drag
 // it up and down the rail, pat it, double-click it for a trick, shake it
-// (gently). On a phone it is the Ask tab. It idles on its own, speaks up with
-// reminders and one-liners, sleeps from 1 to 7am, and opens a chat — with
-// saved conversations — when clicked.
+// (gently). On a phone it is the Ask tab. It idles on its own, has reminders
+// and one-liners (a dot until you come to it), sleeps from 1 to 7am, and
+// opens a chat — with saved conversations — when clicked.
 export function Papi() {
   const router = useRouter();
   const pathname = usePathname();
@@ -57,6 +58,8 @@ export function Papi() {
   const [mood, setMood] = useState<Mood>("idle");
   const [anim, setAnim] = useState<"" | "hop" | "spin" | "bounce">("");
   const [bubble, setBubble] = useState<string | null>(null);
+  // A line Papi came up with on its own, waiting as a dot (see note.ts).
+  const [note, setNote] = useState<Note>(null);
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"chat" | "history" | "settings">("chat");
   const [quiet, setQuiet] = useState(false);
@@ -76,6 +79,7 @@ export function Papi() {
   const [dockY, setDockY] = useState(0);
   const [panel, setPanel] = useState({ w: 380, h: 500 });
   const [vw, setVw] = useState({ w: 1280, h: 800 });
+  const [phone, setPhone] = useState(false);
   // The rail's spot for Papi (or the phone's tab), and where it is on screen.
   const [slot, setSlot] = useState<HTMLElement | null>(null);
   const [slotRect, setSlotRect] = useState<Rect>({ left: 0, top: 0, width: 0, height: 0 });
@@ -91,7 +95,6 @@ export function Papi() {
   const petTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPetLine = useRef(0);
 
-  const phone = vw.w < PHONE_MAX;
   const px = phone ? TAB_PX : RAIL_PX;
   const petW = px + 8;
   const petH = Math.round(px * 70 / 64) + 8;
@@ -113,11 +116,17 @@ export function Papi() {
     const onResize = () => setVw({ w: window.innerWidth, h: window.innerHeight });
     onResize();
     window.addEventListener("resize", onResize);
+    // Phone or not is the rail's own media query, so Papi always lands in the
+    // slot that is actually showing.
+    const wide = window.matchMedia(WIDE_QUERY);
+    const onWide = () => setPhone(isPhone((q) => window.matchMedia(q)));
+    onWide();
+    wide.addEventListener("change", onWide);
     const load = () => fetch("/api/pet").then((r) => (r.ok ? r.json() : null)).then((n) => n && setNudges(n)).catch(() => {});
     load();
     const t = setInterval(() => { load(); setAsleep(asleepNow()); }, 10 * 60_000);
     setReady(true);
-    return () => { clearInterval(t); window.removeEventListener("resize", onResize); };
+    return () => { clearInterval(t); window.removeEventListener("resize", onResize); wide.removeEventListener("change", onWide); };
   }, []);
 
   // Find the spot the rail (or the tab bar, on a phone) keeps for Papi, and
@@ -184,7 +193,22 @@ export function Papi() {
     bubbleTimer.current = setTimeout(() => setBubble(null), ms);
   }, []);
 
-  // Unprompted words: a reminder when one is new, else a quip.
+  // Unprompted words: a reminder when one is new, else a quip. A bubble
+  // would cover the page, so it waits as a dot on Papi instead.
+  const hint = useCallback((text: string) => {
+    setNote(noteArrived(text));
+    setMood((m) => (m === "sleep" || m === "dizzy" ? m : "talk"));
+    setTimeout(() => setMood((m) => (m === "talk" ? "idle" : m)), 1400);
+  }, []);
+  // The waiting line, as a bubble, once the pointer or focus reaches Papi.
+  function sayNote(): boolean {
+    const line = noteToSay(note);
+    // A phone has no hover, and a tap opens the chat, which shows the line.
+    if (!line || open || phone) return false;
+    setNote(noteSeen);
+    say(line);
+    return true;
+  }
   useEffect(() => {
     if (!nudges || quiet || asleep || open) return;
     let alive = true;
@@ -195,14 +219,14 @@ export function Papi() {
         if (document.visibilityState === "visible" && !drag.current) {
           const fresh = nudges.reminders.filter((r) => !said.current.has(r));
           const line = fresh.length && (first || Math.random() < 0.55) ? fresh[0] : pick(nudges.quips);
-          if (line) { said.current.add(line); say(line); }
+          if (line) { said.current.add(line); hint(line); }
         }
         next(false);
       }, first ? rand(4000, 7000) : rand(60_000, 150_000));
     };
     next(said.current.size === 0);
     return () => { alive = false; clearTimeout(t); };
-  }, [nudges, quiet, asleep, open, say]);
+  }, [nudges, quiet, asleep, open, hint]);
 
   // --- interaction: drag, tap, double-tap, pat, shake -------------------------
   function onPointerDown(e: React.PointerEvent<HTMLButtonElement>) {
@@ -257,13 +281,15 @@ export function Papi() {
     setTimeout(() => { setAnim(""); setMood((m) => (m === "happy" ? "idle" : m)); }, 900);
     if (nudges && !open) say(pick(nudges.quips), 5000);
   }
-  // Resting the pointer on Papi for a moment counts as a pat.
+  // Resting the pointer on Papi for a moment counts as a pat. Reaching it at
+  // all is when it says what it has been waiting to say.
   function onEnter() {
+    const spoke = sayNote();
     if (petTimer.current) clearTimeout(petTimer.current);
     petTimer.current = setTimeout(() => {
       setBlush(1);
       setMood((m) => (m === "idle" || m.startsWith("look") ? "happy" : m));
-      if (!open && !bubble && Date.now() - lastPetLine.current > 45_000) { lastPetLine.current = Date.now(); say(pick(PET_LINES), 2200); }
+      if (!open && !bubble && !spoke &&Date.now() - lastPetLine.current > 45_000) { lastPetLine.current = Date.now(); say(pick(PET_LINES), 2200); }
     }, 900);
   }
   function onLeave() {
@@ -279,6 +305,13 @@ export function Papi() {
     setDockY(next);
     store.set(KEYS.dock, String(next));
   }
+
+  // Opening the chat hands it the waiting line, as Papi's latest message.
+  useEffect(() => {
+    if (!open || !note) return;
+    setMessages((m) => [...m, { role: "assistant", content: note.text, at: Date.now() }]);
+    setNote(null);
+  }, [open, note]);
 
   function toggleChat() {
     setBubble(null);
@@ -360,7 +393,7 @@ export function Papi() {
     const q = !quiet;
     setQuiet(q);
     store.set(KEYS.quiet, q ? "1" : "0");
-    if (q) setBubble(null);
+    if (q) { setBubble(null); setNote(null); }
   }
   function resetSpot() { setDockY(0); store.set(KEYS.dock, "0"); setAnim("bounce"); setTimeout(() => setAnim(""), 600); }
 
@@ -389,6 +422,7 @@ export function Papi() {
   function onGripUp() { resize.current = null; }
 
   if (!ready) return null;
+  const waiting = noteWaiting(note) && !open && !dragging;
 
   const iconBtn = "flex h-7 items-center justify-center rounded-md px-2 text-[12px] text-ink-2 hover:bg-sunken hover:text-ink";
 
@@ -457,7 +491,7 @@ export function Papi() {
           {view === "settings" && (
             <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-4 text-[13.5px]">
               <label className="flex items-center justify-between gap-3">
-                <span><span className="text-ink">Speak up on its own</span><br /><span className="text-[12px] text-ink-3">Reminders and one-liners every minute or two</span></span>
+                <span><span className="text-ink">Speak up on its own</span><br /><span className="text-[12px] text-ink-3">Reminders and one-liners every minute or two, shown as a dot on Papi</span></span>
                 <input type="checkbox" checked={!quiet} onChange={toggleQuiet} className="h-4 w-4 accent-[var(--ink)]" />
               </label>
               {!phone && (
@@ -474,7 +508,7 @@ export function Papi() {
           {view === "chat" && (
             <>
               <div ref={listRef} className="flex flex-1 flex-col gap-2.5 overflow-y-auto px-4 py-3" aria-live="polite">
-                {messages.length === 0 && (
+                {!messages.some((m) => m.role === "user") && (
                   <div className="flex flex-col gap-2">
                     <p className="text-[14px] leading-[1.5] text-ink-2">Hi! Ask me what&apos;s due, or anything about your slides, guides and announcements. I answer from your own material and show where each answer came from. Say “remind me to …” and I&apos;ll add a task.</p>
                     <div className="flex flex-wrap gap-1.5">
@@ -540,7 +574,8 @@ export function Papi() {
           onPointerEnter={onEnter} onPointerLeave={onLeave} onKeyDown={onKey}
           onClick={(e) => { if (e.detail === 0) toggleChat(); /* keyboard Enter/Space */ }}
           title={phone ? undefined : "Ask Papi"}
-          aria-label={phone ? undefined : open ? "Close chat with Papi" : "Ask Papi, your study buddy. Arrow keys move it up and down."}
+          aria-label={phone ? undefined : open ? "Close chat with Papi" : `Ask Papi, your study buddy.${waiting ? " Papi has something to tell you." : ""} Arrow keys move it up and down.`}
+          onFocus={() => { sayNote(); }}
           aria-expanded={open}
           style={phone ? { touchAction: "manipulation" } : { bottom: safeBottom, transform: `translateX(-50%) rotate(${tilt}deg)`, touchAction: "none" }}
           className={phone
@@ -551,8 +586,9 @@ export function Papi() {
               <PapiFace mood={open && mood === "sleep" ? "idle" : mood} size={px} gaze={dragging ? null : gaze} blush={blush} />
             </span>
             {asleep && !open && !dragging && <span aria-hidden className="papi-z absolute -top-2 -right-1 text-[13px] font-semibold text-ink-3">z<span className="text-[10px]">z</span></span>}
+            {waiting && <span aria-hidden className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-accent ring-2 ring-surface" />}
           </span>
-          {phone && <span>{open ? "Close" : "Ask"}</span>}
+          {phone && <span>{open ? "Close" : "Ask"}{waiting && <span className="sr-only"> (Papi has something to tell you)</span>}</span>}
         </button>,
         slot,
       )}
