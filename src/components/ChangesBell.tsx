@@ -4,13 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeView } from "@/server/changes";
+import { SGT_ZONE } from "@/lib/sgt";
 
 // The bell: what the courses changed. A date you set that an announcement
 // contradicts waits here for you to choose; dates moved for you can be
 // undone; newly found work can be confirmed or thrown out.
 
-const fmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Singapore" });
-const fmtDay = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Singapore" });
+const fmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: SGT_ZONE });
+const fmtDay = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: SGT_ZONE });
 // "Tue 13 Oct, 18:30", or "Tue 13 Oct" for "by the end of the day".
 function when(ms: number | null): string {
   if (ms === null) return "no date";

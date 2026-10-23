@@ -2,7 +2,7 @@ import type { Overview } from "@/server/overview";
 import type { SourceLink, TasksView, TaskView } from "@/server/tasks";
 import type { CalDue } from "@/server/calendar-dues";
 import type { TaskStep } from "@/enrich/tasks";
-import { sgtDate } from "@/enrich/tasks";
+import { sgtDate } from "@/lib/sgt";
 import { findWeightComponent } from "@/lib/component-display";
 import { shortComponentName } from "@/lib/module-name";
 

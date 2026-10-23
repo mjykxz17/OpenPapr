@@ -1,6 +1,6 @@
 import type { Overview } from "@/server/overview";
 import type { TasksView } from "@/server/tasks";
-import { sgtDate } from "@/enrich/tasks";
+import { sgtDate, sgtHHMM, sgtNoon } from "@/lib/sgt";
 import { findWeightComponent } from "@/lib/component-display";
 import { shortComponentName } from "@/lib/module-name";
 import { htmlToText } from "@/lib/html-text";
@@ -33,7 +33,6 @@ export function eventTitle(title: string, mod: { code: string; name: string } | 
   return left ? title.replace(/\s*\[\d{3,5}\]\s*$/, "") : "Class session";
 }
 
-const timeFmt = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Singapore" });
 
 export function calendarDues(overview: Overview, tv: TasksView, now: number,
   extra: { roadmap?: RoadmapEntry[]; allTasks?: { moduleId: number | null; title: string; dueAt: number | null }[] } = {}): { today: string; dues: CalDue[] } {
@@ -52,7 +51,7 @@ export function calendarDues(overview: Overview, tv: TasksView, now: number,
     const mod = overview.modules.find((m) => m.id === t.moduleId);
     const note = isEvent ? htmlToText(t.body).replace(/\s+/g, " ").trim().slice(0, 160) || null : null;
     dues.push({
-      key: `i${t.id}`, day: sgtDate(t.dueAt), time: timeFmt.format(t.dueAt),
+      key: `i${t.id}`, day: sgtDate(t.dueAt), time: sgtHHMM(t.dueAt),
       title: isEvent ? eventTitle(t.title, mod) : t.title, code: codeOf(t.moduleId), moduleId: t.moduleId,
       href: task ? `/tasks#task-${task.id}` : t.moduleId ? `/modules/${t.moduleId}` : "/tasks",
       counts: isEvent ? null : counts(findWeightComponent(t, overview.modules)), estimated: false, exam: false,
@@ -69,14 +68,14 @@ export function calendarDues(overview: Overview, tv: TasksView, now: number,
     if (t.dueAt === null || t.dueAt < now || shownAsCanvas) continue;
     const title = t.title.replace(/\s*\(expected\)$/i, "");
     dues.push({
-      key: `t${t.id}`, day: sgtDate(t.dueAt), time: timeFmt.format(t.dueAt), title, code: t.code, moduleId: t.moduleId, href: `/tasks#task-${t.id}`,
+      key: `t${t.id}`, day: sgtDate(t.dueAt), time: sgtHHMM(t.dueAt), title, code: t.code, moduleId: t.moduleId, href: `/tasks#task-${t.id}`,
       counts: counts(findWeightComponent({ moduleId: t.moduleId, title }, overview.modules)),
       estimated: t.dueConfidence === "estimated", exam: t.kind === "exam", overdue: false, plan: planOf(t), event: null,
     });
   }
   // The course's own schedule fills in what nothing else has yet — the quiz
   // in Week 10, the CTF in Week 11 — so the whole semester is on the calendar.
-  const known = [...dues.filter((d) => !d.event).map((d) => ({ moduleId: d.moduleId, title: d.title, at: Date.parse(`${d.day}T12:00:00+08:00`) as number | null })),
+  const known = [...dues.filter((d) => !d.event).map((d) => ({ moduleId: d.moduleId, title: d.title, at: sgtNoon(d.day) as number | null })),
     ...(extra.allTasks ?? []).map((t) => ({ moduleId: t.moduleId, title: t.title, at: t.dueAt }))];
   const sameThing = (a: string, b: string) => {
     const na = assessmentNumber(a), nb = assessmentNumber(b);
@@ -95,7 +94,7 @@ export function calendarDues(overview: Overview, tv: TasksView, now: number,
       && ((numbered && assessmentNumber(k.title) !== null) || (k.at !== null && k.at >= from - 86_400_000 && k.at <= to + 86_400_000)))) continue;
     const title = r.title.replace(/\s*\([^)]*\)\s*$/, "") || r.title;
     dues.push({
-      key: `r${r.moduleId}-${r.title}-${r.at}`, day: sgtDate(r.at), time: timeFmt.format(r.at), title, code: codeOf(r.moduleId), moduleId: r.moduleId,
+      key: `r${r.moduleId}-${r.title}-${r.at}`, day: sgtDate(r.at), time: sgtHHMM(r.at), title, code: codeOf(r.moduleId), moduleId: r.moduleId,
       href: r.fileId ? `/modules/${r.moduleId}/files/${r.fileId}` : `/modules/${r.moduleId}`,
       counts: r.weightPct != null ? { name: r.kind === "quiz" ? "Quizzes" : title, pct: r.weightPct } : counts(findWeightComponent({ moduleId: r.moduleId, title }, overview.modules)),
       estimated: r.placed !== "date", exam: ["exam", "midterm", "test"].includes(r.kind), overdue: false, plan: null, event: null,

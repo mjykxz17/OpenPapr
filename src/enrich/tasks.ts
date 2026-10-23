@@ -3,6 +3,7 @@ import { z } from "zod";
 import { chatJson, type CompatConfig } from "./openai-compat";
 import { TASK_KINDS } from "../db/schema";
 import { assessmentNumber, assessmentNumbers, assessmentText, ownWork, quizNumber, sameTask } from "../lib/own-work";
+import { addSgtDays as addDays, parseSgt, sgtDate, sgtStamp } from "../lib/sgt";
 import type { WeakSpot } from "../server/weak-topics";
 export { quizNumber };
 
@@ -131,23 +132,6 @@ export type CleanTask = {
   checks?: string[];
 };
 
-export const sgtDate = (ms: number) => new Date(ms + 8 * 3_600_000).toISOString().slice(0, 10);
-// A date or time from a model, read as Singapore time whatever the server's
-// zone: "2026-10-30" is by the end of that day (23:59), "2026-10-30T14:00"
-// is 2pm there, and anything with its own offset keeps it. NaN if unreadable.
-export function parseSgt(s: string): number {
-  const t = s.trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return Date.parse(`${t}T23:59:00+08:00`);
-  const local = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2}(\.\d+)?)?$/.exec(t);
-  if (local) return Date.parse(`${local[1]}T${local[2]}${local[3] ?? ":00"}+08:00`);
-  return Date.parse(t);
-}
-// "2026-10-30 14:05 (Fri)" in Singapore time, for prompts.
-export const sgtStamp = (ms: number) => {
-  const d = new Date(ms + 8 * 3_600_000);
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} (${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()]})`;
-};
-const addDays = (date: string, n: number) => sgtDate(Date.parse(`${date}T12:00:00+08:00`) + n * 86_400_000);
 export const stepId = (key: string, text: string) => createHash("sha1").update(`${key}\n${text}`).digest("hex").slice(0, 10);
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 const ROUTINE_RE = /^(attend|bring|charge|go to|join|be present)\b/i;

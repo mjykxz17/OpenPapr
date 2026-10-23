@@ -7,6 +7,7 @@ import type { CompatConfig } from "../enrich/openai-compat";
 import type { SignalItem, TaskSource } from "../enrich/tasks";
 import { htmlToText } from "../lib/html-text";
 import { semesterWeeks } from "../lib/acad-week";
+import { endOfSgtDay, sgtDate, sgtDayLabel, sgtHHMM, sgtTime, sgtWeekday } from "../lib/sgt";
 
 // Reads each module's schedule once (and again when its sources change) and
 // turns it into lines the task planner can act on, with "Week 8, in
@@ -14,7 +15,6 @@ import { semesterWeeks } from "../lib/acad-week";
 
 const H = 3_600_000;
 const D = 24 * H;
-const SGT = 8 * H;
 const REREAD_AFTER = 7 * D;       // even unchanged, a fresh read weekly
 const ERROR_BACKOFF = 6 * H;
 const PER_RUN = 2;
@@ -133,10 +133,8 @@ export async function refreshRoadmaps(deps: RoadmapDeps, userId: number, mods: M
 
 // --- for the planner ------------------------------------------------------------
 const WD = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const sgt = (ms: number) => new Date(ms + SGT);
-const dayLabel = (ms: number) => { const d = sgt(ms); return `${WD[d.getUTCDay()]} ${d.getUTCDate()} ${MON[d.getUTCMonth()]}`; };
-const hhmm = (ms: number) => sgt(ms).toISOString().slice(11, 16);
+const dayLabel = sgtDayLabel;
+const hhmm = sgtHHMM;
 
 export type ClassSlot = { weekday: number; time: string; title: string; count: number };
 
@@ -149,7 +147,7 @@ export function classSlots(rows: { type: string; title: string; dueAt: number | 
   for (const [title, times] of by) {
     if (times.length < 3) continue;
     const tally = new Map<string, number>();
-    for (const t of times) { const k = `${sgt(t).getUTCDay()}|${hhmm(t)}`; tally.set(k, (tally.get(k) ?? 0) + 1); }
+    for (const t of times) { const k = `${sgtWeekday(t)}|${hhmm(t)}`; tally.set(k, (tally.get(k) ?? 0) + 1); }
     const [k] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0]!;
     const [weekday, time] = k.split("|");
     out.push({ weekday: Number(weekday), time: time!, title, count: times.length });
@@ -242,7 +240,7 @@ export function roadmapCalendar(db: Db, mod: Mod, now: number): RoadmapEntry[] {
       : typeof it.week === "number" ? weeks.find((w) => w.teachingWeek === it.week) : undefined;
     let at: number | null = null, time = it.time, placed: RoadmapEntry["placed"] = "week";
     if (it.date) {
-      at = Date.parse(`${it.date}T${it.time ?? "23:59"}:00+08:00`);
+      at = sgtTime(it.date, it.time ?? "23:59");
       placed = "date";
     } else if (wk) {
       const slot = pickSlot(slots, it.slot) ?? (!it.slot && slots.length === 1 && ["quiz", "test", "midterm"].includes(it.kind) ? slots[0]! : null);
@@ -276,12 +274,12 @@ export function weeksNamed(text: string): number[] {
 export function placeInWeek(week: number, now: number, slots: ClassSlot[], term?: string | null): { at: number; from: number; to: number; inClass: boolean } | null {
   const wk = semesterWeeks(now, term).weeks.find((w) => w.teachingWeek === week);
   if (!wk) return null;
-  const day = (offset: number) => new Date(wk.monday + offset * D + SGT).toISOString().slice(0, 10);
+  const day = (offset: number) => sgtDate(wk.monday + offset * D);
   if (slots.length === 1) {
     const s = slots[0]!;
-    return { at: Date.parse(`${day((s.weekday + 6) % 7)}T${s.time}:00+08:00`), from: wk.monday, to: wk.sunday + D, inClass: true };
+    return { at: sgtTime(day((s.weekday + 6) % 7), s.time), from: wk.monday, to: wk.sunday + D, inClass: true };
   }
-  return { at: Date.parse(`${day(4)}T23:59:00+08:00`), from: wk.monday, to: wk.sunday + D, inClass: false };
+  return { at: endOfSgtDay(day(4)), from: wk.monday, to: wk.sunday + D, inClass: false };
 }
 
 // The note added to an announcement for the planner.

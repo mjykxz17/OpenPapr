@@ -5,6 +5,7 @@ import type { Db } from "@/db/client";
 import { files, guideProgress, modules, quizAttempts, users } from "@/db/schema";
 import { DEMO_DECKS, seedSemester } from "@/demo/semester";
 import { deckSignature } from "@/lib/deck-versions";
+import { sgtMidnight } from "@/lib/sgt";
 import { extractPdfText } from "@/lib/pdf-text";
 import { deckCachePath } from "./deck";
 import { wipeUserData } from "./account-data";
@@ -24,7 +25,7 @@ export const demoEnabled = () => process.env.DEMO_ENABLED !== "0";
 
 // The most recent midnight in Singapore, as a timestamp.
 export function lastMidnightSgt(now: number): number {
-  return Math.floor((now + 8 * H) / D) * D - 8 * H;
+  return sgtMidnight(now);
 }
 
 export function findDemoUser(db: Db) {

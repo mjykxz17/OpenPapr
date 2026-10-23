@@ -11,10 +11,11 @@
 // The Registrar starts recess, reading and exam periods on the Saturday
 // before their Monday, so those dates are given as that Saturday.
 
+import { SGT_OFFSET_MS, sgtClock } from "./sgt";
+
 const H = 3_600_000;
 const D = 24 * H;
 const W = 7 * D;
-const SGT = 8 * H;
 
 export type AcadPhase = "orientation" | "teaching" | "recess" | "reading" | "exams" | "vacation";
 
@@ -38,14 +39,14 @@ export type SemesterView = {
 export function acadYearStart(startYear: number): number {
   const aug1 = Date.UTC(startYear, 7, 1);
   const dow = new Date(aug1).getUTCDay(); // 0 = Sunday
-  return aug1 + ((8 - dow) % 7) * D - SGT;
+  return aug1 + ((8 - dow) % 7) * D - SGT_OFFSET_MS;
 }
 
 // Monday of a semester's orientation week.
 const semOrientation = (yearStart: number, sem: 1 | 2) => yearStart + (sem === 1 ? 0 : 22) * W;
 
 export function semesterView(now: number): SemesterView {
-  const y = new Date(now + SGT).getUTCFullYear();
+  const y = sgtClock(now).getUTCFullYear();
   const startYear = now < acadYearStart(y) ? y - 1 : y;
   const ys = acadYearStart(startYear);
   const acadWeek = Math.floor((now - ys) / W) + 1; // 1-based

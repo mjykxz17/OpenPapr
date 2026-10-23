@@ -4,7 +4,7 @@ import { requireUserId } from "@/server/session";
 import { getOverview } from "@/server/overview";
 import { taskPlanStatus, tasksView } from "@/server/tasks";
 import { canGenerateGuides } from "@/server/llm-access";
-import { sgtDate } from "@/enrich/tasks";
+import { sgtDate } from "@/lib/sgt";
 import { loadEnv } from "@/lib/env";
 import { semesterWeeks } from "@/lib/acad-week";
 import { calendarDues } from "@/server/calendar-dues";

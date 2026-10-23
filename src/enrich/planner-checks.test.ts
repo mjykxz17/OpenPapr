@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
-  balanceDays, capWithClasses, cleanPlan, dailyCap, dayLoads, fitSteps, mergeTasks, newSteps, parseSgt, quoteFound, refFacts, revisionStepText,
-  sgtDate, stepId, weakSpotAdvice, weakSpotGroups, type ModuleTaskInput, type TaskSource, type TaskStep,
+  balanceDays, capWithClasses, cleanPlan, dailyCap, dayLoads, fitSteps, mergeTasks, newSteps, quoteFound, refFacts, revisionStepText,
+  stepId, weakSpotAdvice, weakSpotGroups, type ModuleTaskInput, type TaskSource, type TaskStep,
 } from "./tasks";
+import { parseSgt, sgtDate } from "../lib/sgt";
 
 // Every date here is written with its offset, and every check reads Singapore
 // days, so these pass whatever zone the process runs in (try TZ=UTC).

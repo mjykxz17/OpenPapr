@@ -7,6 +7,7 @@ import { PapiFace, type Mood } from "./PapiFace";
 import { answerMessage, isUngrounded, UNGROUNDED_NOTE, type Msg, type Source } from "./chat";
 import { bubbleBox, dockBottom, DOCK_ID, isPhone, panelBox, petRect, TAB_ID, WIDE_QUERY, type Rect } from "./placement";
 import { noteArrived, noteSeen, noteToSay, noteWaiting, type Note } from "./note";
+import { sgtHour } from "@/lib/sgt";
 
 type Nudges = { reminders: string[]; quips: string[]; smart: boolean };
 
@@ -28,7 +29,7 @@ const DIZZY_LINES = ["Whoa… the room is spinning.", "Gentle! I'm only paper.",
 
 const rand = (min: number, max: number) => min + Math.random() * (max - min);
 const pick = <T,>(a: readonly T[]) => a[Math.floor(Math.random() * a.length)]!;
-const asleepNow = () => { const h = new Date(Date.now() + 8 * 3_600_000).getUTCHours(); return h >= 1 && h < 7; };
+const asleepNow = () => { const h = sgtHour(Date.now()); return h >= 1 && h < 7; };
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },

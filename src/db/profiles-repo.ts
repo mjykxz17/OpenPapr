@@ -2,6 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import type { Db } from "./client";
 import { courseHistory, moduleProfiles, modules, nusmodsModules, nusmodsReviews, slideNotes, users, weeklyPlans } from "./schema";
 import type { NusmodsModule, Review } from "../connectors/nusmods/client";
+import { sgtMidnight, sgtWeekday } from "../lib/sgt";
 
 // --- course history -------------------------------------------------------
 export function upsertCourseHistory(
@@ -98,9 +99,6 @@ export function userNotesText(db: Db, userId: number, maxChars = 8000): { text: 
 
 // Singapore week: Monday 00:00 SGT.
 export function weekStartSgt(now: number): number {
-  const SGT = 8 * 3_600_000;
-  const local = new Date(now + SGT);
-  const day = (local.getUTCDay() + 6) % 7; // Mon = 0
-  const midnight = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()) - SGT;
-  return midnight - day * 86_400_000;
+  const day = (sgtWeekday(now) + 6) % 7; // Mon = 0
+  return sgtMidnight(now) - day * 86_400_000;
 }
