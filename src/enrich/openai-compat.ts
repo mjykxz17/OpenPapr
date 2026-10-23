@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { checkBaseUrlAddress } from "../lib/llm-address";
 import { providerDetail, requestBody, requestHeaders, tokenParams } from "../lib/llm-provider";
 import { gateFor } from "../lib/rate-gate";
+import { fenceRoles } from "../lib/md-fences";
 
 // OpenAI-compatible provider (Agnes agrouter). Same contracts as ./llm and
 // ./weightage, but JSON is requested in the prompt and validated with zod —
@@ -259,15 +260,11 @@ export async function chatText(
 // text as it came.
 export function lastWholeParagraph(text: string): string {
   const lines = text.split("\n");
-  let fence: string | null = null, end = -1;
+  const { roles } = fenceRoles(lines);
+  let end = -1, seen = false;
   for (const [i, line] of lines.entries()) {
-    const m = line.match(/^\s*(`{3,}|~{3,})/);
-    if (m) {
-      if (fence === null) fence = m[1]!;
-      else if (m[1]![0] === fence[0] && m[1]!.length >= fence.length && line.trim() === m[1]) fence = null;
-      continue;
-    }
-    if (fence === null && line.trim() === "" && lines.slice(0, i).some((l) => l.trim())) end = i;
+    if (roles[i] === "text" && line.trim() === "" && seen) end = i;
+    if (line.trim()) seen = true;
   }
   return end === -1 ? text : lines.slice(0, end).join("\n").trimEnd();
 }

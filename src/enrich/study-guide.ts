@@ -2,6 +2,7 @@ import { z } from "zod";
 import { chatJson, chatText, type CompatConfig } from "./openai-compat";
 import { repairMermaidBlocks } from "../lib/mermaid-fix";
 import { decodeDeck } from "../lib/slide-citation";
+import { closingFence, fenceOpener, fenceRoles } from "../lib/md-fences";
 
 // Generates a study-guide chapter from one lecture deck.
 //
@@ -136,28 +137,35 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
 // against the next paragraph swallows it, which silently ate a whole chapter
 // once already. Cheaper to normalise the output than to keep asking the model
 // to remember.
+//
+// Fences are read as renderers read them (lib/md-fences.ts). Treating every
+// line that starts with ``` as a toggle got the "fence at line N is not
+// followed by a blank line" problems on stored chapters: a ``` shown inside a
+// ````markdown block, or a "```python" line inside a fence, flipped the state,
+// and a section cut off inside a code block left its fence open, so every
+// fence in the sections after it read the wrong way round. A fence still open
+// at the end is closed here, so it cannot leak into the next section.
 export function normalizeFences(markdown: string): string {
   const lines = markdown.split("\n");
+  const { roles, open } = fenceRoles(lines);
   const out: string[] = [];
-  let inFence = false;
-  for (const line of lines) {
-    const isFence = /^\s*```/.test(line);
-    if (isFence && !inFence) {
-      if (out.length && out[out.length - 1]!.trim() !== "") out.push("");
+  const prevBlank = () => !out.length || out[out.length - 1]!.trim() === "";
+  for (const [i, line] of lines.entries()) {
+    const role = roles[i];
+    if (role === "open") {
+      if (!prevBlank()) out.push("");
       out.push(line);
-      inFence = true;
-      continue;
-    }
-    if (isFence && inFence) {
+    } else if (role === "close") {
+      out.push(line, "");
+    } else if (role === "code") {
       out.push(line);
-      out.push("");
-      inFence = false;
-      continue;
+    } else if (!(line.trim() === "" && out.length && prevBlank())) {
+      // Outside code, the doubled blank line a normalised fence can create
+      // is collapsed; inside, blank lines are the code's own.
+      out.push(line);
     }
-    // Collapse the doubled blank line a normalised fence can create.
-    if (line.trim() === "" && out.length && out[out.length - 1]!.trim() === "") continue;
-    out.push(line);
   }
+  if (open) out.push(closingFence(open), "");
   return out.join("\n");
 }
 
@@ -227,20 +235,30 @@ ${outlineText(sheetText, SECTION_CHARS)}`,
 export function validateChapter(markdown: string, deckName: string, pageCount: number): string[] {
   const problems: string[] = [];
 
-  const fences = (markdown.match(/^```/gm) ?? []).length;
-  if (fences % 2 !== 0) problems.push(`unbalanced code fences (${fences})`);
+  const lines = markdown.split("\n");
+  const { roles, open } = fenceRoles(lines);
+  if (open) problems.push(`unbalanced code fences (${roles.filter((r) => r === "open" || r === "close").length})`);
 
   // A closing fence pressed against prose swallows everything after it.
   // Checked line by line: the previous regex matched the shortest span ending
   // in a fence NOT followed by a newline, which happily matched the final
   // fence of the document (followed by nothing) and reported a problem on
   // every clean chapter.
-  const lines = markdown.split("\n");
-  let open = false;
-  for (const [i, line] of lines.entries()) {
-    if (!/^\s*```/.test(line)) continue;
-    if (!open) { open = true; continue; }
-    open = false;
+  //
+  // And a fence that was never closed swallows what follows as code; the
+  // sign is a line inside it that opens a fence just like its own
+  // ("```mermaid" inside a ``` block), which no renderer reads as an end.
+  let opened = -1;
+  for (const [i, role] of roles.entries()) {
+    if (role === "open") { opened = i; continue; }
+    if (role === "code") {
+      const inner = fenceOpener(lines[i]!), outer = fenceOpener(lines[opened]!);
+      if (inner && outer && inner.char === outer.char && inner.len === outer.len && lines[i]!.trim().length > inner.len) {
+        problems.push(`fence at line ${i + 1} is inside the code block opened at line ${opened + 1}, which was never closed`);
+      }
+      continue;
+    }
+    if (role !== "close") continue;
     const next = lines[i + 1];
     if (next !== undefined && next.trim() !== "") problems.push(`fence at line ${i + 1} is not followed by a blank line`);
   }
@@ -334,12 +352,13 @@ export function cleanCitations(markdown: string, decks: Map<string, number>, als
   const clash = (d: string) => all.some((o) => o !== d && shorts.get(o)!.toLowerCase() === shorts.get(d)!.toLowerCase());
   const label = (d: string, page: number) => `${clash(d) ? decodeDeck(d).replace(/\[/g, "(").replace(/\]/g, ")") : shorts.get(d)} p${page}`;
 
-  let repaired = 0, removed = 0, inFence = false, gap = false;
-  const lines = markdown.split("\n").flatMap((line, i, rows) => {
+  let repaired = 0, removed = 0, gap = false;
+  const rows = markdown.split("\n");
+  const { roles } = fenceRoles(rows);
+  const lines = rows.flatMap((line, i) => {
     // A line that was only a bad figure leaves one blank line, not two.
     if (gap) { gap = false; if (line.trim() === "" && (rows[i - 2] ?? "").trim() === "") return []; }
-    if (/^\s*```/.test(line)) { inFence = !inFence; return [line]; }
-    if (inFence || !line.includes("slide")) return [line];
+    if (roles[i] !== "text" || !line.includes("slide")) return [line];
     let dropped = false;
     const out = outsideCode(line, (part) => part.replace(CITE_RE, (_m, bang: string, text: string, scheme: string, rawDeck: string, n: string) => {
       const deck = resolve(rawDeck.trim());
