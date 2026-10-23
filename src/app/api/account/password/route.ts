@@ -4,6 +4,7 @@ import { accountRequest, str } from "@/server/account-request";
 import { getUser, setCredentials } from "@/db/repo";
 import { hashPasswordAsync, normalizeUsername, verifyPasswordAsync } from "@/server/password";
 import { endAllSessions, setSessionCookie } from "@/server/session";
+import { clearLoginFailures } from "@/server/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +12,8 @@ export const dynamic = "force-dynamic";
 // password must present it: a session left open on a shared machine should
 // not be enough to lock the owner out. Saving signs out every other device
 // (a new password is what someone sets when they fear the old one leaked)
-// and re-issues this device's cookie so it stays signed in. The demo account
+// and re-issues this device's cookie so it stays signed in; it also lifts
+// any sign-in lockout the old password's wrong tries left behind. The demo account
 // is refused by accountRequest.
 export async function PUT(request: Request) {
   const req = await accountRequest(request);
@@ -33,5 +35,6 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "that username is already taken" }, { status: 409 });
   }
   endAllSessions(db, user.id);
+  clearLoginFailures(db, user.id);
   return setSessionCookie(NextResponse.json({ ok: true, username }), db, user.id);
 }

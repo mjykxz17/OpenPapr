@@ -412,7 +412,9 @@ function SignInSection({ signIn }: Pick<Props, "signIn">) {
     setPending(false);
     if (!r.ok) { setError(String(r.data.error ?? "Could not save.")); return; }
     setCurrent(""); setNext("");
-    setOk(signIn.hasPassword ? "Password changed. Your other devices are signed out." :"Saved. Sign in with these from now on — no token needed.");
+    setOk(signIn.hasPassword
+      ? "Password changed. Your other devices are signed out."
+      : "Saved. Sign in with these from now on — no token needed. Your other devices are signed out.");
     router.refresh();
   }
 
