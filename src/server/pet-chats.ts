@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { petChats } from "@/db/schema";
-import type { SourceRef } from "./ask";
+import { sourceLabel, type SourceRef } from "./ask";
 
 // `grounded` (answers only): whether the answer cites the student's material.
 export type PetMsg = { role: "user" | "assistant"; content: string; at: number; sources?: SourceRef[]; grounded?: boolean };
@@ -10,7 +10,14 @@ export type PetChatSummary = { id: number; title: string; updatedAt: number; cou
 const MAX_CHATS = 50;
 const MAX_MESSAGES = 200;
 
-const parse = (json: string): PetMsg[] => { try { const v = JSON.parse(json); return Array.isArray(v) ? v : []; } catch { return []; } };
+// Answers saved before `grounded` and `label` existed get them here, so every
+// message the chat reads back has both.
+const filled = (m: PetMsg): PetMsg => m.role !== "assistant" ? m : {
+  ...m,
+  ...(m.sources ? { sources: m.sources.map((s) => (s.label ? s : { ...s, label: sourceLabel(s.kind) })) } : {}),
+  grounded: m.grounded ?? !!m.sources?.length,
+};
+const parse = (json: string): PetMsg[] => { try { const v = JSON.parse(json); return Array.isArray(v) ? (v as PetMsg[]).map(filled) : []; } catch { return []; } };
 const titleFrom = (q: string) => { const t = q.replace(/\s+/g, " ").trim(); return t.length > 60 ? `${t.slice(0, 57).trimEnd()}…` : t || "New chat"; };
 
 export function listChats(db: Db, userId: number): PetChatSummary[] {

@@ -32,7 +32,9 @@ export const dynamic = "force-dynamic";
 // false for "I couldn't find that in your material" (nothing passed the
 // floor; the model was not asked), for an answer that cites nothing, and for
 // answers about dates and tasks, which come from the student's facts rather
-// than their material. The same flag is kept on the stored message.
+// than their material. The same flag is kept on the stored message;
+// messages saved before it existed read back with grounded = "cites a source"
+// and each source's label filled in from its kind.
 export async function POST(request: Request) {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -68,7 +70,7 @@ export async function POST(request: Request) {
       : `Added to your tasks: “${q.title}”${dueAt ? `, due ${dayLabel(dueAt)}` : " (no date — say “by Friday” next time and I'll set one)"}. It's on the Tasks page.`;
     // The demo account is shared by every visitor: nobody's chat is kept for the next one.
     if (user?.isDemo) return NextResponse.json({ reply, smart: false, grounded: false, sessionId: null, added: id !== null });
-    const saved = appendToChat(db, userId, earlierTurns.length ? sessionId : null, question, reply, now);
+    const saved = appendToChat(db, userId, earlierTurns.length ? sessionId : null, question, reply, now, [], false);
     return NextResponse.json({ reply, smart: false, grounded: false, sessionId: saved.id, title: saved.title, added: id !== null });
   }
   const fallback = () => ruleAnswer(question, dueList(db, userId, now), codes, now, recentlySaid(db, userId, now));
