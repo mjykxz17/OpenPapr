@@ -75,5 +75,24 @@ export function needsRehash(stored: string | null | undefined): boolean {
   return !h || h.N !== COST.N || h.r !== COST.r || h.p !== COST.p || h.key.length !== KEYLEN;
 }
 
+// Checking a hash made with cheaper, older settings takes less time than
+// checking one made today, and an unknown username is checked against a
+// today's-cost dummy. So after a failed check, the caller makes up the
+// missing work, or the quicker refusal would mark a real username. scrypt's
+// time is linear in N·r·p, so the gap is filled with that much more p.
+export function paddingFor(stored: string | null | undefined): { N: number; r: number; p: number } | null {
+  const h = parse(stored);
+  if (!h) return { ...COST };
+  const p = Math.round((COST.N * COST.r * COST.p - h.N * h.r * h.p) / (COST.N * COST.r));
+  return p >= 1 ? { N: COST.N, r: COST.r, p } : null;
+}
+
+const PAD_SALT = Buffer.alloc(16);
+
+export async function padVerifyWork(password: string, stored: string | null | undefined): Promise<void> {
+  const c = paddingFor(stored);
+  if (c) await scryptAsync(password, PAD_SALT, KEYLEN, opts(c)).catch(() => undefined);
+}
+
 // Usernames are an identity key, so they are compared in one canonical form.
 export const normalizeUsername = (raw: string): string => raw.trim().toLowerCase();

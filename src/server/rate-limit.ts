@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, lte, or, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { users } from "@/db/schema";
 
@@ -43,17 +43,28 @@ export function loginLocked(user: { lockedUntil: number | null }, now = Date.now
   return user.lockedUntil !== null && user.lockedUntil > now;
 }
 
-export function recordLoginFailure(db: Db, userId: number, now = Date.now()): void {
-  const row = db.select({ n: users.failedLogins }).from(users).where(eq(users.id, userId)).get();
-  if (!row) return;
-  const n = row.n + 1;
-  // The count starts again once the lock is set, so after it lifts there are
-  // another LOCK_AFTER tries before the next one.
-  db.update(users).set(n >= LOCK_AFTER ? { failedLogins: 0, lockedUntil: now + LOCK_MS } : { failedLogins: n })
-    .where(eq(users.id, userId)).run();
+// Counts a sign-in attempt before its password is checked, and says whether
+// it may go ahead. The check takes a tenth of a second, so counting only the
+// attempts that turned out wrong would let a burst sent all at once read the
+// account as unlocked and get every guess checked. One UPDATE both tests the
+// lock and takes the slot, so two requests can never both take the last one.
+// The attempt that reaches LOCK_AFTER still gets its check; the lock it sets
+// turns away the ones after it. The count starts again once the lock is set,
+// so after it lifts there are another LOCK_AFTER tries before the next one.
+export function claimLoginAttempt(db: Db, userId: number, now = Date.now()): boolean {
+  const n = sql`${users.failedLogins} + 1`;
+  const reached = sql`${n} >= ${LOCK_AFTER}`;
+  return db.update(users)
+    .set({
+      failedLogins: sql`CASE WHEN ${reached} THEN 0 ELSE ${n} END`,
+      lockedUntil: sql`CASE WHEN ${reached} THEN ${now + LOCK_MS} ELSE ${users.lockedUntil} END`,
+    })
+    .where(and(eq(users.id, userId), or(isNull(users.lockedUntil), lte(users.lockedUntil, now))))
+    .returning({ id: users.id }).get() !== undefined;
 }
 
-export function recordLoginSuccess(db: Db, user: { id: number; failedLogins: number; lockedUntil: number | null }): void {
-  if (user.failedLogins === 0 && user.lockedUntil === null) return;
-  db.update(users).set({ failedLogins: 0, lockedUntil: null }).where(eq(users.id, user.id)).run();
+// A right password, or a new one set by the owner: the run of wrong tries,
+// and any lock it caused, is over.
+export function clearLoginFailures(db: Db, userId: number): void {
+  db.update(users).set({ failedLogins: 0, lockedUntil: null }).where(eq(users.id, userId)).run();
 }

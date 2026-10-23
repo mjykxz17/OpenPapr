@@ -1,12 +1,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { hashPassword, hashPasswordAsync, needsRehash, normalizeUsername, verifyPasswordAsync } from "@/server/password";
-import { loginLocked, pruneRateLimits, rateLimit, recordLoginFailure, recordLoginSuccess } from "@/server/rate-limit";
-import { setSessionCookie } from "@/server/session";
+import { hashPassword, hashPasswordAsync, needsRehash, normalizeUsername, padVerifyWork, verifyPasswordAsync } from "@/server/password";
+import { claimLoginAttempt, clearLoginFailures, pruneRateLimits, rateLimit } from "@/server/rate-limit";
+import { endAllSessions, setSessionCookie } from "@/server/session";
 import { getDb } from "@/server/db";
 import { users } from "@/db/schema";
-import { createLocalUser, findByUsername, resolveCanvasUser, setCredentials } from "@/db/repo";
+import { createLocalUser, findByUsername, getUser, resolveCanvasUser, setCredentials } from "@/db/repo";
 import { createCanvasClient } from "@/connectors/canvas/client";
 import { loadEnv } from "@/lib/env";
 
@@ -47,18 +47,18 @@ export async function POST(request: Request) {
   // --- returning visit: username and password, no Canvas token needed ---
   if (username && password && !str(raw.canvasToken) && !str(raw.inviteCode)) {
     const user = findByUsername(db, username);
-    const now = Date.now();
-    // Verify against a dummy hash when the user is unknown — and even when the
-    // account is locked — so every refusal takes the same time to answer.
-    const ok = await verifyPasswordAsync(password, user?.passwordHash ?? DUMMY_HASH);
-    if (!user || loginLocked(user, now) || !ok) {
-      if (user && !loginLocked(user, now)) recordLoginFailure(db, user.id, now);
-      // A hash from before the cost went up checks faster than the dummy;
-      // pay the difference so a quick refusal does not mark a real username.
-      if (user?.passwordHash && needsRehash(user.passwordHash)) await verifyPasswordAsync(password, DUMMY_HASH);
+    const stored = user?.passwordHash ?? DUMMY_HASH;
+    // The attempt is counted before the slow check, not after, so a burst
+    // sent all at once cannot get past the lockout (see claimLoginAttempt).
+    const allowed = user ? claimLoginAttempt(db, user.id) : false;
+    // The password is checked even when the user is unknown (against a dummy
+    // hash) or the account is locked, so every refusal takes the same time.
+    const ok = await verifyPasswordAsync(password, stored);
+    if (!user || !allowed || !ok) {
+      await padVerifyWork(password, stored);
       return NextResponse.json({ error: SIGN_IN_REFUSED }, { status: 401 });
     }
-    recordLoginSuccess(db, user);
+    clearLoginFailures(db, user.id);
     // Hashes made with older, cheaper settings are upgraded while the
     // password is at hand; this is the only moment it is.
     if (needsRehash(user.passwordHash)) {
@@ -108,10 +108,16 @@ export async function POST(request: Request) {
     if (password.length < 8) {
       return NextResponse.json({ error: "choose a password of at least 8 characters" }, { status: 400 });
     }
+    // Someone who comes back through here to replace a forgotten or leaked
+    // password gets what the Account page gives: every other device signed
+    // out, and no lockout left over from the wrong tries.
+    const replacing = Boolean(getUser(db, userId)?.passwordHash);
     credentialsSaved = setCredentials(db, userId, username, await hashPasswordAsync(password));
     if (!credentialsSaved) {
       return NextResponse.json({ error: "that username is already taken" }, { status: 409 });
     }
+    if (replacing) endAllSessions(db, userId);
+    clearLoginFailures(db, userId);
   }
 
   return withSession({ ok: true, name: self.name, credentialsSaved }, userId);

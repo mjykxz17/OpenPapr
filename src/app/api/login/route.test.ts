@@ -5,10 +5,23 @@ import { users } from "@/db/schema";
 import { readSession } from "@/server/auth";
 import { hashPassword, needsRehash, verifyPassword } from "@/server/password";
 import { LOCK_AFTER, LOCK_MS, resetRateLimits } from "@/server/rate-limit";
+import { signSession } from "@/server/auth";
 import { sessionUserId } from "@/server/session";
 
-const h = vi.hoisted(() => ({ db: null as unknown as Db }));
+const h = vi.hoisted(() => ({ db: null as unknown as Db, work: [] as number[] }));
 vi.mock("@/server/db", () => ({ getDb: () => h.db }));
+vi.mock("@/connectors/canvas/client", () => ({ createCanvasClient: () => ({ getSelf: async () => ({ id: 77, name: "Alice" }) }) }));
+// Records the scrypt work (N·r·p) of every async hash, so the tests can
+// compare what each kind of refusal costs without timing anything.
+vi.mock("node:crypto", async (orig) => {
+  const real = await orig<typeof import("node:crypto")>();
+  const scrypt = (...args: Parameters<typeof real.scrypt>) => {
+    const o = args[3] as { N: number; r: number; p: number };
+    h.work.push(o.N * o.r * o.p);
+    return (real.scrypt as (...a: unknown[]) => void)(...args);
+  };
+  return { ...real, default: { ...real, scrypt }, scrypt };
+});
 
 const { POST } = await import("./route");
 
@@ -31,6 +44,7 @@ beforeEach(() => {
   vi.stubEnv("SESSION_KEY", undefined);
   vi.stubEnv("APP_PASSWORD", "invite-code-123");
   resetRateLimits();
+  h.work = [];
   ip++;
   h.db = createDb(":memory:");
   alice = h.db.insert(users).values({ name: "Alice", username: "alice", passwordHash: hashPassword("pw-right-1") }).returning({ id: users.id }).get().id;
@@ -88,5 +102,47 @@ describe("POST /api/login", () => {
     expect(stored).not.toBe(OLD_HASH);
     expect(needsRehash(stored)).toBe(false);
     expect(verifyPassword("pw-right-1", stored)).toBe(true);
+  });
+
+  // Sent all at once, every request reads the account before any wrong
+  // password is recorded; the lockout must still hold.
+  it("holds the lockout against a burst of guesses sent at the same time", async () => {
+    const guesses = Array.from({ length: LOCK_AFTER + 4 }, (_, i) => signIn("alice", "nope-nope", `10.7.${ip}.${i}`));
+    const right = signIn("alice", "pw-right-1", "10.6.0.1");
+    const all = await Promise.all([...guesses, right]);
+    expect(all.map((r) => r.status)).toEqual(all.map(() => 401));
+    expect(row(alice).lockedUntil).toBeGreaterThan(Date.now());
+  });
+
+  it("makes every refusal cost the same scrypt work, whatever hash the account has", async () => {
+    const work = async (username: string, password = "nope-nope") => {
+      h.work = [];
+      await signIn(username, password, `10.5.${ip}.${Math.random()}`);
+      return h.work.reduce((a, b) => a + b, 0);
+    };
+    const unknown = await work("nobody");
+    expect(unknown).toBe(16384 * 8 * 5);
+    expect(await work("alice")).toBe(unknown);
+    h.db.update(users).set({ passwordHash: OLD_HASH }).where(eq(users.id, alice)).run();
+    expect(await work("alice")).toBe(unknown);
+    h.db.update(users).set({ lockedUntil: Date.now() + LOCK_MS }).where(eq(users.id, alice)).run();
+    expect(await work("alice", "pw-right-1")).toBe(unknown);
+  });
+
+  // The way back in for someone who forgot their password, or fears it
+  // leaked: it must end the other sessions and the lockout, as Account does.
+  it("re-setting the password with the invite code and a Canvas token signs out other devices and lifts the lock", async () => {
+    h.db.update(users).set({ canvasUserId: 77, lockedUntil: Date.now() + LOCK_MS, failedLogins: 3 }).where(eq(users.id, alice)).run();
+    const otherDevice = signSession(alice, key);
+    const res = await POST(new Request("http://x/api/login", {
+      method: "POST",
+      headers: { "content-type": "application/json", "fly-client-ip": `10.4.0.${ip}` },
+      body: JSON.stringify({ inviteCode: "invite-code-123", canvasToken: "tok", username: "alice", password: "brand-new-pw" }),
+    }));
+    expect(res.status).toBe(200);
+    expect(sessionUserId(h.db, otherDevice, key)).toBeNull();
+    expect(sessionUserId(h.db, res.cookies.get("session")!.value, key)).toBe(alice);
+    expect(row(alice)).toMatchObject({ failedLogins: 0, lockedUntil: null });
+    expect((await signIn("alice", "brand-new-pw")).status).toBe(200);
   });
 });
