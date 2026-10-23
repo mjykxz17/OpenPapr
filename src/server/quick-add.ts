@@ -71,11 +71,15 @@ const KIND_RULES: [RegExp, TaskKind][] = [
   [/\b(meet(ing)?|consult(ation)?|appointment|office hours|interview|call with)\b/i, "meeting"],
   [/\b(presentation|present|pitch)\b/i, "presentation"],
   [/\bproject\b/i, "project"],
+  // Something handed in, whatever else the title says: "Peer review
+  // submission", "Submit reading response", "Final report".
+  [/\b(submit|submission|hand in|report|essay)\b/i, "submission"],
   [/\b(revise|revision|study|review|practi[cs]e|prepare|prep|past (year )?papers?|pyp)\b/i, "prep"],
   [/\b(read|reading|readings|chapter|ch\.? ?\d+)\b/i, "reading"],
   [/\b(quiz(zes)?)\b/i, "quiz"],
-  [/\b(exam|exams|midterms?|mid-terms?|finals?)\b/i, "exam"],
-  [/\b(assignment|problem set|pset|ps ?\d+|homework|hw ?\d*|lab ?\d+|lab report|essay|report|submit|submission|worksheet|tutorial)\b/i, "submission"],
+  // "Finals", not "final": "Final essay" is not an exam.
+  [/\b(exam|exams|midterms?|mid-terms?|finals)\b/i, "exam"],
+  [/\b(assignment|problem set|pset|ps ?\d+|homework|hw ?\d*|lab ?\d+|worksheet|tutorial)\b/i, "submission"],
   [/\b(gym|dinner|lunch|birthday|dentist|doctor|haircut|party)\b/i, "personal"],
 ];
 export function guessKind(title: string): TaskKind {

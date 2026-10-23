@@ -38,4 +38,14 @@ describe("quick add", () => {
     expect(guessKind("Buy a lab coat")).toBe("admin");
     expect(guessKind("")).toBe("admin");
   });
+  it("calls something handed in a submission, whatever else the title says", () => {
+    expect(guessKind("Final report")).toBe("submission");
+    expect(guessKind("Final essay")).toBe("submission");
+    expect(guessKind("Final submission")).toBe("submission");
+    expect(guessKind("Peer review submission")).toBe("submission");
+    expect(guessKind("Submit reading response")).toBe("submission");
+    expect(guessKind("Finals")).toBe("exam");
+    expect(guessKind("Final exam")).toBe("exam");
+    expect(guessKind("Revise for finals")).toBe("prep");
+  });
 });
