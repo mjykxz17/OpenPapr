@@ -2,7 +2,8 @@ import { z } from "zod";
 import type { LlmScore } from "./llm";
 import type { ExtractedComponent, WeightageSourceText } from "./weightage";
 import { createHash } from "node:crypto";
-import { requestBody, requestHeaders, tokenParams } from "../lib/llm-provider";
+import { checkBaseUrlAddress } from "../lib/llm-address";
+import { providerDetail, requestBody, requestHeaders, tokenParams } from "../lib/llm-provider";
 import { gateFor } from "../lib/rate-gate";
 
 // OpenAI-compatible provider (Agnes agrouter). Same contracts as ./llm and
@@ -24,6 +25,17 @@ export interface CompatConfig {
   embedModel?: string | null;
   // Who the call is for and whose key pays, for the usage count.
   owner?: { userId: number; shared: boolean } | null;
+  // Set on a URL a student typed in: its host is resolved and refused if
+  // private before every call. The host's own configured URL is trusted.
+  vetAddress?: boolean;
+}
+
+// Throws before any request goes out when a student's base URL now points at
+// a private address.
+export async function assertPublicBaseUrl(cfg: CompatConfig, label: string): Promise<void> {
+  if (!cfg.vetAddress) return;
+  const check = await checkBaseUrlAddress(cfg.baseUrl);
+  if (!check.ok) throw new Error(`${label} blocked: ${check.error}`);
 }
 
 // Told about every successful call that has an owner; the worker and the web
@@ -64,14 +76,29 @@ function retryAfterMs(res: Response): number | null {
   return ms >= 0 && ms <= 60_000 ? ms : null;
 }
 
+const IMAGE_WORDS = /\b(image|vision|multimodal|multi-modal|image_url|content type|content part)\b/i;
+
+// The status and the provider's own error message, never its raw body. A
+// plain-text refusal of images is still recognised, so a caller can retry
+// with text alone.
+async function errorFor(res: Response): Promise<string> {
+  const body = await res.text().catch(() => "");
+  const detail = providerDetail(body) || (IMAGE_WORDS.test(body) ? "image input is not supported" : "");
+  return detail ? `llm ${res.status}: ${detail}` : `llm ${res.status}`;
+}
+
 async function callOnce(cfg: CompatConfig, messages: Message[], params: Record<string, number>, timeoutMs: number, fetchFn: typeof fetch): Promise<string> {
   for (let attempt = 0; ; attempt++) {
+    await assertPublicBaseUrl(cfg, "llm");
     await gateFor(gateKey(cfg), cfg.rpm).acquire();
+    // A redirect could lead anywhere, the private network included, so the
+    // URL that was checked is the only one ever called.
     const res = await fetchFn(`${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: requestHeaders(cfg),
       body: JSON.stringify(requestBody(cfg, params, messages)),
       signal: AbortSignal.timeout(timeoutMs),
+      redirect: "error",
     });
     // Rate-limited or briefly overloaded, with a short wait suggested: wait
     // once and try the same provider again before giving up on it.
@@ -79,7 +106,7 @@ async function callOnce(cfg: CompatConfig, messages: Message[], params: Record<s
       const wait = retryAfterMs(res) ?? (res.status === 429 ? 5_000 : null);
       if (wait !== null) { await res.body?.cancel().catch(() => {}); await new Promise((r) => setTimeout(r, wait)); continue; }
     }
-    if (!res.ok) throw new Error(`llm ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    if (!res.ok) throw new Error(await errorFor(res));
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
     return data.choices?.[0]?.message?.content ?? "";
   }
@@ -144,7 +171,7 @@ export async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system:
 // An error from a provider whose model can't take images ("image input is
 // not supported", "invalid content type"…), as opposed to any other failure.
 export const isImageRefusal = (err: unknown) =>
-  /\b(image|vision|multimodal|multi-modal|image_url|content type|content part)\b/i.test(String(err instanceof Error ? err.message : err))
+  IMAGE_WORDS.test(String(err instanceof Error ? err.message : err))
   && /llm 4\d\d/.test(String(err instanceof Error ? err.message : err));
 
 // Prose completion, for generated long-form content. chatJson is the wrong
