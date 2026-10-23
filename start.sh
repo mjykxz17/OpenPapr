@@ -71,7 +71,24 @@ shutdown() {
 }
 trap shutdown TERM INT
 
+# Migrations run here, once, before the web server or the worker opens the
+# database. If both migrated on start they could each apply the same one and
+# crash; OPENPAPR_MIGRATED tells them it is already done (src/db/client.ts).
+migrate() {
+  if [ -f dist/migrate.cjs ]; then
+    node dist/migrate.cjs
+  else
+    $TSX scripts/migrate.ts
+  fi
+}
+
 [ "$backups" -eq 1 ] && start_litestream
+migrate || {
+  echo "migrations failed — not starting"
+  [ -n "$litestream_pid" ] && kill -TERM "$litestream_pid" 2>/dev/null
+  exit 1
+}
+export OPENPAPR_MIGRATED=1
 node server.js &
 web_pid=$!
 # The machine sleeps when idle and wakes on a request, which is waiting for
