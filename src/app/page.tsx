@@ -23,6 +23,9 @@ import { calendarDues } from "@/server/calendar-dues";
 import { MonthWidget } from "@/components/home/MonthWidget";
 import { SemesterBar } from "@/components/home/SemesterBar";
 import { shortDate, syncedLabel } from "@/lib/format-date";
+import { todayLine } from "@/components/home/today-line";
+import { AccountLink } from "@/components/home/AccountLink";
+import { mailEnabled } from "@/components/mail-access";
 
 export const dynamic = "force-dynamic";
 
@@ -99,8 +102,8 @@ export default async function Home() {
   const sem = env.ACADEMIC_CALENDAR === "nus" ? semesterView(now) : null;
   const todayKey = new Date(now + 8 * 3_600_000).toISOString().slice(0, 10);
   const dueToday = overview.todos.filter((t) => t.category !== "routine" && t.dueAt !== null && t.dueAt >= now && new Date(t.dueAt + 8 * 3_600_000).toISOString().slice(0, 10) === todayKey).length;
-  // Under the bar: only whether anything is due today; the week is the title.
-  const semLine = dueToday ? `${dueToday} due today` : "Nothing due today";
+  // Under the bar: only whether a deadline falls today; the week is the title.
+  const semLine = todayLine(dueToday);
   const canvasOkAt = overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null;
   // The server sleeps when nobody is using it, so data a few hours old on
   // opening is normal (the Sync button catches up straight away). Only a
@@ -118,7 +121,7 @@ export default async function Home() {
           </a>
         </div>
       )}
-      {overview.graphAuthBroken && (
+      {overview.graphAuthBroken && mailEnabled(env) && (
         <div className="mb-6 rounded-md border border-warn-line bg-warn-soft px-4 py-3 text-sm text-warn-ink">
           Microsoft sign-in has expired —{" "}
           <a href="/mail" className="font-medium underline underline-offset-2">
@@ -156,7 +159,10 @@ export default async function Home() {
             {user?.canvasTokenEnc && syncStale && <div className="mt-2"><SyncStatus syncStatus={overview.syncStatus} now={now} mailConnected={Boolean(user?.msRefreshTokenEnc)} /></div>}
           </div>
         }
-        actions={user?.canvasTokenEnc ? <SyncButton lastSyncedAt={canvasOkAt} label={canvasOkAt ? `Synced ${syncedLabel(canvasOkAt, now)}` : "Not synced yet"} /> : null}
+        actions={<>
+          {user?.canvasTokenEnc && <SyncButton lastSyncedAt={canvasOkAt} label={canvasOkAt ? `Synced ${syncedLabel(canvasOkAt, now)}` : "Not synced yet"} />}
+          <AccountLink />
+        </>}
       />
     </AppShell>
   );
