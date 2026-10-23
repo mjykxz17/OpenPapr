@@ -2,6 +2,8 @@
 // no model: it has to work on the shared key's last call of the month too,
 // and it must never guess a date the student did not say.
 
+import type { TaskKind } from "@/enrich/tasks";
+
 const H = 3_600_000;
 const D = 24 * H;
 const WEEKDAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
@@ -60,6 +62,28 @@ function dayFrom(date: number, month: number, now: number): string | null {
     if (iso >= sgtDay(now)) return iso;
   }
   return null;
+}
+
+// What kind of thing a title names, for the Type a new task starts with.
+// The first rule that fits wins, so "Revise for Quiz 3" is studying and
+// "Quiz 3" is the quiz. Nothing fits: a plain task.
+const KIND_RULES: [RegExp, TaskKind][] = [
+  [/\b(meet(ing)?|consult(ation)?|appointment|office hours|interview|call with)\b/i, "meeting"],
+  [/\b(presentation|present|pitch)\b/i, "presentation"],
+  [/\bproject\b/i, "project"],
+  // Something handed in, whatever else the title says: "Peer review
+  // submission", "Submit reading response", "Final report".
+  [/\b(submit|submission|hand in|report|essay)\b/i, "submission"],
+  [/\b(revise|revision|study|review|practi[cs]e|prepare|prep|past (year )?papers?|pyp)\b/i, "prep"],
+  [/\b(read|reading|readings|chapter|ch\.? ?\d+)\b/i, "reading"],
+  [/\b(quiz(zes)?)\b/i, "quiz"],
+  // "Finals", not "final": "Final essay" is not an exam.
+  [/\b(exam|exams|midterms?|mid-terms?|finals)\b/i, "exam"],
+  [/\b(assignment|problem set|pset|ps ?\d+|homework|hw ?\d*|lab ?\d+|worksheet|tutorial)\b/i, "submission"],
+  [/\b(gym|dinner|lunch|birthday|dentist|doctor|haircut|party)\b/i, "personal"],
+];
+export function guessKind(title: string): TaskKind {
+  return KIND_RULES.find(([re]) => re.test(title))?.[1] ?? "admin";
 }
 
 export function parseQuickAdd(text: string, codes: string[], now: number): QuickAdd {

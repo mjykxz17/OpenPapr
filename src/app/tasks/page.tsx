@@ -44,19 +44,9 @@ export default async function TasksPage() {
           : <Link href="/account" className="text-[13px] text-accent hover:underline">Add an AI key to plan tasks</Link>}
       </header>
 
-      {view.today.length > 0 && (
-        <>
-          <div className="mb-6 hidden max-w-3xl sm:block"><TodaySteps view={view} today={today} /></div>
-          {/* On a phone today's steps fold away, so the views start on screen. */}
-          <details className="mb-4 rounded-[10px] border border-line bg-panel sm:hidden">
-            <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-[14px] [&::-webkit-details-marker]:hidden">
-              <b className="font-semibold text-ink">Today’s steps</b>
-              <span className="text-ink-2">{view.today.length} · {view.todayMinutes < 60 ? `${view.todayMinutes}m` : `${Math.floor(view.todayMinutes / 60)}h${view.todayMinutes % 60 ? ` ${view.todayMinutes % 60}m` : ""}`} ▾</span>
-            </summary>
-            <div className="border-t border-line p-2"><TodaySteps view={view} today={today} /></div>
-          </details>
-        </>
-      )}
+      {/* Always mounted, so ticking the last step keeps its Undo; it draws
+          nothing when there is nothing for today. */}
+      <TodaySteps view={view} today={today} />
 
       <TasksApp rows={rows} modules={modules} today={today} weeks={weekBands(semesterWeeks(now).weeks)} />
 

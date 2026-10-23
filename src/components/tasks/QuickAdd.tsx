@@ -1,21 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createTask, dayText, type Mod } from "./task-ui";
+import { guessKind } from "@/server/quick-add";
+import { createTask, dayText, EDIT_KINDS, KIND, type Mod } from "./task-ui";
 
 // Add something: a title, and if you like a day, a time, a module and what
 // kind of thing it is. Opens next to where you clicked; on a phone it comes
-// up from the bottom.
+// up from the bottom. The type follows the title ("Quiz 3" is a quiz) until
+// the student picks one; with no word to go on it is a plain task.
 
 export type AddAt = { day: string | null; rect: DOMRect };
-const KINDS: [string, string][] = [["admin", "To do"], ["submission", "Submission"], ["personal", "Personal"], ["meeting", "Meeting"], ["prep", "Study"], ["exam", "Exam"], ["quiz", "Quiz"]];
+const KINDS = ["admin", ...EDIT_KINDS.filter((k) => k !== "admin")];
 
 export function QuickAdd({ at, today, modules, onClose, onAdded }: { at: AddAt; today: string; modules: Mod[]; onClose: () => void; onAdded: () => void }) {
   const [title, setTitle] = useState("");
   const [day, setDay] = useState(at.day ?? "");
   const [time, setTime] = useState("");
   const [moduleId, setModuleId] = useState("");
-  const [kind, setKind] = useState("admin");
+  const [picked, setPicked] = useState<string | null>(null);
+  const kind = picked ?? guessKind(title);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
   const box = useRef<HTMLFormElement>(null);
@@ -56,20 +59,21 @@ export function QuickAdd({ at, today, modules, onClose, onAdded }: { at: AddAt; 
       <form ref={box} onSubmit={submit} aria-label="New task"
         className="fixed inset-x-0 bottom-0 z-50 flex flex-col gap-2.5 rounded-t-2xl border border-line bg-panel p-4 pb-8 shadow-2xl sm:inset-x-auto sm:bottom-auto sm:w-[340px] sm:rounded-xl sm:pb-4"
         style={vw >= 640 ? { left, top } : undefined}>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">New{day ? ` on ${day === today ? "today" : dayText(day)}` : ""}</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-3">New{day ? ` on ${day === today ? "today" : dayText(day)}` : " · no date"}</p>
         <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What is it?" maxLength={120} aria-label="Title"
           className="h-10 rounded-md border border-line-2 bg-surface px-3 text-[14px] text-ink outline-none focus:border-accent" />
         <div className="flex flex-wrap gap-2">
-          <input type="date" value={day} onChange={(e) => setDay(e.target.value)} aria-label="Date" className={`${field} flex-1`} />
+          <input type="date" value={day} onChange={(e) => setDay(e.target.value)} aria-label="Date" aria-describedby={day ? undefined : "quick-add-no-date"} className={`${field} flex-1`} />
           <input type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={!day} aria-label="Time (optional)" className={`${field} w-[100px] disabled:opacity-40`} />
         </div>
+        {!day && <p id="quick-add-no-date" className="-mt-1 text-[12px] text-ink-3">No date: it goes under “No date” until you give it one.</p>}
         <div className="flex gap-2">
           <select value={moduleId} onChange={(e) => setModuleId(e.target.value)} aria-label="Module" className={`${field} flex-1`}>
             <option value="">No module</option>
             {modules.map((m) => <option key={m.id} value={m.id}>{m.code}</option>)}
           </select>
-          <select value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Type" className={`${field} flex-1`}>
-            {KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          <select value={kind} onChange={(e) => setPicked(e.target.value)} aria-label="Type" className={`${field} flex-1`}>
+            {KINDS.map((k) => <option key={k} value={k}>{KIND[k] ?? k}</option>)}
           </select>
         </div>
         {error && <p role="alert" className="text-[12.5px] text-danger">Could not add it. Try again.</p>}
@@ -77,7 +81,7 @@ export function QuickAdd({ at, today, modules, onClose, onAdded }: { at: AddAt; 
           <span className="hidden text-[12px] text-ink-3 sm:inline">Enter to add · Esc to cancel</span>
           <span className="flex gap-2 sm:ml-auto">
             <button type="button" onClick={onClose} className="h-9 rounded-md px-3 text-[13px] text-ink-2 hover:text-ink sm:hidden">Cancel</button>
-            <button type="submit" disabled={busy || title.trim().length < 2} className="h-9 rounded-md bg-accent px-4 text-[13px] font-semibold text-on-accent hover:bg-accent-strong disabled:opacity-50">Add</button>
+            <button type="submit" disabled={busy || title.trim().length < 2} className="h-9 rounded-md bg-accent px-4 text-[13px] font-semibold text-on-accent hover:bg-accent-strong disabled:opacity-50">{day ? "Add" : "Add without a date"}</button>
           </span>
         </div>
       </form>

@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { TaskRow, WeekBand } from "@/server/task-rows";
 import { addDays, Check, EDIT_KINDS, KIND, ModTag, mondayOf, ORIGIN, Progress, rangeText, StatusPill, whenText, type Change } from "./task-ui";
 import type { AddAt } from "./QuickAdd";
 
 // Grouped by week like a Notion table. Name, due date, type and status edit
 // in place where the row allows it; anything else opens the side panel.
+
+const TYPE = "rounded px-1 py-0.5 text-[13.5px] text-ink";
 
 type Group = { key: string; label: string; addDay: string | null; rows: TaskRow[] };
 
@@ -63,7 +65,7 @@ export function TableView({ rows, today, weeks, color, selected, onOpen, onChang
               {g.key !== "overdue" && (
                 <tr><td colSpan={9} className="py-1.5">
                   <button type="button" onClick={(e) => onAdd({ day: g.addDay, rect: e.currentTarget.getBoundingClientRect() })}
-                    className="pl-8 text-[13px] text-ink-3 hover:text-accent">+ New{g.addDay ? "" : " without a date"}</button>
+                    className="ml-7 inline-flex h-6 items-center rounded px-1 text-[13px] text-ink-3 hover:text-accent">+ New{g.addDay ? "" : " without a date"}</button>
                 </td></tr>
               )}
             </tbody>
@@ -79,7 +81,8 @@ export function TableView({ rows, today, weeks, color, selected, onOpen, onChang
             <ul className="flex flex-col gap-2">
               {g.rows.map((r) => (
                 <li key={r.id}>
-                  <div role="button" tabIndex={0} onClick={() => onOpen(r.id)} onKeyDown={(e) => e.key === "Enter" && onOpen(r.id)}
+                  <div role="button" tabIndex={0} data-open={r.id} aria-haspopup="dialog" onClick={() => onOpen(r.id)}
+                    onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onOpen(r.id); } }}
                     className={`flex items-start gap-3 rounded-xl border bg-panel px-3.5 py-3 ${r.origin === "schedule" ? "border-dashed border-line-2" : "border-line"} ${selected === r.id ? "border-accent" : ""}`}>
                     <span className="pt-0.5"><Check checked={r.status === "done"} disabled={!r.can.done} label={`Done: ${r.title}`}
                       onChange={() => onChange(r, { status: r.status === "done" ? "open" : "done" })} /></span>
@@ -110,7 +113,10 @@ export function TableView({ rows, today, weeks, color, selected, onOpen, onChang
 function Row({ r, today, color, on, onOpen, onChange }: { r: TaskRow; today: string; color: (id: number | null) => string; on: boolean; onOpen: (id: string) => void; onChange: Props["onChange"] }) {
   const [edit, setEdit] = useState<"title" | "due" | null>(null);
   const [title, setTitle] = useState(r.title);
+  const name = useRef<HTMLButtonElement>(null);
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  // Done renaming from the keyboard: back to the name, not lost to the page.
+  const refocus = () => requestAnimationFrame(() => name.current?.focus());
   const saveTitle = () => { setEdit(null); const t = title.trim(); if (t.length >= 2 && t !== r.title) onChange(r, { title: t }); else setTitle(r.title); };
   const cell = "border-b border-line/70 py-2 pr-3 align-middle";
   const done = r.status === "done";
@@ -120,15 +126,17 @@ function Row({ r, today, color, on, onOpen, onChange }: { r: TaskRow; today: str
       <td className={cell}>
         {edit === "title" ? (
           <input autoFocus value={title} onClick={stop} onChange={(e) => setTitle(e.target.value)} onBlur={saveTitle} maxLength={120}
-            onKeyDown={(e) => { if (e.key === "Enter") saveTitle(); if (e.key === "Escape") { setTitle(r.title); setEdit(null); } }}
+            onKeyDown={(e) => { if (e.key === "Enter") { saveTitle(); refocus(); } if (e.key === "Escape") { setTitle(r.title); setEdit(null); refocus(); } }}
             className="w-full rounded-md border border-accent bg-surface px-2 py-1 text-[13.5px] text-ink outline-none" />
         ) : (
           <span className="flex items-center gap-1.5">
-            <span className={`min-w-0 truncate font-medium ${done ? "text-ink-3 line-through" : "text-ink"}`}>{r.title}</span>
+            {/* A real button, so the keyboard can open the panel too. */}
+            <button ref={name} type="button" data-open={r.id} aria-haspopup="dialog" onClick={(e) => { stop(e); onOpen(r.id); }}
+              className={`-mx-1 min-w-0 truncate rounded px-1 py-0.5 text-left font-medium outline-none focus-visible:ring-2 focus-visible:ring-accent ${done ? "text-ink-3 line-through" : "text-ink"}`}>{r.title}</button>
             {r.missing && <span className="shrink-0 rounded-full bg-danger/15 px-1.5 text-[11px] font-semibold text-danger">Missing</span>}
             {r.can.title && (
-              <button type="button" aria-label="Rename" onClick={(e) => { stop(e); setEdit("title"); }}
-                className="shrink-0 rounded px-1 text-ink-3 opacity-0 hover:text-accent focus:opacity-100 group-hover:opacity-100">
+              <button type="button" aria-label={`Rename ${r.title}`} onClick={(e) => { stop(e); setEdit("title"); }}
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-3 opacity-0 hover:text-accent focus:opacity-100 group-hover:opacity-100">
                 <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><path d="m10.5 2.5 3 3-8 8h-3v-3z" /></svg>
               </button>
             )}
@@ -143,16 +151,22 @@ function Row({ r, today, color, on, onOpen, onChange }: { r: TaskRow; today: str
             className="rounded-md border border-accent bg-surface px-1.5 py-0.5 text-[13px] text-ink outline-none" />
         ) : r.can.date ? (
           <button type="button" onClick={(e) => { stop(e); setEdit("due"); }} title="Change the date"
-            className={`rounded px-1 -mx-1 text-left hover:bg-sunken ${r.overdue ? "text-danger" : r.estimated || r.week ? "text-ink-2" : "text-ink"}`}>{whenText(r, today)}</button>
+            className={`-mx-1 rounded px-1 py-0.5 text-left hover:bg-sunken ${r.overdue ? "text-danger" : r.estimated || r.week ? "text-ink-2" : "text-ink"}`}>{whenText(r, today)}</button>
         ) : <span className={r.overdue ? "text-danger" : r.estimated || r.week ? "text-ink-2" : "text-ink"} title={r.origin === "canvas" ? "Canvas sets this date" : undefined}>{whenText(r, today)}</span>}
       </td>
       <td className={cell}>
+        {/* Same look whether it can change or not; a changeable one shows
+            its arrow on hover, like the date beside it. */}
         {r.can.kind ? (
-          <select value={r.kind} onClick={stop} onChange={(e) => onChange(r, { kind: e.target.value })} aria-label="Type"
-            className="-ml-1 cursor-pointer rounded bg-transparent px-0.5 py-0.5 text-[13.5px] text-ink hover:bg-sunken">
-            {[...new Set([r.kind, ...EDIT_KINDS])].map((k) => <option key={k} value={k}>{KIND[k] ?? k}</option>)}
-          </select>
-        ) : <span className="text-ink-2">{KIND[r.kind] ?? r.kind}</span>}
+          <span className="group/type relative -ml-1 inline-flex items-center">
+            <select value={r.kind} onClick={stop} onChange={(e) => onChange(r, { kind: e.target.value })} aria-label={`Type of ${r.title}`}
+              className={`${TYPE} cursor-pointer appearance-none bg-transparent pr-5 hover:bg-sunken focus-visible:bg-sunken`}>
+              {[...new Set([r.kind, ...EDIT_KINDS])].map((k) => <option key={k} value={k}>{KIND[k] ?? k}</option>)}
+            </select>
+            <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden
+              className="pointer-events-none absolute right-1.5 text-ink-3 opacity-0 group-focus-within/type:opacity-100 group-hover/type:opacity-100"><path d="m4 6 4 4 4-4" /></svg>
+          </span>
+        ) : <span className={`${TYPE} -ml-1 inline-block`} title={r.origin === "canvas" ? "Canvas sets this" : undefined}>{KIND[r.kind] ?? r.kind}</span>}
       </td>
       <td className={cell}>
         {r.taskId !== null ? (

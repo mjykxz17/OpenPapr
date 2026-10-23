@@ -35,7 +35,8 @@ export function BoardView({ rows, today, color, selected, onOpen, onChange }: Pr
             {list.map((r) => (
               <div key={r.id} role="button" tabIndex={0} draggable={r.taskId !== null}
                 onDragStart={(e) => { e.dataTransfer.setData("text/plain", r.id); setDrag(r.id); }} onDragEnd={() => { setDrag(null); setOver(null); }}
-                onClick={() => onOpen(r.id)} onKeyDown={(e) => e.key === "Enter" && onOpen(r.id)}
+                data-open={r.id} aria-haspopup="dialog" onClick={() => onOpen(r.id)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(r.id); } }}
                 className={`flex flex-col gap-1.5 rounded-lg border bg-panel px-3 py-2.5 text-[13px] ${r.taskId !== null ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${r.origin === "schedule" ? "border-dashed border-line-2" : "border-line"} ${selected === r.id ? "ring-1 ring-accent" : ""} ${drag === r.id ? "opacity-40" : ""}`}>
                 <b className={`font-semibold leading-snug ${col === "done" ? "text-ink-3 line-through" : "text-ink"}`}>{r.title}</b>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-ink-2">

@@ -15,6 +15,21 @@ type Props = {
 };
 const WD = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
+// A chip is dashed while its date is not final: expected from the course
+// schedule, or only a best guess.
+const isDashed = (r: TaskRow) => !r.event && Boolean(r.origin === "schedule" || r.estimated || r.week);
+
+// The line under the month: only what the month on screen actually has.
+export function legendFor(rows: TaskRow[], from: string, to: string): string {
+  const on = rows.filter((r) => r.day && r.day >= from && r.day <= to);
+  return [
+    on.some((r) => r.can.date) && "Drag to move",
+    "click a day to add",
+    on.some(isDashed) && "dashed = date not final yet",
+    on.some((r) => r.event) && "outlined = a class",
+  ].filter(Boolean).join(" · ").replace(/^c/, "C");
+}
+
 export function CalendarView({ rows, today, color, selected, onOpen, onChange, onAdd }: Props) {
   const [month, setMonth] = useState(today.slice(0, 7));
   const [classes, setClasses] = useState(true);
@@ -44,9 +59,9 @@ export function CalendarView({ rows, today, color, selected, onOpen, onChange, o
 
   const chip = (r: TaskRow) => {
     const c = color(r.moduleId);
-    const dashed = r.origin === "schedule" || r.estimated || r.week;
+    const dashed = isDashed(r);
     return (
-      <button key={r.id} type="button" draggable={r.can.date}
+      <button key={r.id} type="button" data-open={r.id} aria-haspopup="dialog" draggable={r.can.date}
         onDragStart={(e) => { e.dataTransfer.setData("text/plain", r.id); e.dataTransfer.effectAllowed = "move"; setDrag(r.id); }}
         onDragEnd={() => { setDrag(null); setOver(null); }}
         onClick={(e) => { e.stopPropagation(); onOpen(r.id); }}
@@ -68,9 +83,11 @@ export function CalendarView({ rows, today, color, selected, onOpen, onChange, o
           <button type="button" onClick={() => shift(1)} aria-label="Next month" className="h-8 w-8 rounded-md text-ink-2 hover:bg-sunken hover:text-ink">›</button>
         </div>
         {month !== today.slice(0, 7) && <button type="button" onClick={() => { setMonth(today.slice(0, 7)); setPicked(today); }} className="h-8 rounded-md border border-line-2 px-2.5 text-[12.5px] text-ink-2 hover:text-ink">Today</button>}
-        <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-[12.5px] text-ink-2">
-          <input type="checkbox" checked={classes} onChange={(e) => setClasses(e.target.checked)} className="accent-[var(--accent)]" /> Classes
-        </label>
+        {rows.some((r) => r.event) && (
+          <label className="ml-auto flex min-h-6 cursor-pointer items-center gap-1.5 text-[12.5px] text-ink-2">
+            <input type="checkbox" checked={classes} onChange={(e) => setClasses(e.target.checked)} className="accent-[var(--accent)]" /> Classes
+          </label>
+        )}
       </div>
 
       {/* Desktop month */}
@@ -97,7 +114,7 @@ export function CalendarView({ rows, today, color, selected, onOpen, onChange, o
             );
           })}
         </div>
-        <p className="mt-2 text-[12px] text-ink-3">Drag to move · click a day to add · dashed = expected from the course schedule · outlined = a class</p>
+        <p className="mt-2 text-[12px] text-ink-3">{legendFor(shown, days[0]!, days[days.length - 1]!)}</p>
       </div>
 
       {/* Phone month: dots, and the picked day underneath */}
@@ -124,7 +141,7 @@ export function CalendarView({ rows, today, color, selected, onOpen, onChange, o
         <div className="mt-3 rounded-xl border border-line bg-panel p-3">
           <div className="mb-2 flex items-center justify-between">
             <b className="text-[14px] text-ink">{picked === today ? "Today" : dayText(picked)}</b>
-            <button type="button" onClick={(e) => onAdd({ day: picked, rect: e.currentTarget.getBoundingClientRect() })} className="text-[13px] font-medium text-accent">+ Add</button>
+            <button type="button" onClick={(e) => onAdd({ day: picked, rect: e.currentTarget.getBoundingClientRect() })} className="-mr-1 inline-flex h-8 items-center rounded px-1 text-[13px] font-medium text-accent">+ Add</button>
           </div>
           <div className="flex flex-col gap-1.5">
             {(byDay.get(picked) ?? []).map(chip)}

@@ -14,7 +14,7 @@ export type Change = {
 
 export const KIND: Record<string, string> = {
   exam: "Exam", quiz: "Quiz", submission: "Submission", project: "Project", presentation: "Presentation", prep: "Prep",
-  reading: "Reading", admin: "Admin", meeting: "Meeting", personal: "Personal", class: "Class",
+  reading: "Reading", admin: "Task", meeting: "Meeting", personal: "Personal", class: "Class",
 };
 export const EDIT_KINDS = ["submission", "quiz", "exam", "project", "presentation", "prep", "reading", "admin", "meeting", "personal"];
 export const STATUS: Record<RowStatus, string> = { todo: "To do", doing: "Doing", done: "Done" };
@@ -101,10 +101,13 @@ export function StatusPill({ status }: { status: RowStatus }) {
   return <span className={`inline-flex rounded-full border px-2 text-[11.5px] leading-[18px] ${cls}`}>{STATUS[status]}</span>;
 }
 
+// An 18px box with a 24px target around it, so it is easy to hit without
+// making the rows taller. The target hangs off the inside of the 1px border,
+// so 16px + 4px each side.
 export function Check({ checked, onChange, label, disabled }: { checked: boolean; onChange: () => void; label: string; disabled?: boolean }) {
   return (
     <button type="button" role="checkbox" aria-checked={checked} aria-label={label} onClick={(e) => { e.stopPropagation(); onChange(); }} disabled={disabled}
-      className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border transition-colors disabled:opacity-40 ${checked ? "border-accent bg-accent text-on-accent" : "border-ink-3/60 hover:border-accent"}`}>
+      className={`relative flex h-[18px] w-[18px] shrink-0 before:absolute before:-inset-[4px] before:content-[''] items-center justify-center rounded-[5px] border transition-colors disabled:opacity-40 ${checked ? "border-accent bg-accent text-on-accent" : "border-ink-3/60 hover:border-accent"}`}>
       {checked && <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden><path d="m3.5 8.5 3 3 6-7" /></svg>}
     </button>
   );
