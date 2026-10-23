@@ -153,11 +153,3 @@ export const DEMO_DECKS = DEMO_DECK_SOURCES.map((d) => d.stem);
 // Pages in a deck, the cover included.
 export const deckPages = (d: DemoDeck) => d.slides.length + 1;
 
-// The text a page shows, for checking a citation against the deck it cites.
-export function pageText(stem: string, page: number): string | null {
-  const d = DEMO_DECK_SOURCES.find((x) => x.stem === stem);
-  if (!d || page < 1 || page > deckPages(d)) return null;
-  if (page === 1) return `${d.title} ${d.subtitle}`;
-  const sl = d.slides[page - 2]!;
-  return [sl.title, ...sl.bullets].join(" ");
-}

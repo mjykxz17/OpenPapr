@@ -96,11 +96,13 @@ describe("demo account", () => {
     // Nothing links to a Canvas that doesn't have these courses.
     expect(db.select().from(items).where(eq(items.userId, id)).all().filter((i) => i.url !== null)).toEqual([]);
 
-    // The account agrees with the "synced" the module pages show.
+    // The account agrees with the "synced" the module pages show, and with
+    // having no token: no "last worked" for the Account page to show.
     const user = findDemoUser(db)!;
     const sync = db.select().from(syncRuns).where(eq(syncRuns.userId, id)).all().find((r) => r.source === "canvas")!;
-    expect(user.canvasVerifiedAt).toBe(sync.finishedAt);
     expect(user.lastSyncStartedAt).toBe(sync.startedAt);
+    expect(user.canvasTokenEnc).toBeNull();
+    expect(user.canvasVerifiedAt).toBeNull();
     expect(user.canvasTokenFailedAt).toBeNull();
   });
 
