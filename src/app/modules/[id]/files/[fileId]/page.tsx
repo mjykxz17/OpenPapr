@@ -3,7 +3,9 @@ import { BackLink } from "@/components/BackLink";
 import { getDb } from "@/server/db";
 import { requireUserId } from "@/server/session";
 import { ownedFile } from "@/server/files";
-import { listModuleFiles } from "@/db/repo";
+import { getUser, listModuleFiles } from "@/db/repo";
+import { MiddleEllipsis } from "@/components/viewer/MiddleEllipsis";
+import { showCanvasLinks } from "@/components/module/canvas-links";
 import { loadEnv } from "@/lib/env";
 import { categoryLabel, sortMaterials } from "@/lib/materials";
 import { fileExt, fileKind } from "@/lib/file-kind";
@@ -47,21 +49,28 @@ export default async function FilePage({ params }: { params: Promise<{ id: strin
   const at = list.findIndex((f) => f.id === file.id);
   const next = list.slice(at + 1).find((f) => ["pdf", "office"].includes(fileKind(f.name)));
   const nextRaw = next ? `/api/modules/${mod.id}/files/${next.id}${fileKind(next.name) === "office" ? "?as=pdf" : ""}` : null;
-  const canvasUrl = `${loadEnv().CANVAS_BASE_URL}/courses/${mod.canvasCourseId}/files/${file.canvasFileId}`;
+  // No link for the demo, whose courses are made up.
+  const canvasUrl = showCanvasLinks(getUser(db, userId), mod.canvasCourseId)
+    ? `${loadEnv().CANVAS_BASE_URL}/courses/${mod.canvasCourseId}/files/${file.canvasFileId}` : null;
 
   return (
     <AppShell bleed>
       <div className="flex h-dvh flex-col">
+        {/* On a phone the name gets a row of its own and may wrap to two
+            lines; wider, it is cut in the middle so its end still shows. */}
         <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-2 sm:px-6">
           <BackLink href={`/modules/${mod.id}`}>{mod.code}</BackLink>
           <span aria-hidden className="hidden h-4 w-px bg-line sm:block" />
-          <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink" title={file.displayName}>{file.displayName}</h1>
-          <div className="flex items-center gap-3 text-[13px]">
+          <h1 className="order-last w-full min-w-0 text-[15px] font-semibold text-ink sm:order-none sm:w-auto sm:flex-1" title={file.displayName}>
+            <span className="line-clamp-2 leading-snug [overflow-wrap:anywhere] sm:hidden">{file.displayName}</span>
+            <MiddleEllipsis text={file.displayName} className="hidden sm:flex" />
+          </h1>
+          <div className="ml-auto flex items-center gap-3 text-[13px] sm:ml-0">
             <span className="tabular-nums text-ink-3">{[ext.toUpperCase(), size(file.sizeBytes)].filter(Boolean).join(" · ")}</span>
             <a href={`/api/modules/${mod.id}/files/${file.id}?download=1`} className="text-ink-2 hover:text-accent">Download</a>
-            <a href={canvasUrl} target="_blank" rel="noreferrer" className="text-ink-3 hover:text-accent" title="Open this file on Canvas">Canvas ↗</a>
+            {canvasUrl && <a href={canvasUrl} target="_blank" rel="noreferrer" className="text-ink-3 hover:text-accent" title="Open this file on Canvas">Canvas ↗</a>}
           </div>
-          <div className="w-full lg:hidden"><FileSelect moduleId={mod.id} files={list} currentId={file.id} /></div>
+          <div className="order-last w-full lg:hidden"><FileSelect moduleId={mod.id} files={list} currentId={file.id} /></div>
         </header>
         <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)]">
           <nav aria-label="Module files" className="hidden min-h-0 border-r border-line lg:block">

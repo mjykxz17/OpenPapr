@@ -44,12 +44,15 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
 
   return (
     <AppShell wide>
-      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-line pb-4">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <BackLink href={`/modules/${mod.id}`}>{mod.code} overview</BackLink>
+      {/* On a phone the way back and the title share one row, so the guide
+          starts sooner: the back button names only the code, the title is
+          cut to one line. */}
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-line pb-3 sm:gap-y-3 sm:pb-4">
+        <div className="flex w-full min-w-0 items-center gap-x-3 sm:w-auto sm:min-w-[18rem] sm:flex-1 sm:gap-x-4">
+          <BackLink href={`/modules/${mod.id}`}>{mod.code}<span className="hidden sm:inline"> overview</span></BackLink>
           <span aria-hidden className="hidden h-4 w-px bg-line sm:block" />
-          <h1 className="text-base font-semibold text-ink">
-            {title} <span className="font-normal text-ink-2">· Study guide</span>
+          <h1 className="min-w-0 truncate text-base font-semibold text-ink" title={`${title} · Study guide`}>
+            {title} <span className="sr-only font-normal text-ink-2 sm:not-sr-only">· Study guide</span>
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -59,7 +62,7 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
       </header>
 
       {guide ? (
-        <section id="study" className="mt-7">
+        <section id="study" className="mt-4 sm:mt-7">
           <StudyGuide markdown={guide.markdown} moduleId={mod.id} decks={decks} />
         </section>
       ) : (
