@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { files, guideTopics, items, modules, studyGuides, users } from "../db/schema";
-import { assembleGuide, guideStatus, nextTopics, requestGuideRefresh, runAutoGuides, type GuideDeps } from "./guides";
+import { assembleGuide, guideStatus, inSlots, nextTopics, requestGuideRefresh, runAutoGuides, type GuideDeps } from "./guides";
 import { MAX_TRIES, partialHash, writeFailure } from "../server/guide-status";
 import { chapterHash } from "../lib/guide-chapters";
 import { splitGuideIntoChapters } from "../lib/study-chapters";
@@ -402,5 +402,29 @@ describe("nextTopics", () => {
   it("fills spare places from the same student when nobody else is waiting", () => {
     const db = twoStudents();
     expect(nextTopics(db, NOW, (u) => u === 1, 2).map((n) => n.topic.key)).toEqual(["a1", "a2"]);
+  });
+});
+
+describe("inSlots", () => {
+  it("keeps every slot busy: a free slot takes the next item without waiting for the others", async () => {
+    let running = 0, most = 0;
+    const order: string[] = [];
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const items = [{ id: "a", ms: 60 }, { id: "b", ms: 5 }, { id: "c", ms: 5 }, { id: "d", ms: 5 }, { id: "e", ms: 5 }];
+    await inSlots(items, 2, async (it) => {
+      running++; most = Math.max(most, running);
+      await wait(it.ms);
+      order.push(it.id);
+      running--;
+    });
+    expect(most).toBe(2);
+    // The long first item is still going while the other slot works through the rest.
+    expect(order).toEqual(["b", "c", "d", "e", "a"]);
+  });
+
+  it("does nothing for no items", async () => {
+    const fn = vi.fn(async () => {});
+    await inSlots([], 4, fn);
+    expect(fn).not.toHaveBeenCalled();
   });
 });

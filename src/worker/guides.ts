@@ -32,7 +32,8 @@ const FINGERPRINTS_PER_PASS = 6;
 const REPLAN_EVERY = 6 * H;          // when only quizzes or announcements changed
 const UNREADABLE_TRIES = 3;          // a deck that would not download or convert, once a day
 const OCR_TRIES = 3;                 // a scan OCR read nothing from, once a day
-const CONCURRENT_CHAPTERS = 2;       // chapters written at once, across everyone
+const CONCURRENT_CHAPTERS = 4;       // chapters written at once, across everyone
+const CHAPTERS_PER_PASS = 12;        // then the pass ends, so new slides and plans are looked at again
 const AUTO_PREFIX = "auto";          // study_guides.sourceNote of an automatic guide
 
 export type GuideDeps = {
@@ -473,7 +474,7 @@ export async function writeTopic(deps: GuideDeps, topic: Topic, mod: Mod): Promi
 
 // --- the loop ---------------------------------------------------------------------
 // Preparation (fingerprints, plans, headers) is cheap and done for every
-// module each pass; then a couple of chapters are written side by side, for
+// module each pass; then several chapters are written side by side, for
 // different students when more than one is waiting. Writing takes minutes,
 // and every call still queues behind its provider's rate limit.
 export async function runAutoGuides(deps: GuideDeps): Promise<void> {
@@ -491,8 +492,18 @@ export async function runAutoGuides(deps: GuideDeps): Promise<void> {
       assembleGuide(db, mod, deps.now());
     }
   }
-  const next = nextTopics(db, deps.now(), (userId) => Boolean(deps.cfgFor(userId)), CONCURRENT_CHAPTERS);
-  await Promise.all(next.map((n) => writeTopic(deps, n.topic, n.mod)));
+  const next = nextTopics(db, deps.now(), (userId) => Boolean(deps.cfgFor(userId)), CHAPTERS_PER_PASS);
+  await inSlots(next, CONCURRENT_CHAPTERS, (n) => writeTopic(deps, n.topic, n.mod));
+}
+
+// Runs fn over items, at most `slots` at once. A slot takes the next item as
+// soon as it is free, so one long chapter does not hold up the others the
+// way a batch waiting for its slowest would.
+export async function inSlots<T>(items: T[], slots: number, fn: (item: T) => Promise<unknown>): Promise<void> {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(slots, items.length) }, async () => {
+    while (next < items.length) await fn(items[next++]!);
+  }));
 }
 
 export { guideStatus, requestGuideRefresh } from "../server/guide-status";
