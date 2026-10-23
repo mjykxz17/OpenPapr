@@ -339,7 +339,7 @@ describe("figures, for a model that reads images", () => {
     expect(growth.images).toEqual([2, 3]);
     expect(bounds.images).toEqual([10, 11, 12, 13]);
     expect(bounds.parts.map((p) => p.type)).toEqual(["text", "image_url", "image_url", "image_url", "image_url"]);
-    expect(bounds.text).toMatch(/Image 1 is slide 10, Image 2 is slide 11, Image 3 is slide 12, Image 4 is slide 13\. Describe each figure only from what its image shows, and embed it where it belongs as !\[short caption\]\(slide-img:L1-asymptotics#N\)/);
+    expect(bounds.text).toMatch(/Image 1 is slide 10, Image 2 is slide 11, Image 3 is slide 12, Image 4 is slide 13\. Read each image as part of its slide, saying only what it shows: copy any code or command on it into a fenced block.*Embed it where it belongs as !\[short caption\]\(slide-img:L1-asymptotics#N\)/);
     // The key points are text alone, and slides are rendered once each.
     expect(seen.find((s) => asked(s).includes("Key points"))!.images).toEqual([]);
     expect(rendered.sort((a, b) => a - b)).toEqual([2, 3, 10, 11, 12, 13]);

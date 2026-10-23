@@ -301,7 +301,7 @@ Heading (use it verbatim as your first line): ### ${s.number} ${s.heading}
 What it must teach: ${s.covers}
 It draws on slides ${s.slides}: cite mainly those.${whole ? "" : " Only some of the deck's slides are shown above; cite only those."}
 Teach fully everything "What it must teach" names, even where another section of the outline touches it. Only for an idea that is not in that line and is another section's, point to that section by its heading in italics ("see *<its heading>*") instead of teaching it again; never by a number. Use "#### " subheadings without numbers.${images.length ? `
-After this text come images of ${images.length === 1 ? "a figure slide" : `${images.length} figure slides`} in your range: ${images.map((n, i) => `Image ${i + 1} is slide ${n}`).join(", ")}. Describe each figure only from what its image shows, and embed it where it belongs as ![short caption](slide-img:${plan.deckName}#N), with N its slide number.` : ""}`;
+After this text come images of ${images.length === 1 ? "a figure slide" : `${images.length} figure slides`} in your range: ${images.map((n, i) => `Image ${i + 1} is slide ${n}`).join(", ")}. Read each image as part of its slide, saying only what it shows: copy any code or command on it into a fenced block and walk through it, put a table's numbers in a markdown table, and explain a diagram step by step. Embed it where it belongs as ![short caption](slide-img:${plan.deckName}#N), with N its slide number.` : ""}`;
 
     let cut = false;
     const ask = (user: string | ContentPart[], maxTokens: number, giveUp: (err: unknown) => boolean) => withRetry(
