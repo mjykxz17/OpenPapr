@@ -224,6 +224,16 @@ export const isImageRefusal = (err: unknown) =>
   IMAGE_WORDS.test(String(err instanceof Error ? err.message : err))
   && /llm 4\d\d/.test(String(err instanceof Error ? err.message : err));
 
+// Models that have refused an image, for the life of the process, so later
+// calls go out in text alone instead of paying for a refused request first.
+// Keyed by provider, key and model: another model on the same key may well
+// read images.
+const noImages = new Set<string>();
+const imageKey = (cfg: CompatConfig) => `${gateKey(cfg)}:${cfg.model}`;
+export const refusesImages = (cfg: CompatConfig) => noImages.has(imageKey(cfg));
+export function rememberImageRefusal(cfg: CompatConfig): void { noImages.add(imageKey(cfg)); }
+export function resetImageRefusals(): void { noImages.clear(); }
+
 // Prose completion, for generated long-form content. chatJson is the wrong
 // shape for a study guide: it hunts for the first { and last } and would
 // mangle markdown. Carries a timeout because the shared client has none and a

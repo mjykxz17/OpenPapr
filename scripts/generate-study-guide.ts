@@ -18,6 +18,7 @@ import { decrypt } from "../src/lib/crypto";
 import { createCanvasClient } from "../src/connectors/canvas/client";
 import { extractPdfText } from "../src/lib/pdf-text";
 import { createGuideGenerator, preferColourDeck, validateChapter } from "../src/enrich/study-guide";
+import { deckOutcome } from "../src/enrich/generate-guide";
 import { upsertStudyGuide } from "../src/db/repo";
 import { deckStem } from "../src/server/deck";
 import { parseUserArg } from "../src/lib/cli";
@@ -73,11 +74,14 @@ async function main(): Promise<void> {
     console.log(`  ${name}: "${outline.title}" — ${outline.sections.length} sections, ${pageCount} slides`);
 
     const t0 = Date.now();
-    const bodies = await Promise.all(outline.sections.map((s, n) =>
-      gen.section(name, text, pageCount, `${i + 1}.${n + 1} ${s.heading}`, s.covers, s.slides)
-        .catch((e) => { console.log(`    section ${n + 1} failed: ${String(e).slice(0, 120)}`); return ""; })));
+    const written = await gen.writeDeck({
+      deckName: name, deckText: text, pageCount,
+      sections: outline.sections.map((s, n) => ({ number: `${i + 1}.${n + 1}`, heading: s.heading, covers: s.covers, slides: s.slides })),
+    }, { recap: `${i + 1}.${outline.sections.length + 1}` });
+    const got = deckOutcome(name, written);
+    for (const p of got.problems) console.log(`    ${p}`);
 
-    const chapter = [`## ${i + 1}. ${outline.title}`, ...bodies.filter(Boolean)].join("\n\n");
+    const chapter = [`## ${i + 1}. ${outline.title}`, ...got.parts].join("\n\n");
     const problems = validateChapter(chapter, name, pageCount);
     console.log(`    ${Math.round((Date.now() - t0) / 1000)}s, ${chapter.length} chars` +
       (problems.length ? ` — PROBLEMS: ${problems.join("; ")}` : " — clean"));

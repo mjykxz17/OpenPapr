@@ -3,9 +3,10 @@ import type { Db } from "../db/client";
 import { files, modules } from "../db/schema";
 import type { CanvasClient } from "../connectors/canvas/client";
 import { extractPdfText } from "../lib/pdf-text";
+import { renderPdfPage } from "../lib/pdf-render";
 import { citeDeck } from "../lib/slide-citation";
 import { modelsServed, startServedLog } from "./openai-compat";
-import { cleanCitations, createGuideGenerator, figureSlides, selectGuideDecks, validateChapter, type CompatConfig } from "./study-guide-deps";
+import { cleanCitations, createGuideGenerator, selectGuideDecks, validateChapter, type CompatConfig, type DeckPlan, type DeckWritten } from "./study-guide-deps";
 
 export type GuideProgress = {
   stage: string;
@@ -23,6 +24,25 @@ export type GuideResult = {
 };
 
 const MIN_DECK_SLIDES = 8;
+
+// What one deck's writing leaves for the chapter: its sections in order, then
+// its key points. Every section that could not be written — failed, or came
+// back empty — is a problem line and counts as missing, so the chapter is
+// tried again; one cut off at the token budget, or key points that failed,
+// is only a problem line.
+export function deckOutcome(name: string, w: DeckWritten): { parts: string[]; problems: string[]; missing: number } {
+  const problems: string[] = [];
+  let missing = 0;
+  w.errors.forEach((e, k) => {
+    if (e === null && (w.bodies[k] ?? "").trim() !== "") return;
+    problems.push(`${name} section ${k + 1}: ${(e ?? "nothing was written").slice(0, 80)}`);
+    missing++;
+  });
+  for (const k of w.cut) problems.push(`${name} section ${k + 1}: cut off at the model's token budget, kept to its last whole paragraph`);
+  if (w.recapError) problems.push(`${name} key points: ${w.recapError.slice(0, 80)}`);
+  const parts = w.bodies.filter((b): b is string => b !== null && b.trim() !== "");
+  return { parts: w.recap ? [...parts, w.recap] : parts, problems, missing };
+}
 
 // Shared by the CLI script and the worker, so an in-app generation and a
 // terminal one produce the same guide. The caller decides what to do with
@@ -70,14 +90,18 @@ export async function generateModuleGuide(opts: {
     report();
 
     let text: string;
+    let bytes: Uint8Array;
     try {
       if (opts.loadPdf) {
-        text = await extractPdfText(await opts.loadPdf(deck));
+        bytes = await opts.loadPdf(deck);
       } else {
         // Signed download urls expire, so the id is re-resolved rather than stored.
         const fresh = await canvas.getFile(deck.canvasFileId);
-        text = await extractPdfText(await canvas.downloadFile(fresh.url));
+        bytes = await canvas.downloadFile(fresh.url);
       }
+      // pdf.js may take over the buffer it is given, so it reads a copy; the
+      // original stays for rendering figure slides.
+      text = await extractPdfText(bytes.slice());
     } catch (err) {
       problems.push(`${name}: could not be read (${String(err instanceof Error ? err.message : err).slice(0, 80)})`);
       progress.decksDone++;
@@ -111,28 +135,29 @@ export async function generateModuleGuide(opts: {
       continue;
     }
 
-    const figures = figureSlides(text);
     progress.sectionsTotal += outline.sections.length;
     report();
 
-    // Sections run concurrently but report as they land, so the count climbs
-    // steadily instead of jumping from 0 to done.
-    const bodies = await Promise.all(outline.sections.map((s, n) =>
-      gen.section(citeDeck(name), text, pageCount, `${i + 1}.${n + 1} ${s.heading}`, s.covers, s.slides, figures)
-        .then((body) => {
-          progress.sectionsDone++;
-          progress.stage = `Writing ${name}: ${progress.sectionsDone} of ${progress.sectionsTotal} sections`;
-          report();
-          return body;
-        })
-        .catch((e) => {
-          progress.sectionsDone++;
-          problems.push(`${name} section ${n + 1}: ${String(e).slice(0, 80)}`);
-          report();
-          return "";
-        })));
+    const cite = citeDeck(name);
+    const plan: DeckPlan = {
+      deckName: cite, deckText: text, pageCount,
+      sections: outline.sections.map((s, n) => ({ number: `${i + 1}.${n + 1}`, heading: s.heading, covers: s.covers, slides: s.slides })),
+      pageImage: (page) => renderPdfPage(bytes.slice(), page, 1.25),
+    };
+    // Sections report as they land, so the count climbs steadily instead of
+    // jumping from 0 to done.
+    const written = await gen.writeDeck(plan, {
+      recap: `${i + 1}.${outline.sections.length + 1}`,
+      onSection: () => {
+        progress.sectionsDone++;
+        progress.stage = `Writing ${name}: ${progress.sectionsDone} of ${progress.sectionsTotal} sections`;
+        report();
+      },
+    });
+    const got = deckOutcome(name, written);
+    problems.push(...got.problems);
 
-    const chapter = cleanCitations([`## ${i + 1}. ${outline.title}`, ...bodies.filter(Boolean)].join("\n\n"), new Map([[citeDeck(name), pageCount]])).markdown;
+    const chapter = cleanCitations([`## ${i + 1}. ${outline.title}`, ...got.parts].join("\n\n"), new Map([[cite, pageCount]])).markdown;
     problems.push(...validateChapter(chapter, citeDeck(name), pageCount).map((p) => `${name}: ${p}`));
     chapters.push(chapter);
     used.push(name);
@@ -167,11 +192,16 @@ export async function generateModuleGuide(opts: {
 // missing counts the parts that could not be written this time — sections
 // the model dropped and practice sheets, and apart from them whole decks
 // whose outline failed — so the caller can keep what was written and try the
-// rest again later. planned is how many sections were attempted.
+// rest again later. planned is how many sections were attempted. A deck's
+// "Key points" recap shares the 1.N numbering, after its sections; it is not
+// counted in either, so a failed one never makes a chapter be rewritten.
 //
 // otherDecks: the module's other deck names, so a link reads "Week1 L2"
 // rather than a "Week1" another chapter's deck also goes by.
-export type TopicSource = { name: string; text: string };
+//
+// pageImage: a lecture deck's slide as a PNG, so a model that reads images
+// sees the figures it embeds.
+export type TopicSource = { name: string; text: string; pageImage?: ((page: number) => Promise<Uint8Array | null>) | null };
 
 export async function generateTopicChapter(opts: {
   cfg: CompatConfig;
@@ -187,7 +217,7 @@ export async function generateTopicChapter(opts: {
   const parts: string[] = [];
   const decks = new Map<string, number>();
   const missing = { sections: 0, decks: 0 };
-  let n = 0;
+  let n = 0, planned = 0;
   const pagesOf = (text: string) => Number(text.match(/--\s*\d+\s*of\s*(\d+)\s*--/)?.[1] ?? 0);
 
   for (const deck of opts.lectures) {
@@ -198,17 +228,28 @@ export async function generateTopicChapter(opts: {
     opts.onStage?.(`Planning from ${deck.name}`);
     const outline = await gen.outline(deck.name, deck.text, pageCount).catch(() => null);
     if (!outline) { problems.push(`${deck.name}: outline failed`); missing.decks++; continue; }
-    const figures = figureSlides(deck.text);
     let done = 0;
-    const start = n;
-    n += outline.sections.length;
-    const bodies = await Promise.all(outline.sections.map((s, k) =>
-      gen.section(cite, deck.text, pageCount, `1.${start + k + 1} ${s.heading}`, s.covers, s.slides, figures)
-        .then((b) => { done++; opts.onStage?.(`Writing from ${deck.name}: ${done} of ${outline.sections.length} sections`); return b; })
-        .catch((e) => { problems.push(`${deck.name} section ${k + 1}: ${String(e).slice(0, 80)}`); missing.sections++; return ""; })));
+    const total = outline.sections.length;
+    const plan: DeckPlan = {
+      deckName: cite, deckText: deck.text, pageCount, pageImage: deck.pageImage ?? null,
+      sections: outline.sections.map((s, k) => ({ number: `1.${n + k + 1}`, heading: s.heading, covers: s.covers, slides: s.slides })),
+    };
+    n += total;
+    planned += total;
+    const w = await gen.writeDeck(plan, {
+      recap: `1.${n + 1}`,
+      onSection: () => {
+        done++;
+        opts.onStage?.(done < total ? `Writing from ${deck.name}: ${done} of ${total} sections` : `Key points from ${deck.name}`);
+      },
+    });
+    if (w.recap) n++;
+    const got = deckOutcome(deck.name, w);
+    problems.push(...got.problems);
+    missing.sections += got.missing;
     // Each section saw only this deck, so a citation to anything else is
     // either this deck misspelt or made up.
-    const written = cleanCitations(bodies.filter(Boolean).join("\n\n"), new Map([[cite, pageCount]])).markdown;
+    const written = cleanCitations(got.parts.join("\n\n"), new Map([[cite, pageCount]])).markdown;
     problems.push(...validateChapter(written, cite, pageCount).map((p) => `${deck.name}: ${p}`));
     if (written) parts.push(written);
   }
@@ -221,6 +262,7 @@ export async function generateTopicChapter(opts: {
     decks.set(cite, pageCount);
     opts.onStage?.(`Practice: ${sheet.name}`);
     n++;
+    planned++;
     try {
       parts.push(cleanCitations(await gen.practice(cite, sheet.text, pageCount, `1.${n} Practice: ${sheet.name}`, opts.title), new Map([[cite, pageCount]])).markdown);
     } catch (e) {
@@ -231,5 +273,5 @@ export async function generateTopicChapter(opts: {
   // Once more over the whole chapter, so two decks that would share a short
   // name — here or elsewhere in the module — are told apart in their links.
   const others = (opts.otherDecks ?? []).map((d) => citeDeck(d));
-  return { body: cleanCitations(parts.join("\n\n"), decks, others).markdown, problems, missing, planned: n };
+  return { body: cleanCitations(parts.join("\n\n"), decks, others).markdown, problems, missing, planned };
 }

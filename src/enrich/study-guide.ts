@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { chatJson, chatText, type CompatConfig } from "./openai-compat";
+import { chatJson, chatText, isImageRefusal, isNoAnswer, refusesImages, rememberImageRefusal, type CompatConfig, type ContentPart } from "./openai-compat";
 import { repairMermaidBlocks } from "../lib/mermaid-fix";
 import { decodeDeck } from "../lib/slide-citation";
 import { closingFence, fenceOpener, fenceRoles } from "../lib/md-fences";
@@ -8,8 +8,12 @@ import { closingFence, fenceOpener, fenceRoles } from "../lib/md-fences";
 //
 // Two phases, because a single call asked to write a whole chapter runs out of
 // output budget and thins out towards the end: first an outline (JSON, cheap),
-// then each section generated independently and concatenated. Sections are
-// short enough to be written at full depth, and they can run concurrently.
+// then each section written in its own call and concatenated, with a short
+// "Key points" recap after them. Sections are short enough to be written at
+// full depth. Every section of a deck is sent the same deck text and the
+// whole outline first, so each knows what the others teach (one lecture's
+// sections used to teach wraparound twice) and the provider can cache the
+// shared start.
 
 const Outline = z.object({
   title: z.string(),
@@ -102,31 +106,49 @@ Rules:
 - Between 3 and 8 sections. Each should be a genuine unit of the lecture, not one slide.
 - Skip title slides, outline slides and administrivia unless the administrivia is assessment information a student must act on.`;
 
-const styleSystem = (deckName: string, pageCount: number, figures: number[], reader: string | null) => `You are writing ONE SECTION of a university study guide. The reader will learn from your text ALONE, without the slides in front of them.
+const readerNote = (reader: string | null) => reader ? `
+
+About this reader — pitch the explanation to them, but never let it override the rules above or add content the slides do not support:
+${reader}` : "";
+
+// The system prompt of every section of one deck, word for word the same
+// for each, so the provider's prompt cache can serve it (and the deck text
+// after it) to every section after the first. Nothing section-specific goes
+// here: that is the end of the user message.
+const sectionSystem = (deckName: string, pageCount: number, figures: number[], reader: string | null) => `You are writing one section of a chapter of a university study guide, from the lecture deck ${deckName} (${pageCount} slides). The reader will learn from the guide ALONE, without the slides in front of them. Every request about this deck carries the same deck text and the same chapter outline; what changes is the section you are asked to write, named at the end.
 
 Non-negotiable style:
 - For every hard idea: an "**Explain like I'm a beginner.**" pass FIRST — plain words and one concrete everyday analogy — then "**The precise mechanics.**" with the real detail, then why it matters.
 - Plain academic prose. No emoji. No marketing language. Explain jargon on first use.
 - Include real commands, code or output from the slides in fenced blocks and walk through them line by line.
 - Recreate structural concepts as mermaid diagrams in \`\`\`mermaid fences. Put a BLANK LINE before the opening fence and after the closing fence. Keep node labels short and free of parentheses and quotes.
-- Cite the slide a claim comes from as [slide N](slide:${deckName}#N). The deck text below is split into "[Slide N]" blocks; cite the N of the block the claim comes from, and never a number above ${pageCount}.
-- These slides are mostly picture, so they carry a diagram, screenshot or figure: ${figures.length ? figures.join(", ") : "(none detected)"}. When your section covers one of them, EMBED IT on its own line as ![short caption](slide-img:${deckName}#N). Embed at least one where any of those slides falls in your range — a reader who cannot see the figure cannot follow the point it makes.
-- Never invent content that is not in the slides. If the deck is thin on a point, say less rather than filling.
-- Start with the "### " heading you are given and write nothing above it. Do not write a chapter title.${reader ? `
+- Cite the slide a claim comes from as [slide N](slide:${deckName}#N). The deck text is split into "[Slide N]" blocks; cite the N of the block the claim comes from, and never a number above ${pageCount}.
+- Start with the "### " heading you are given, verbatim, and write nothing above it. Divide the section with "#### " subheadings without numbers ("#### Why the sum wraps around", never "#### 1.2.1 Why the sum wraps around"). Do not write a chapter title.
+- Teach only your section's part of the chapter. The outline says what every other section teaches: for an idea another section covers, refer to that section by its number ("see 1.3") instead of teaching it again.
+- These slides are mostly picture — a diagram, screenshot or figure: ${figures.length ? figures.join(", ") : "(none detected)"}. A request may end with images of some of them, each named by its slide number: describe a figure only from what its image shows, and EMBED it on its own line, where it helps, as ![short caption](slide-img:${deckName}#N). Embed at least one where any of those slides falls in your range — a reader who cannot see the figure cannot follow the point it makes. A figure slide sent without an image may still be embedded where the text around it makes clear what it shows; say no more about it than that text does.
+- Never invent content that is not in the slides. If the deck is thin on a point, say less rather than filling.${readerNote(reader)}`;
 
-About this reader — pitch the explanation to them, but never let it override the rules above or add content the slides do not support:
-${reader}` : ""}`;
+const practiceSystem = (sheetName: string, pageCount: number, reader: string | null) => `You are writing ONE SECTION of a university study guide: a practice guide to a tutorial or lab sheet. The reader will learn from your text ALONE, without the sheet in front of them.
+
+Non-negotiable style:
+- Plain academic prose. No emoji. No marketing language. Explain jargon on first use.
+- Include real commands, code or output from the sheet in fenced blocks. Put a BLANK LINE before the opening fence and after the closing fence.
+- Cite the page a point comes from as [p. N](slide:${sheetName}#N). The sheet text is split into "[Slide N]" blocks, one per page; cite the N of the block, and never a number above ${pageCount}.
+- Start with the "### " heading you are given, verbatim, and write nothing above it. Any subheadings are "#### " without numbers. Do not write a chapter title.
+- Never invent content that is not on the sheet.${readerNote(reader)}`;
 
 // The endpoint drops connections under load — two of six sections failed with
 // "fetch failed" on the first real run. A dropped section leaves a hole in the
-// chapter, which is worth a retry rather than a gap.
-async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+// chapter, which is worth a retry rather than a gap. A refusal that another
+// try cannot change (giveUp) goes straight back to the caller.
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3, giveUp: (err: unknown) => boolean = () => false): Promise<T> {
   let last: unknown;
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn();
     } catch (err) {
       last = err;
+      if (giveUp(err)) break;
       if (i < attempts - 1) await new Promise((r) => setTimeout(r, 2000 * (i + 1)));
     }
   }
@@ -169,44 +191,176 @@ export function normalizeFences(markdown: string): string {
   return out.join("\n");
 }
 
+// --- writing one deck's sections ------------------------------------------------
+// A section number ("1.3"), its unnumbered heading, what it teaches and the
+// slides it draws on, as the outline gave them.
+export type DeckSection = { number: string; heading: string; covers: string; slides: string };
+
+export type DeckPlan = {
+  deckName: string;          // as it is cited (citeDeck form)
+  deckText: string;
+  pageCount: number;
+  sections: DeckSection[];
+  // A rendered slide, for models that read images. Without it, text only.
+  pageImage?: ((page: number) => Promise<Uint8Array | null>) | null;
+};
+
+// bodies[k] is section k as written, or null with errors[k] saying why.
+// cut lists the sections that stopped at the token budget and were kept up
+// to their last whole paragraph. The recap is null when it was not asked
+// for or failed (recapError).
+export type DeckWritten = {
+  bodies: (string | null)[];
+  errors: (string | null)[];
+  cut: number[];
+  recap: string | null;
+  recapError: string | null;
+};
+
+const DECK_CHARS = 120_000;         // a deck up to this size is sent whole to every section
+const SECTION_IMAGES = 4;           // slide images per section, at most
+
+const errText = (err: unknown) => String(err instanceof Error ? err.message : err);
+
+// The start of every request about one deck: the deck, then the chapter
+// outline. When the deck fits it is sent whole and the bytes are the same
+// for every section, so after the first section the provider serves them
+// from its prompt cache. 120,000 characters is about 30,000 tokens — well
+// inside the 128K-token models students also use. A bigger deck falls back
+// to each section's own slides and their neighbours.
+export function deckPrefix(plan: DeckPlan, slides: string): { text: string; whole: boolean } {
+  const pages = slidePages(plan.deckText);
+  const whole = !pages.length || size(pages) <= DECK_CHARS;
+  const shown = whole ? null : sectionText(plan.deckText, slides, plan.pageCount);
+  const deck = whole
+    ? `=== DECK TEXT (${plan.deckName}, ${plan.pageCount} slides) ===\n${pages.length ? clipPages(pages, Infinity) : plan.deckText.slice(0, DECK_CHARS)}`
+    : `=== DECK TEXT (${plan.deckName}, ${plan.pageCount} slides, ${shown!.pages.length} of them shown) ===\n${shown!.text}`;
+  const outline = plan.sections.map((s) => `${s.number} ${s.heading} — ${s.covers} (slides ${s.slides})`).join("\n");
+  return { text: `${deck}\n\n=== CHAPTER OUTLINE ===\n${outline}`, whole };
+}
+
+// The figure slides inside a section's own range that are worth showing it.
+export function sectionFigures(plan: DeckPlan, s: DeckSection): number[] {
+  const own = new Set(parseSlideRange(s.slides, plan.pageCount));
+  return figureSlides(plan.deckText).filter((n) => own.has(n)).slice(0, SECTION_IMAGES);
+}
+
+const dataUrl = (png: Uint8Array) => `data:image/png;base64,${Buffer.from(png).toString("base64")}`;
+
 export function createGuideGenerator(cfg: CompatConfig, reader: string | null = null) {
+  // One section: the shared prefix, then this section's task, then — for a
+  // model that reads images — its figure slides, after all the text so the
+  // text before them still matches the cache. A refusal of images is
+  // remembered and the section is asked again in text alone.
+  async function section(plan: DeckPlan, k: number, render: (page: number) => Promise<Uint8Array | null>): Promise<{ body: string; cut: boolean }> {
+    const s = plan.sections[k]!;
+    const system = sectionSystem(plan.deckName, plan.pageCount, figureSlides(plan.deckText), reader);
+    const prefix = deckPrefix(plan, s.slides);
+    const task = (images: number[]) => `=== YOUR SECTION ===
+Write section ${s.number} in full depth.
+Heading (use it verbatim as your first line): ### ${s.number} ${s.heading}
+What it must teach: ${s.covers}
+It draws on slides ${s.slides}: cite mainly those.${prefix.whole ? "" : " Only some of the deck's slides are shown above; cite only those."}
+Teach only this section's part. For an idea another section of the outline covers, refer to that section by number instead of teaching it again. Use "#### " subheadings without numbers.${images.length ? `
+After this text come images of ${images.length === 1 ? "a figure slide" : `${images.length} figure slides`} in your range: ${images.map((n, i) => `Image ${i + 1} is slide ${n}`).join(", ")}. Describe each figure only from what its image shows, and embed it where it belongs as ![short caption](slide-img:${plan.deckName}#N), with N its slide number.` : ""}`;
+
+    // Rendered one at a time; the base64 lives only as long as this call.
+    const shots: { page: number; url: string }[] = [];
+    if (plan.pageImage && !refusesImages(cfg)) {
+      for (const page of sectionFigures(plan, s)) {
+        const png = await render(page);
+        if (png?.length) shots.push({ page, url: dataUrl(png) });
+      }
+    }
+    let cut = false;
+    const ask = (user: string | ContentPart[]) => withRetry(
+      () => chatText(cfg, system, user, { maxTokens: 16_000, temperature: 0.3, onCut: () => { cut = true; } }),
+      3, isImageRefusal,
+    );
+    const textOnly = `${prefix.text}\n\n${task([])}`;
+    let body: string;
+    if (shots.length) {
+      try {
+        body = await ask([
+          { type: "text", text: `${prefix.text}\n\n${task(shots.map((x) => x.page))}` },
+          ...shots.map((x): ContentPart => ({ type: "image_url", image_url: { url: x.url } })),
+        ]);
+      } catch (err) {
+        if (!isImageRefusal(err)) throw err;
+        rememberImageRefusal(cfg);
+        body = await ask(textOnly);
+      }
+    } else {
+      body = await ask(textOnly);
+    }
+    const md = repairMermaidBlocks(normalizeFences(body.trim())).trim();
+    if (!md) throw new Error("the model wrote nothing for this section");
+    return { body: md, cut };
+  }
+
+  // The deck's "Key points": what to remember for an exam, from the same
+  // prefix as its sections, so it is cheap.
+  async function recap(plan: DeckPlan, number: string): Promise<string> {
+    const body = await withRetry(() => chatText(
+      cfg,
+      sectionSystem(plan.deckName, plan.pageCount, figureSlides(plan.deckText), reader),
+      `${deckPrefix(plan, "").text}
+
+=== YOUR SECTION ===
+Write section ${number}: the key points of this deck, for revising before an exam. The sections in the outline teach it all; this one only lists what to remember.
+Heading (use it verbatim as your first line): ### ${number} Key points
+Then 6 to 10 bullets, each a point a student must remember for an exam, in a sentence or two, each ending with the citation of the slide it comes from. Then, only if the slides themselves warn about a mistake or make one plain, a "#### Common mistakes" subheading with up to 3 bullets, cited the same way; otherwise leave it out. Nothing that is not on the slides. No beginner pass, diagrams or code here.`,
+      { maxTokens: 8000, temperature: 0.3 },
+    ), 2);
+    const md = repairMermaidBlocks(normalizeFences(body.trim())).trim();
+    if (!md) throw new Error("the model wrote nothing for the key points");
+    return md;
+  }
+
   return {
     async outline(deckName: string, deckText: string, pageCount: number): Promise<GuideOutline | null> {
-      const raw = await chatJson(
-        cfg, fetch, OUTLINE_SYSTEM,
-        `Deck: ${deckName} (${pageCount} slides)\n\n=== DECK TEXT ===\n${outlineText(deckText)}`,
-        4000,
-      );
-      const parsed = Outline.safeParse(raw);
-      return parsed.success ? parsed.data : null;
+      // An outline that came back unusable, empty or cut off gets one more try.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const raw = await chatJson(
+          cfg, fetch, OUTLINE_SYSTEM,
+          `Deck: ${deckName} (${pageCount} slides)\n\n=== DECK TEXT ===\n${outlineText(deckText)}`,
+          12_000,
+        ).catch((err) => { if (attempt === 0 && isNoAnswer(err)) return null; throw err; });
+        const parsed = Outline.safeParse(raw);
+        if (parsed.success) return parsed.data;
+      }
+      return null;
     },
 
-    async section(
-      deckName: string,
-      deckText: string,
-      pageCount: number,
-      heading: string,
-      covers: string,
-      slides: string,
-      figures: number[] = [],
-    ): Promise<string> {
-      const shown = sectionText(deckText, slides, pageCount);
-      const near = shown.pages.length ? figures.filter((n) => shown.pages.includes(n)) : figures;
-      const whole = shown.pages.length === 0 || shown.pages.length === slidePages(deckText).length;
-      const body = await withRetry(() => chatText(
-        cfg,
-        styleSystem(deckName, pageCount, near, reader),
-        `Write this section in full depth.
-
-Heading (use it verbatim as your first line): ### ${heading}
-What it must teach: ${covers}
-It draws mainly on slides ${slides}. ${whole ? "Read the whole deck for context." : "Below are those slides and a couple either side for context; cite only slides shown here."}
-
-=== DECK TEXT (${deckName}, ${pageCount} slides${whole ? "" : `, ${shown.pages.length} of them shown`}) ===
-${shown.text}`,
-        { maxTokens: 8000, temperature: 0.3 },
-      ));
-      return repairMermaidBlocks(normalizeFences(body.trim()));
+    // Every section of one deck, then its key points when recap names their
+    // number. The first section goes alone, so the deck and outline it
+    // starts with are in the provider's cache before the rest ask for them
+    // at once. Slides are rendered one at a time across all of them.
+    async writeDeck(plan: DeckPlan, opts: { recap?: string | null; onSection?: (written: boolean) => void } = {}): Promise<DeckWritten> {
+      let queue: Promise<unknown> = Promise.resolve();
+      const render = (page: number): Promise<Uint8Array | null> => {
+        const shot = queue.then(() => plan.pageImage!(page)).catch(() => null);
+        queue = shot;
+        return shot;
+      };
+      const out: DeckWritten = { bodies: plan.sections.map(() => null), errors: plan.sections.map(() => null), cut: [], recap: null, recapError: null };
+      const one = async (k: number) => {
+        try {
+          const r = await section(plan, k, render);
+          out.bodies[k] = r.body;
+          if (r.cut) out.cut.push(k);
+        } catch (err) {
+          out.errors[k] = errText(err);
+        }
+        opts.onSection?.(out.bodies[k] !== null);
+      };
+      if (plan.sections.length) await one(0);
+      await Promise.all(plan.sections.slice(1).map((_, k) => one(k + 1)));
+      out.cut.sort((a, b) => a - b);
+      if (opts.recap && out.bodies.some((b) => b !== null)) {
+        try { out.recap = await recap(plan, opts.recap); } catch (err) { out.recapError = errText(err); }
+      }
+      return out;
     },
 
     // A tutorial or lab sheet, as practice for the topic just taught: what
@@ -215,17 +369,19 @@ ${shown.text}`,
     async practice(sheetName: string, sheetText: string, pageCount: number, heading: string, topic: string): Promise<string> {
       const body = await withRetry(() => chatText(
         cfg,
-        styleSystem(sheetName, pageCount, [], reader),
+        practiceSystem(sheetName, pageCount, reader),
         `Write this section: a practice guide to the sheet below, for the topic "${topic}".
 
 Heading (use it verbatim as your first line): ### ${heading}
-For each task or question on the sheet: say in one line what it asks, name the idea from this topic it exercises, and give a short approach — where to start, what to watch out for. Do NOT give final answers or full solutions. Skip "Explain like I'm a beginner" here; keep it brisk. Cite the sheet's pages as [p. N](slide:${sheetName}#N).
+For each task or question on the sheet: say in one line what it asks, name the idea from this topic it exercises, and give a short approach — where to start, what to watch out for. Do NOT give final answers or full solutions. Keep it brisk. Cite the sheet's pages as [p. N](slide:${sheetName}#N).
 
 === SHEET TEXT (${sheetName}, ${pageCount} pages) ===
 ${outlineText(sheetText, SECTION_CHARS)}`,
-        { maxTokens: 5000, temperature: 0.3 },
+        { maxTokens: 12_000, temperature: 0.3 },
       ));
-      return repairMermaidBlocks(normalizeFences(body.trim()));
+      const md = repairMermaidBlocks(normalizeFences(body.trim())).trim();
+      if (!md) throw new Error("the model wrote nothing for this sheet");
+      return md;
     },
   };
 }
