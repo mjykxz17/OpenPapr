@@ -3,7 +3,7 @@ import { renderPdfPage } from "../lib/pdf-render";
 import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
-import { components, items, modules, users } from "../db/schema";
+import { components, files, items, modules, users } from "../db/schema";
 import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, selectRequestedUsers, takeSyncRequest,
   claimNextGuideRun, updateGuideRun, failStaleGuideRuns, failOrphanedGuideRuns, upsertStudyGuide, setModuleActivity, shouldAttemptWeightage, upsertMailItems, recordCanvasTokenCheck } from "../db/repo";
 import { loadEnv } from "../lib/env";
@@ -28,7 +28,8 @@ import type { CompatConfig } from "../enrich/openai-compat";
 import { sharedLlmConfig, userLlmConfig } from "../lib/llm-provider";
 import { setUsageListener } from "../enrich/openai-compat";
 import { recordLlmCall, sharedAllowanceLeft } from "../server/llm-usage";
-import { createGuard, runUserSync } from "./sync";
+import { createGuard, recordRun, runUserSync } from "./sync";
+import { createEnrichQueue, type Budget, type Turn } from "./enrich-queue";
 import { pollIntervalAt } from "../lib/poll-schedule";
 import { clearProfileRequests, refreshProfiles, usersWithProfileRequests, type ProfileDeps } from "./profiles";
 import { refreshTasks, usersWithTaskRequests, type TaskDeps } from "./tasks";
@@ -42,7 +43,6 @@ import { readFileSync } from "node:fs";
 import { ensurePdf } from "../server/files";
 import { dirname, join } from "node:path";
 import { backfillOptimize, evictCaches, pruneSyncRuns, writeHeartbeat } from "./maintenance";
-import { setWaitListener } from "../lib/rate-gate";
 import { getStudyGuide } from "../db/repo";
 import { assembleGuide, mergeChapters, splitChapters } from "../lib/guide-chapters";
 import { ModuleProfile, UserProfile, WritingStyle, readerBrief } from "../enrich/profiles";
@@ -133,11 +133,17 @@ const SYLLABUS_NAME_RE = /(syllabus|assessment|grading|outline)/i;
 // again every sync.
 const harvestFiles = createHarvester({ db, now: Date.now });
 
+// The modules each user's last sync saw, for the model work that follows it
+// in the enrichment lane (file categories, weightage).
+const syncedModules = new Map<number, number[]>();
+
+// Canvas only: no model calls here, so a sync is seconds of requests however
+// slow anyone's provider is. What needs a model is left for the enrichment
+// lane (enrich, below).
 async function canvasSync(userId: number): Promise<void> {
   const user = db.select().from(users).where(eq(users.id, userId)).get()!;
   if (!user.canvasTokenEnc) return;
   const canvas = createCanvasClient(env.CANVAS_BASE_URL, decrypt(user.canvasTokenEnc, env.SECRET_KEY));
-  const { extractor, supportsPdfSources, fileCategorizer } = kitFor(userId);
   let courses: Awaited<ReturnType<CanvasClient["listActiveCourses"]>>;
   try {
     courses = await canvas.listActiveCourses();
@@ -148,6 +154,7 @@ async function canvasSync(userId: number): Promise<void> {
     throw err;
   }
   recordCanvasTokenCheck(db, userId, true, Date.now());
+  const seen: number[] = [];
   for (const course of courses) {
     const [groups, announcements, events] = await Promise.all([
       canvas.listAssignmentGroups(course.id),
@@ -156,59 +163,63 @@ async function canvasSync(userId: number): Promise<void> {
     ]);
     const sync = normalizeCanvasCourse(course, groups, announcements, events);
     const { moduleId } = applyCanvasSync(db, userId, sync, Date.now());
+    seen.push(moduleId);
 
     await harvestFiles(canvas, course.id, moduleId, [
       ...announcements.map((a) => ({ label: a.title, html: a.message })),
       { label: "Syllabus", html: course.syllabus_body ?? null },
     ]);
-    await categorizeModuleFiles(db, moduleId, fileCategorizer);
+    // The rules sort most files at once; the model does the rest later.
+    await categorizeModuleFiles(db, moduleId, null);
 
     await syncDiscussions(canvas, user.canvasUserId ?? null, course.id, moduleId);
-
-    // Weightage extraction: component-less modules only, at most weekly.
-    if (!extractor) continue;
-    const modRow = db.select().from(modules).where(eq(modules.id, moduleId)).get()!;
-    const have = db.select().from(components).where(eq(components.moduleId, moduleId)).all();
-    if (!shouldAttemptWeightage(have.length, modRow.weightageCheckedAt, Date.now())) continue;
-    // Pages/files are OPTIONAL weightage sources: courses can have the Pages or
-    // Files feature disabled (Canvas returns 404 "disabled for this course"),
-    // and that must not abort the sync of this or later courses.
-    const optional = async <T,>(p: Promise<T>, fallback: T): Promise<T> => {
-      try { return await p; } catch { return fallback; }
-    };
-    const texts: WeightageSourceText[] = [];
-    if (sync.module.syllabusBody) texts.push({ label: "Canvas syllabus page", text: sync.module.syllabusBody });
-    for (const p of (await optional(canvas.listPages(course.id), [])).filter((p) => SYLLABUS_NAME_RE.test(p.title)).slice(0, 3))
-      texts.push({ label: `Page: ${p.title}`, text: await optional(cachedPageBody(db, canvas, course.id, p, Date.now()), "") });
-    // Candidate PDFs: syllabus-named files, else week-0/admin-looking decks
-    // (profs often put the assessment breakdown in the prelim slides).
-    let candidateFiles = (await optional(canvas.listSyllabusFiles(course.id), [])).filter(isPdfFile);
-    if (candidateFiles.length === 0) {
-      const DECK_RE = /(prelim|intro|week ?0|u0|admin|assess|outline|course.?info)/i;
-      candidateFiles = (await optional(canvas.listCourseFiles(course.id), []))
-        .filter((f) => isPdfFile(f) && DECK_RE.test(f.display_name));
-    }
-    candidateFiles = candidateFiles.slice(0, 2);
-    const pdfs: WeightageSourcePdf[] = [];
-    for (const f of candidateFiles) {
-      const bytes = await optional(canvas.downloadFile(f.url), new Uint8Array());
-      if (bytes.length === 0) continue;
-      if (supportsPdfSources) {
-        pdfs.push({ label: f.display_name, base64: Buffer.from(bytes).toString("base64") });
-      } else {
-        const text = await extractPdfText(bytes);
-        if (text.trim()) texts.push({ label: `Slides: ${f.display_name}`, text: focusAssessmentText(text) });
-      }
-    }
-    const extracted = await extractor(texts, pdfs);
-    db.update(modules).set({ weightageCheckedAt: Date.now() }).where(eq(modules.id, moduleId)).run();
-    if (extracted) for (const c of extracted) {
-      db.insert(components).values({ moduleId, name: c.name, weightPct: c.weightPct, source: "llm_syllabus", evidence: c.evidence })
-        .onConflictDoNothing().run();
-    }
   }
+  syncedModules.set(userId, seen);
   setModuleActivity(db, userId);
   await syncPlanner(canvas, userId);
+}
+
+// Weightage extraction for one module (the caller checks it is due). Reads
+// the syllabus sources from Canvas, then asks the model.
+async function extractWeightage(canvas: CanvasClient, kit: LlmKit, moduleId: number): Promise<void> {
+  const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get()!;
+  const courseId = mod.canvasCourseId;
+  // Pages/files are OPTIONAL weightage sources: courses can have the Pages or
+  // Files feature disabled (Canvas returns 404 "disabled for this course"),
+  // and that must not abort the work for this or later courses.
+  const optional = async <T,>(p: Promise<T>, fallback: T): Promise<T> => {
+    try { return await p; } catch { return fallback; }
+  };
+  const texts: WeightageSourceText[] = [];
+  if (mod.syllabusBody) texts.push({ label: "Canvas syllabus page", text: mod.syllabusBody });
+  for (const p of (await optional(canvas.listPages(courseId), [])).filter((p) => SYLLABUS_NAME_RE.test(p.title)).slice(0, 3))
+    texts.push({ label: `Page: ${p.title}`, text: await optional(cachedPageBody(db, canvas, courseId, p, Date.now()), "") });
+  // Candidate PDFs: syllabus-named files, else week-0/admin-looking decks
+  // (profs often put the assessment breakdown in the prelim slides).
+  let candidateFiles = (await optional(canvas.listSyllabusFiles(courseId), [])).filter(isPdfFile);
+  if (candidateFiles.length === 0) {
+    const DECK_RE = /(prelim|intro|week ?0|u0|admin|assess|outline|course.?info)/i;
+    candidateFiles = (await optional(canvas.listCourseFiles(courseId), []))
+      .filter((f) => isPdfFile(f) && DECK_RE.test(f.display_name));
+  }
+  candidateFiles = candidateFiles.slice(0, 2);
+  const pdfs: WeightageSourcePdf[] = [];
+  for (const f of candidateFiles) {
+    const bytes = await optional(canvas.downloadFile(f.url), new Uint8Array());
+    if (bytes.length === 0) continue;
+    if (kit.supportsPdfSources) {
+      pdfs.push({ label: f.display_name, base64: Buffer.from(bytes).toString("base64") });
+    } else {
+      const text = await extractPdfText(bytes);
+      if (text.trim()) texts.push({ label: `Slides: ${f.display_name}`, text: focusAssessmentText(text) });
+    }
+  }
+  const extracted = await kit.extractor!(texts, pdfs);
+  db.update(modules).set({ weightageCheckedAt: Date.now() }).where(eq(modules.id, moduleId)).run();
+  if (extracted) for (const c of extracted) {
+    db.insert(components).values({ moduleId, name: c.name, weightPct: c.weightPct, source: "llm_syllabus", evidence: c.evidence })
+      .onConflictDoNothing().run();
+  }
 }
 
 const THREADS_PER_COURSE = 6;
@@ -270,8 +281,38 @@ async function mailSync(userId: number): Promise<void> {
     .where(eq(users.id, userId)).run();
 }
 
-async function enrich(userId: number): Promise<void> {
-  const { scorer, actionExtractor, deadlineClassifier } = kitFor(userId);
+// Everything a sync leaves for a model, for one user, inside the turn's
+// budget. Checked before each model call; true when it got to the end, false
+// when time ran out. The rest is picked up on the user's next turn: every
+// step works from what is still undone in the database, so nothing repeats.
+async function enrich(userId: number, budget: Budget): Promise<boolean> {
+  const kit = kitFor(userId);
+  const { scorer, actionExtractor, deadlineClassifier, fileCategorizer, extractor } = kit;
+  const synced = syncedModules.get(userId) ?? [];
+
+  // Files the rules could not sort, one batch per module.
+  if (fileCategorizer) for (const moduleId of synced) {
+    if (!db.select({ id: files.id }).from(files).where(and(eq(files.moduleId, moduleId), isNull(files.category))).get()) continue;
+    if (!budget.left()) return false;
+    await categorizeModuleFiles(db, moduleId, fileCategorizer);
+    budget.progress();
+  }
+
+  // Weightage: component-less modules only, at most weekly.
+  const user = db.select().from(users).where(eq(users.id, userId)).get();
+  if (extractor && user?.canvasTokenEnc) {
+    let canvas: CanvasClient | null = null;
+    for (const moduleId of synced) {
+      const mod = db.select().from(modules).where(eq(modules.id, moduleId)).get();
+      const have = db.select({ id: components.id }).from(components).where(eq(components.moduleId, moduleId)).all();
+      if (!mod || !shouldAttemptWeightage(have.length, mod.weightageCheckedAt, Date.now())) continue;
+      if (!budget.left()) return false;
+      canvas ??= createCanvasClient(env.CANVAS_BASE_URL, decrypt(user.canvasTokenEnc, env.SECRET_KEY));
+      await extractWeightage(canvas, kit, moduleId);
+      budget.progress();
+    }
+  }
+
   const activeCodes = db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all().map((m) => m.code);
   const pending = db.select().from(items).where(and(
     eq(items.userId, userId), eq(items.type, "email"),
@@ -284,9 +325,11 @@ async function enrich(userId: number): Promise<void> {
         .where(eq(items.id, mail.id)).run();
       continue;
     }
+    if (!budget.left()) return false;
     const scored = await scorer({ sender: mail.sender, title: mail.title, body: mail.body });
     db.update(items).set({ triage: scored.triage, importance: scored.importance, importanceReason: scored.reason })
       .where(eq(items.id, mail.id)).run();
+    budget.progress();
   }
 
   // Deadline extraction: announcements + important emails from ACTIVE modules
@@ -294,11 +337,13 @@ async function enrich(userId: number): Promise<void> {
   // a cold start can't burst the LLM budget. A null result counts as a failed
   // attempt and is retried on later cycles, but only up to MAX_ACTION_ATTEMPTS
   // — an item the extractor can never parse must not be retried forever.
-  if (!actionExtractor) return;
+  if (!actionExtractor) return true;
   const activeIds = new Set(
     db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all().map((m) => m.id));
   for (const item of selectActionCandidates(db, userId, activeIds)) {
+    if (!budget.left()) return false;
     const actions = await actionExtractor({ title: item.title, body: item.body, postedAt: item.sourceCreatedAt ?? item.firstSeenAt });
+    budget.progress();
     if (actions === null) {
       recordActionFailure(db, item.id);
       continue;
@@ -307,17 +352,20 @@ async function enrich(userId: number): Promise<void> {
   }
 
   // Classify unclassified deadlines in one batched call per cycle.
-  if (!deadlineClassifier) return;
+  if (!deadlineClassifier) return true;
   const codeById = new Map(db.select().from(modules).where(eq(modules.userId, userId)).all().map((m) => [m.id, m.code]));
   const unclassified = db.select().from(items).where(and(
     eq(items.userId, userId), eq(items.type, "deadline"), isNull(items.category),
   )).all().slice(0, 50);
-  if (unclassified.length === 0) return;
+  if (unclassified.length === 0) return true;
+  if (!budget.left()) return false;
   const result = await deadlineClassifier(unclassified.map((d) => ({
     id: d.id, title: d.title, module: d.moduleId !== null ? codeById.get(d.moduleId) ?? null : null,
   })));
+  budget.progress();
   if (result) for (const [id, category] of result)
     db.update(items).set({ category }).where(eq(items.id, id)).run();
+  return true;
 }
 
 // Keeps the machine up through long work while it would otherwise sleep.
@@ -325,11 +373,12 @@ const awake = selfPing();
 
 const guard = createGuard(env.POLL_INTERVAL_MS);
 
+// The sync itself: Canvas and mail. The model work runs in the enrichment
+// lane, below.
 const deps = {
   db, now: Date.now,
   canvasSync: guard("canvas", canvasSync),
   mailSync: guard("graph", mailSync),
-  enrich: guard("enrich", enrich),
 };
 
 // Two cadences on one timer. The fast tick exists so "Sync now" is picked up
@@ -400,12 +449,65 @@ const guardedTasks = taskGuard("tasks", async (userId: number) => {
   }
 });
 
-async function runFor(userId: number): Promise<void> {
-  beat();
+// --- the enrichment lane ------------------------------------------------------
+// Users take turns (enrich-queue.ts): each gets up to ENRICH_BUDGET_MS of
+// model work, then the next user goes. A turn still running after
+// ENRICH_HOLD_MS (one slow call: a 3-minute timeout, then a fallback) is left
+// to finish in the background while the lane carries on.
+const ENRICH_BUDGET_MS = 90_000;
+const ENRICH_HOLD_MS = 4 * 60_000;
+const AFTER_SYNC = ["enrich", "profiles", "tasks"];
+
+async function enrichTurn({ userId, work, budget, urgent }: Turn): Promise<void> {
+  const go = async () => {
+    if (work.has("enrich")) {
+      let finished = true;
+      await recordRun(deps, userId, "enrich", guard("enrich", async (id) => { finished = await enrich(id, budget); }));
+      if (!finished) return;   // out of time: the rest waits for this user's next turn
+      work.delete("enrich");
+    }
+    // Profiles are built after the sync that feeds them, and tasks after the
+    // profiles they read. Neither ever fails a sync: a model that is down
+    // leaves the current ones standing. Each is one piece, started only with
+    // time left in the turn.
+    if (work.has("profiles")) {
+      if (!budget.left()) return;
+      await guardedProfiles(userId).catch(() => {});
+      budget.progress();
+      work.delete("profiles");
+    }
+    if (work.has("tasks")) {
+      if (!budget.left()) return;
+      await guardedTasks(userId).catch(() => {});
+      budget.progress();
+      work.delete("tasks");
+    }
+  };
+  // Work someone asked for keeps the machine up until it is done.
+  await keepAwake(go(), urgent ? awake : null);
+}
+
+const enrichQueue = createEnrichQueue({
+  run: enrichTurn, budgetMs: ENRICH_BUDGET_MS, holdMs: ENRICH_HOLD_MS,
+  log: (m) => console.log(m),
+});
+let enrichJob: Promise<void> | null = null;
+// One pass down the line, unless one is under way. Called after every sync
+// and at the end of every tick, so the lane never waits on the sync loop.
+function kickEnrichment(): void {
+  if (enrichJob || enrichQueue.pending() === 0) return;
+  enrichJob = enrichQueue.drain().then(() => undefined)
+    .catch((err) => console.error("enrichment lane crashed", err))
+    .finally(() => { enrichJob = null; });
+}
+
+// A sync is Canvas and mail only; its model work joins the enrichment lane.
+async function runFor(userId: number, urgent: boolean): Promise<void> {
   markSyncStarted(db, userId, Date.now());
   await runUserSync(deps, userId);
-  await guardedProfiles(userId).catch(() => {});
-  await guardedTasks(userId).catch(() => {});
+  beat();
+  enrichQueue.add(userId, AFTER_SYNC, { urgent });
+  kickEnrichment();
 }
 
 function parseJson<T>(schema: { safeParse: (v: unknown) => { success: boolean; data?: unknown } }, json: string | null | undefined): T | null {
@@ -496,7 +598,7 @@ async function tickOnce(): Promise<void> {
       if (!takeSyncRequest(db, user.id)) continue;
       guard.resetUser(user.id);
       console.log(`manual sync requested for user ${user.id}`);
-      await keepAwake(runFor(user.id), awake);
+      await keepAwake(runFor(user.id, true), awake);
     }
 
     const now = Date.now();
@@ -505,17 +607,23 @@ async function tickOnce(): Promise<void> {
       const total = db.select().from(users).all().length;
       const cap = Math.max(1, Math.ceil(total / TICKS_PER_INTERVAL));
       for (const user of selectDueUsers(db, Date.now(), pollIntervalAt(Date.now(), env.POLL_INTERVAL_MS), cap)) {
-        await runFor(user.id);
+        await runFor(user.id, false);
       }
     }
+    // Rebuilds asked for in the app join the lane, ahead of the background
+    // work. A user whose turn is under way is left alone: the flag is
+    // cleared when that turn's profiles or tasks finish.
     for (const userId of usersWithProfileRequests(db)) {
+      if (enrichQueue.running(userId)) continue;
       profileGuard.resetUser(userId);
-      await keepAwake(guardedProfiles(userId).catch(() => {}), awake);
+      enrichQueue.add(userId, ["profiles"], { urgent: true });
     }
     for (const userId of usersWithTaskRequests(db)) {
+      if (enrichQueue.running(userId)) continue;
       taskGuard.resetUser(userId);
-      await keepAwake(guardedTasks(userId).catch(() => {}), awake);
+      enrichQueue.add(userId, ["tasks"], { urgent: true });
     }
+    kickEnrichment();
     // Generation takes minutes; it runs beside the tick rather than inside
     // it, so "Sync now" and everyone's syncs keep flowing meanwhile.
     // A guide someone asked for by hand first, then the automatic guides:
@@ -563,7 +671,6 @@ let lastIndexAt = Date.now() - INDEX_EVERY + QUIET_AFTER_START_MS;
 async function runIndex(): Promise<void> {
   const ids = [...new Set(db.select({ userId: modules.userId }).from(modules).where(eq(modules.active, true)).all().map((m) => m.userId))];
   for (const userId of ids) {
-    beat();
     const r = await indexUser({ db, now: Date.now, cfgFor: (id) => kitFor(id).compatCfg, fileText: (u, f, m) => taskDeps.fileText(u, f, m) }, userId);
     if (r.changed || r.embedded) console.log(`index for user ${userId}: ${r.changed} passage(s) changed, ${r.embedded} embedded`);
   }
@@ -592,21 +699,31 @@ const guideDeps: GuideDeps = {
 
 // --- liveness --------------------------------------------------------------
 // The heartbeat file tells the web server (and /api/health) the worker is
-// alive. The watchdog covers the failure a heartbeat cannot fix by itself: a
-// tick stuck on something that never returns. It exits, and start.sh starts
+// alive. The watchdog covers the failure a heartbeat cannot fix by itself:
+// work stuck on something that never returns. It exits, and start.sh starts
 // a fresh worker.
+//
+// Progress is finished work, nothing else: a tick or a user's sync done (the
+// beat), or a model call done in the enrichment lane (its budget's
+// progress()). Waiting in a provider's queue is not progress — a turn that
+// only waits is stuck as far as everyone behind it is concerned.
 const HEARTBEAT = join(dirname(env.DATABASE_PATH), "worker-heartbeat");
 let lastBeat = Date.now();
 function beat(): void {
   lastBeat = Date.now();
   writeHeartbeat(HEARTBEAT, lastBeat);
 }
+// The sync loop: no model calls, every Canvas request capped at 30s.
 const STUCK_MS = 20 * 60_000;
-// Waiting in a provider's RPM queue is progress, not a hang.
-setWaitListener(() => beat());
+// A turn in the lane: longer than the slowest single piece of it (a profile
+// rebuild is a handful of model calls, each up to 3 min plus a fallback).
+const ENRICH_STUCK_MS = 30 * 60_000;
 setInterval(() => {
-  if (Date.now() - lastBeat > STUCK_MS) {
-    console.error(`worker made no progress for ${Math.round((Date.now() - lastBeat) / 60_000)} min — exiting so it restarts`);
+  const idle = Date.now() - lastBeat;
+  const stalled = enrichQueue.stalledMs();
+  if (idle > STUCK_MS || stalled > ENRICH_STUCK_MS) {
+    const what = idle > STUCK_MS ? `the sync loop finished nothing for ${Math.round(idle / 60_000)} min` : `a user's model work finished nothing for ${Math.round(stalled / 60_000)} min`;
+    console.error(`worker stuck: ${what} — exiting so it restarts`);
     process.exit(1);
   }
 }, 60_000).unref();

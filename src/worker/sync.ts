@@ -5,26 +5,33 @@ import { syncRuns } from "../db/schema";
 export interface SyncDeps {
   db: Db;
   now: () => number;
-  canvasSync: (userId: number) => Promise<void>; // fetch + normalize + applyCanvasSync + weightage refresh
+  canvasSync: (userId: number) => Promise<void>; // fetch + normalize + applyCanvasSync
   mailSync: (userId: number) => Promise<void>; // delta fetch + normalize + upsertMailItems + persist deltaLink/refresh token
-  enrich: (userId: number) => Promise<void>; // rules pass + LLM pass over triage IS NULL / 'unscored' emails
+  // rules pass + LLM pass over triage IS NULL / 'unscored' emails. The worker
+  // leaves it out and runs it in the enrichment lane instead (enrich-queue).
+  enrich?: (userId: number) => Promise<void>;
+}
+
+type Source = "canvas" | "graph" | "enrich";
+
+// Runs one job, with a sync_runs row that shows it running and how it ended.
+// A failure is recorded, not thrown: one source failing never stops the next.
+export async function recordRun(deps: Pick<SyncDeps, "db" | "now">, userId: number, source: Source, job: (userId: number) => Promise<void>): Promise<boolean> {
+  const run = deps.db.insert(syncRuns).values({ userId, source, startedAt: deps.now() }).returning().get();
+  try {
+    await job(userId);
+    deps.db.update(syncRuns).set({ finishedAt: deps.now(), ok: true }).where(eq(syncRuns.id, run.id)).run();
+    return true;
+  } catch (err) {
+    deps.db.update(syncRuns).set({ finishedAt: deps.now(), ok: false, error: String(err) }).where(eq(syncRuns.id, run.id)).run();
+    return false;
+  }
 }
 
 export async function runUserSync(deps: SyncDeps, userId: number): Promise<void> {
-  const jobs = [
-    ["canvas", deps.canvasSync],
-    ["graph", deps.mailSync],
-    ["enrich", deps.enrich],
-  ] as const;
-  for (const [source, job] of jobs) {
-    const run = deps.db.insert(syncRuns).values({ userId, source, startedAt: deps.now() }).returning().get();
-    try {
-      await job(userId);
-      deps.db.update(syncRuns).set({ finishedAt: deps.now(), ok: true }).where(eq(syncRuns.id, run.id)).run();
-    } catch (err) {
-      deps.db.update(syncRuns).set({ finishedAt: deps.now(), ok: false, error: String(err) }).where(eq(syncRuns.id, run.id)).run();
-    }
-  }
+  const jobs: [Source, (userId: number) => Promise<void>][] = [["canvas", deps.canvasSync], ["graph", deps.mailSync]];
+  if (deps.enrich) jobs.push(["enrich", deps.enrich]);
+  for (const [source, job] of jobs) await recordRun(deps, userId, source, job);
 }
 
 export function computeBackoffMs(consecutiveFailures: number, baseMs: number): number {
