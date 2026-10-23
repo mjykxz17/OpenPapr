@@ -1,0 +1,272 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [7 0 R 9 0 R 11 0 R 13 0 R 15 0 R 17 0 R 19 0 R 21 0 R 23 0 R 25 0 R 27 0 R] /Count 11 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Title (CS2105 L4 Reliable transfer - Reliable data transfer) /Producer (OpenPapr make-demo-decks) >>
+endobj
+6 0 obj
+<< /Length 349 >>
+stream
+0.17 0.36 0.66 rg 0 0 12 540 re f
+BT /F2 46 Tf 0.11 0.12 0.15 rg 80 318 Td (Reliable data transfer) Tj ET
+BT /F1 24 Tf 0.25 0.27 0.32 rg 80 256 Td (CS2105 ∑ Lecture 4) Tj ET
+BT /F1 16 Tf 0.45 0.47 0.52 rg 80 218 Td (Demo course material, written for OpenPapr) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 1/11) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 509 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (The problem) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (The network layer may corrupt, lose or reorder packets) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (The transport layer must still deliver the data correctly and in order) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 2/11) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Length 715 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (The tools) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (Checksums detect corrupted packets) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (ACKs tell the sender what arrived) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (Sequence numbers spot duplicates) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 252.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 252.5 Td (Timers recover lost packets) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 3/11) Tj ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 10 0 R >>
+endobj
+12 0 obj
+<< /Length 613 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Stop-and-wait \(rdt 3.0\)) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (Send one packet, then wait for its ACK) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (Retransmit when the timer expires) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (A 1-bit sequence number \(0, 1\) is enough) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 4/11) Tj ET
+endstream
+endobj
+13 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 12 0 R >>
+endobj
+14 0 obj
+<< /Length 632 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Stop-and-wait is slow) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (Utilisation U = \(L/R\) / \(RTT + L/R\)) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (L = 8000 bits, R = 1 Gbps, RTT = 30 ms gives U = 0.00027) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (The link sits idle while the sender waits) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 5/11) Tj ET
+endstream
+endobj
+15 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 14 0 R >>
+endobj
+16 0 obj
+<< /Length 629 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Pipelining) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (Let several unACKed packets be in flight at once) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (Needs a range of sequence numbers and buffering) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (Two ways to do it: Go-Back-N and Selective Repeat) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 6/11) Tj ET
+endstream
+endobj
+17 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 16 0 R >>
+endobj
+18 0 obj
+<< /Length 2695 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Go-Back-N: the sender) Tj ET
+BT /F1 22 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 22 Tf 0.11 0.12 0.15 rg 98 392 Td (Up to N unACKed packets in the window) Tj ET
+BT /F1 22 Tf 0.17 0.36 0.66 rg 68 351.08 Td (ï) Tj ET
+BT /F1 22 Tf 0.11 0.12 0.15 rg 98 351.08 Td (Cumulative ACK: ACK n means every packet up to n arrived) Tj ET
+BT /F1 22 Tf 0.17 0.36 0.66 rg 68 310.16 Td (ï) Tj ET
+BT /F1 22 Tf 0.11 0.12 0.15 rg 98 310.16 Td (One timer, for the oldest unACKed packet) Tj ET
+BT /F1 22 Tf 0.17 0.36 0.66 rg 68 269.24 Td (ï) Tj ET
+BT /F1 22 Tf 0.11 0.12 0.15 rg 98 269.24 Td (On timeout, resend every packet in the window) Tj ET
+0.55 0.78 0.58 rg 0.35 0.37 0.42 RG 1.5 w 135 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 155.11 166 Td (0) Tj ET
+0.55 0.78 0.58 rg 0.35 0.37 0.42 RG 1.5 w 193 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 213.11 166 Td (1) Tj ET
+0.55 0.78 0.58 rg 0.35 0.37 0.42 RG 1.5 w 251 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 271.11 166 Td (2) Tj ET
+0.98 0.83 0.45 rg 0.35 0.37 0.42 RG 1.5 w 309 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 329.11 166 Td (3) Tj ET
+0.98 0.83 0.45 rg 0.35 0.37 0.42 RG 1.5 w 367 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 387.11 166 Td (4) Tj ET
+0.98 0.83 0.45 rg 0.35 0.37 0.42 RG 1.5 w 425 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 445.11 166 Td (5) Tj ET
+0.82 0.89 0.98 rg 0.35 0.37 0.42 RG 1.5 w 483 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 503.11 166 Td (6) Tj ET
+0.92 0.92 0.93 rg 0.35 0.37 0.42 RG 1.5 w 541 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 561.11 166 Td (7) Tj ET
+0.92 0.92 0.93 rg 0.35 0.37 0.42 RG 1.5 w 599 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 619.11 166 Td (8) Tj ET
+0.92 0.92 0.93 rg 0.35 0.37 0.42 RG 1.5 w 657 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 677.11 166 Td (9) Tj ET
+0.92 0.92 0.93 rg 0.35 0.37 0.42 RG 1.5 w 715 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 729.21 166 Td (10) Tj ET
+0.92 0.92 0.93 rg 0.35 0.37 0.42 RG 1.5 w 773 148 52 52 re B
+BT /F2 20 Tf 0.11 0.12 0.15 rg 787.21 166 Td (11) Tj ET
+0.55 0.78 0.58 rg 0.35 0.37 0.42 RG 1.5 w 246.84 108 14 14 re B
+BT /F1 15 Tf 0.25 0.27 0.32 rg 268.84 110 Td (ACKed) Tj ET
+0.98 0.83 0.45 rg 0.35 0.37 0.42 RG 1.5 w 344.36 108 14 14 re B
+BT /F1 15 Tf 0.25 0.27 0.32 rg 366.36 110 Td (sent, not yet ACKed) Tj ET
+0.82 0.89 0.98 rg 0.35 0.37 0.42 RG 1.5 w 527.77 108 14 14 re B
+BT /F1 15 Tf 0.25 0.27 0.32 rg 549.77 110 Td (usable) Tj ET
+0.92 0.92 0.93 rg 0.35 0.37 0.42 RG 1.5 w 621.95 108 14 14 re B
+BT /F1 15 Tf 0.25 0.27 0.32 rg 643.95 110 Td (not usable) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 7/11) Tj ET
+endstream
+endobj
+19 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 18 0 R >>
+endobj
+20 0 obj
+<< /Length 629 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Go-Back-N: the receiver) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (Accepts only the next in-order packet) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (Discards out-of-order packets and buffers nothing) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (Re-sends the ACK for the last in-order packet) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 8/11) Tj ET
+endstream
+endobj
+21 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 20 0 R >>
+endobj
+22 0 obj
+<< /Length 700 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Go-Back-N in action) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (Window N = 4; packet 2 is lost) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (Packets 3, 4 and 5 arrive out of order and are discarded; the receiver) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 311.5 Td (repeats ACK 1) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 265 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 265 Td (Timeout: the sender resends 2, 3, 4 and 5) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 9/11) Tj ET
+endstream
+endobj
+23 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 22 0 R >>
+endobj
+24 0 obj
+<< /Length 667 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Selective Repeat) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (The receiver ACKs and buffers each packet on its own) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (The sender keeps a timer per packet and resends only the lost ones) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (The window must be at most half the sequence number space) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 10/11) Tj ET
+endstream
+endobj
+25 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 24 0 R >>
+endobj
+26 0 obj
+<< /Length 751 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Summary) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (Checksums, ACKs, sequence numbers and timers) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (Pipelining fixes the utilisation of stop-and-wait) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (GBN: simple receiver, more resending) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 252.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 252.5 Td (SR: less resending, more buffering) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (CS2105 L4 Reliable transfer ∑ 11/11) Tj ET
+endstream
+endobj
+27 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 26 0 R >>
+endobj
+xref
+0 28
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000191 00000 n 
+0000000288 00000 n 
+0000000390 00000 n 
+0000000510 00000 n 
+0000000909 00000 n 
+0000001045 00000 n 
+0000001604 00000 n 
+0000001740 00000 n 
+0000002506 00000 n 
+0000002644 00000 n 
+0000003308 00000 n 
+0000003446 00000 n 
+0000004129 00000 n 
+0000004267 00000 n 
+0000004947 00000 n 
+0000005085 00000 n 
+0000007832 00000 n 
+0000007970 00000 n 
+0000008650 00000 n 
+0000008788 00000 n 
+0000009539 00000 n 
+0000009677 00000 n 
+0000010395 00000 n 
+0000010533 00000 n 
+0000011335 00000 n 
+trailer
+<< /Size 28 /Root 1 0 R /Info 5 0 R >>
+startxref
+11473
+%%EOF

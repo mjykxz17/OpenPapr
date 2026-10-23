@@ -1,0 +1,217 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [7 0 R 9 0 R 11 0 R 13 0 R 15 0 R 17 0 R 19 0 R 21 0 R 23 0 R 25 0 R] /Count 10 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Title (ST2334 L3 Conditional probability - Conditional probability and Bayes' theorem) /Producer (OpenPapr make-demo-decks) >>
+endobj
+6 0 obj
+<< /Length 424 >>
+stream
+0.17 0.36 0.66 rg 0 0 12 540 re f
+BT /F2 46 Tf 0.11 0.12 0.15 rg 80 318 Td (Conditional probability and Bayes') Tj ET
+BT /F2 46 Tf 0.11 0.12 0.15 rg 80 262 Td (theorem) Tj ET
+BT /F1 24 Tf 0.25 0.27 0.32 rg 80 200 Td (ST2334 ∑ Lecture 3) Tj ET
+BT /F1 16 Tf 0.45 0.47 0.52 rg 80 162 Td (Demo course material, written for OpenPapr) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (ST2334 L3 Conditional probability ∑ 1/10) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 632 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Conditional probability) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (P\(A | B\) = P\(A and B\) / P\(B\), for P\(B\) > 0) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (The probability of A once we know B has happened) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (B becomes the new sample space) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (ST2334 L3 Conditional probability ∑ 2/10) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 8 0 R >>
+endobj
+10 0 obj
+<< /Length 639 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Example: two dice) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (B: the sum is 8, so \(2,6\), \(3,5\), \(4,4\), \(5,3\) or \(6,2\)) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (A: both dice show the same number) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (P\(A | B\) = 1/5, while P\(A\) = 6/36 = 1/6) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (ST2334 L3 Conditional probability ∑ 3/10) Tj ET
+endstream
+endobj
+11 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 10 0 R >>
+endobj
+12 0 obj
+<< /Length 515 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Multiplication rule) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (P\(A and B\) = P\(A | B\) P\(B\) = P\(B | A\) P\(A\)) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (Chain rule: P\(A1 A2 A3\) = P\(A1\) P\(A2 | A1\) P\(A3 | A1 A2\)) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (ST2334 L3 Conditional probability ∑ 4/10) Tj ET
+endstream
+endobj
+13 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 12 0 R >>
+endobj
+14 0 obj
+<< /Length 643 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Law of total probability) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (If B1, ..., Bk partition the sample space:) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (P\(A\) = P\(A | B1\) P\(B1\) + ... + P\(A | Bk\) P\(Bk\)) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (Split a hard probability into easy cases) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (ST2334 L3 Conditional probability ∑ 5/10) Tj ET
+endstream
+endobj
+15 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 14 0 R >>
+endobj
+16 0 obj
+<< /Length 635 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Bayes' theorem) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (P\(B | A\) = P\(A | B\) P\(B\) / P\(A\)) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (Turns P\(evidence | cause\) into P\(cause | evidence\)) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (Expand P\(A\) with the law of total probability) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (ST2334 L3 Conditional probability ∑ 6/10) Tj ET
+endstream
+endobj
+17 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 16 0 R >>
+endobj
+18 0 obj
+<< /Length 880 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Example: a medical test) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (1% of people have the disease) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (The test is positive for 95% of those who have it, and for 5% of those) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 311.5 Td (who do not) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 265 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 265 Td (P\(positive\) = 0.95\(0.01\) + 0.05\(0.99\) = 0.059) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 218.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 218.5 Td (P\(disease | positive\) = 0.0095 / 0.059 = 0.161, about 16%) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (ST2334 L3 Conditional probability ∑ 7/10) Tj ET
+endstream
+endobj
+19 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 18 0 R >>
+endobj
+20 0 obj
+<< /Length 594 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (The base-rate fallacy) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (A positive result from an accurate test can still leave the disease) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 358 Td (unlikely) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 311.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 311.5 Td (When the condition is rare, false positives outnumber true positives) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (ST2334 L3 Conditional probability ∑ 8/10) Tj ET
+endstream
+endobj
+21 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 20 0 R >>
+endobj
+22 0 obj
+<< /Length 646 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Independence) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (A and B are independent if P\(A and B\) = P\(A\) P\(B\)) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (Equivalently P\(A | B\) = P\(A\), when P\(B\) > 0) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (Independent is not the same as mutually exclusive) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (ST2334 L3 Conditional probability ∑ 9/10) Tj ET
+endstream
+endobj
+23 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 22 0 R >>
+endobj
+24 0 obj
+<< /Length 594 >>
+stream
+0.17 0.36 0.66 rg 0 532 960 8 re f
+BT /F2 34 Tf 0.11 0.12 0.15 rg 64 456 Td (Summary) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 392 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 392 Td (Conditioning: restrict to B and rescale) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 345.5 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 345.5 Td (Total probability: split into cases) Tj ET
+BT /F1 25 Tf 0.17 0.36 0.66 rg 68 299 Td (ï) Tj ET
+BT /F1 25 Tf 0.11 0.12 0.15 rg 98 299 Td (Bayes: reverse the conditioning) Tj ET
+BT /F1 12 Tf 0.45 0.47 0.52 rg 64 26 Td (ST2334 L3 Conditional probability ∑ 10/10) Tj ET
+endstream
+endobj
+25 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 960 540] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 24 0 R >>
+endobj
+xref
+0 26
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000184 00000 n 
+0000000281 00000 n 
+0000000383 00000 n 
+0000000529 00000 n 
+0000001003 00000 n 
+0000001139 00000 n 
+0000001821 00000 n 
+0000001957 00000 n 
+0000002647 00000 n 
+0000002785 00000 n 
+0000003351 00000 n 
+0000003489 00000 n 
+0000004183 00000 n 
+0000004321 00000 n 
+0000005007 00000 n 
+0000005145 00000 n 
+0000006076 00000 n 
+0000006214 00000 n 
+0000006859 00000 n 
+0000006997 00000 n 
+0000007694 00000 n 
+0000007832 00000 n 
+0000008477 00000 n 
+trailer
+<< /Size 26 /Root 1 0 R /Info 5 0 R >>
+startxref
+8615
+%%EOF
