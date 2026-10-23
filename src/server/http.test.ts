@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { isJsonRequest, requireJson } from "./http";
+import { isJsonRequest, publicBaseUrl, requireJson } from "./http";
+
+describe("publicBaseUrl", () => {
+  it("uses PUBLIC_URL, reduced to its origin", () => {
+    expect(publicBaseUrl({ PUBLIC_URL: "https://op.example.com/some/path/" })).toBe("https://op.example.com");
+  });
+  it("falls back to the Fly app's address, then to this machine", () => {
+    expect(publicBaseUrl({ FLY_APP_NAME: "openpapr" })).toBe("https://openpapr.fly.dev");
+    expect(publicBaseUrl({ PUBLIC_URL: "not a url", FLY_APP_NAME: "openpapr" })).toBe("https://openpapr.fly.dev");
+    expect(publicBaseUrl({ PUBLIC_URL: "javascript:alert(1)" })).toBe("http://localhost:3000");
+    expect(publicBaseUrl({ PORT: "3101" })).toBe("http://localhost:3101");
+  });
+});
 
 const req = (type?: string) => new Request("http://x/api", { method: "POST", headers: type ? { "Content-Type": type } : {}, body: "{}" });
 

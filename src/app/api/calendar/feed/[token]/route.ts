@@ -4,6 +4,7 @@ import { buildIcs } from "@/lib/ics";
 import { and, desc, eq } from "drizzle-orm";
 import { syncRuns } from "@/db/schema";
 import { requestSync } from "@/db/repo";
+import { publicBaseUrl } from "@/server/http";
 
 // The server sleeps when nobody is using it, so a calendar app checking the
 // feed is often what wakes it. It gets what is known now, and a sync is asked
@@ -24,8 +25,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ toke
     .where(and(eq(syncRuns.userId, userId), eq(syncRuns.source, "canvas"), eq(syncRuns.ok, true))).orderBy(desc(syncRuns.id)).limit(1).get();
   if (!last?.at || Date.now() - last.at > FEED_SYNC_AFTER_MS) requestSync(db, userId, Date.now());
   const url = new URL(request.url);
-  const base = `${request.headers.get("x-forwarded-proto") ?? url.protocol.replace(":", "")}://${request.headers.get("host") ?? url.host}`;
-  const ics = buildIcs("OpenPapr", calendarEvents(db, userId, Date.now(), { steps: url.searchParams.get("steps") === "1", baseUrl: base }), Date.now());
+  const ics = buildIcs("OpenPapr", calendarEvents(db, userId, Date.now(), { steps: url.searchParams.get("steps") === "1", baseUrl: publicBaseUrl() }), Date.now());
   return new Response(ics, {
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
