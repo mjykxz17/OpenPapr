@@ -13,6 +13,7 @@ import { fileKind } from "@/lib/file-kind";
 import { deckCachePath } from "./deck";
 import { onceMap, TooLargeError, touch, writeAtomic } from "./io";
 import { markerPath, optimizePdf } from "./pdf-optimize";
+import { LockTimeoutError, processLock, type ProcessLock } from "./process-lock";
 
 // Every file a student opens is fetched from Canvas once and then served from
 // the volume. PDFs share the deck cache the study guide already uses, so a
@@ -127,13 +128,16 @@ export function sofficeBin(): string | null {
   return candidates.find((p) => existsSync(p)) ?? null;
 }
 
-// One conversion at a time: LibreOffice takes a few hundred MB, and the
-// machine also runs the web server and the worker.
-let queue: Promise<unknown> = Promise.resolve();
-function serial<T>(work: () => Promise<T>): Promise<T> {
-  const run = queue.then(work, work);
-  queue = run.catch(() => undefined);
-  return run;
+// One conversion at a time on the whole machine: LibreOffice takes a few
+// hundred MB, and the web server and the worker can each want one at once on
+// 1GB. The lock is shared between the two processes (see process-lock).
+let convertLock: { path: string; lock: ProcessLock } | null = null;
+function oneConversionAtATime<T>(work: () => Promise<T>): Promise<T> {
+  const path = join(dirname(dbPath()), "convert.lock");
+  if (convertLock?.path !== path) convertLock = { path, lock: processLock(path) };
+  // A conversion is capped at three minutes; past five in line, something is
+  // queued behind several, and the viewer is better told to come back.
+  return convertLock.lock.run(work, { maxWaitMs: 5 * 60_000 });
 }
 
 async function runSoffice(bin: string, srcPath: string, ext: string): Promise<Uint8Array | null> {
@@ -173,7 +177,13 @@ export function ensurePdf(db: Db, userId: number, row: Row): Promise<Served> {
     const original = await ensureOriginal(db, userId, row);
     if ("error" in original) return original;
     const ext = row.file.displayName.split(".").pop()!.toLowerCase();
-    const pdf = await serial(() => runSoffice(bin, original.path, ext));
+    let pdf: Uint8Array | null;
+    try {
+      pdf = await oneConversionAtATime(() => runSoffice(bin, original.path, ext));
+    } catch (err) {
+      if (err instanceof LockTimeoutError) return { error: "lots of files are being converted right now — try again in a minute", status: 503 };
+      throw err;
+    }
     if (!pdf || pdf.length === 0) return { error: "this file could not be converted for preview", status: 422 };
     writeAtomic(target, pdf);
     recordSource(target, row);
