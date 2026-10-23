@@ -1,0 +1,45 @@
+import { describe, expect, it } from "vitest";
+import { createDb } from "@/db/client";
+import { guideProgress, modules, quizAttempts, users } from "@/db/schema";
+import { deleteAccount, exportAccount, wipeUserData } from "./account-data";
+
+const now = Date.parse("2026-10-01T10:00:00+08:00");
+
+function setup() {
+  const db = createDb(":memory:");
+  db.insert(users).values([{ name: "a" }, { name: "b" }]).run();
+  db.insert(modules).values([
+    { userId: 1, canvasCourseId: 7, code: "CS1", name: "x" },
+    { userId: 2, canvasCourseId: 7, code: "CS1", name: "x" },
+  ]).run();
+  for (const [userId, moduleId] of [[1, 1], [2, 2]] as const) {
+    db.insert(quizAttempts).values({ userId, moduleId, chapterHash: "h", question: 0, chosen: 1, correct: true, answeredAt: now }).run();
+    db.insert(guideProgress).values({ userId, moduleId, topicKey: "1-intro", readAt: now }).run();
+  }
+  return db;
+}
+
+describe("account data and the quiz and reading tables", () => {
+  it("exports the student's own quiz answers and chapters read, and nobody else's", () => {
+    const ex = exportAccount(setup(), 1)!;
+    expect(ex.quizAttempts).toEqual([expect.objectContaining({ userId: 1, chapterHash: "h", correct: true })]);
+    expect(ex.chaptersRead).toEqual([expect.objectContaining({ userId: 1, topicKey: "1-intro" })]);
+  });
+
+  it("deletes them with the account, leaving other students' alone", () => {
+    const db = setup();
+    deleteAccount(db, 1);
+    expect(db.select().from(quizAttempts).all().map((r) => r.userId)).toEqual([2]);
+    expect(db.select().from(guideProgress).all().map((r) => r.userId)).toEqual([2]);
+    expect(db.select().from(users).all().map((u) => u.id)).toEqual([2]);
+  });
+
+  // The demo reset wipes the account but keeps its user row.
+  it("wipes them on a reset that keeps the user", () => {
+    const db = setup();
+    wipeUserData(db, 1);
+    expect(db.select().from(quizAttempts).all().map((r) => r.userId)).toEqual([2]);
+    expect(db.select().from(guideProgress).all().map((r) => r.userId)).toEqual([2]);
+    expect(db.select().from(users).all()).toHaveLength(2);
+  });
+});

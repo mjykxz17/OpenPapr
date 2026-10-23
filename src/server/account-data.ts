@@ -1,8 +1,8 @@
 import { eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import {
-  components, courseHistory, fileHints, files, guidePlans, guideQuizzes, guideRuns, guideTopics, items, llmUsage,
-  moduleProfiles, moduleRoadmaps, modules, passages, petChats, slideNotes, studyGuides, syncRuns, taskChanges, taskFeedback, taskPlans, tasks, users, weeklyPlans,
+  components, courseHistory, fileHints, files, guidePlans, guideProgress, guideQuizzes, guideRuns, guideTopics, items, llmUsage,
+  moduleProfiles, moduleRoadmaps, modules, passages, petChats, quizAttempts, slideNotes, studyGuides, syncRuns, taskChanges, taskFeedback, taskPlans, tasks, users, weeklyPlans,
 } from "@/db/schema";
 
 // The student's data, theirs to take or to remove. Export leaves out every
@@ -30,6 +30,8 @@ export function exportAccount(db: Db, userId: number) {
     studyGuides: db.select().from(studyGuides).where(inArray(studyGuides.moduleId, inMods)).all(),
     guideTopics: db.select().from(guideTopics).where(inArray(guideTopics.moduleId, inMods)).all(),
     slideNotes: db.select().from(slideNotes).where(eq(slideNotes.userId, userId)).all(),
+    quizAttempts: db.select().from(quizAttempts).where(eq(quizAttempts.userId, userId)).all(),
+    chaptersRead: db.select().from(guideProgress).where(eq(guideProgress.userId, userId)).all(),
     moduleProfiles: db.select().from(moduleProfiles).where(inArray(moduleProfiles.moduleId, inMods)).all(),
     weeklyPlans: db.select().from(weeklyPlans).where(eq(weeklyPlans.userId, userId)).all(),
     courseHistory: db.select().from(courseHistory).where(eq(courseHistory.userId, userId)).all(),
@@ -51,7 +53,7 @@ export function wipeUserData(db: Db, userId: number, andUser = false): void {
       }
       tx.delete(files).where(inArray(files.moduleId, ids)).run();
     }
-    for (const t of [passages, taskChanges, taskFeedback, tasks, items, guideRuns, slideNotes, weeklyPlans, courseHistory, petChats, llmUsage, syncRuns] as const) {
+    for (const t of [passages, quizAttempts, guideProgress, taskChanges, taskFeedback, tasks, items, guideRuns, slideNotes, weeklyPlans, courseHistory, petChats, llmUsage, syncRuns] as const) {
       tx.delete(t).where(eq(t.userId, userId)).run();
     }
     if (ids.length) tx.delete(modules).where(inArray(modules.id, ids)).run();

@@ -59,7 +59,9 @@ const PPTX_RE = /\.pptx?$/i;
     // LibreOffice writes <basename>.pdf into --outdir; that matches our cache name.
     execFileSync(SOFFICE, ["--headless", "--convert-to", "pdf", "--outdir", outDir, srcPath], { stdio: "ignore" });
     console.log(existsSync(target) ? `converted ${f.display_name} -> ${stem}.pdf` : `FAILED ${f.display_name}`);
-    if (existsSync(target)) done++;
+    // Which upload the copy came from: the deck routes only use a copy of the
+    // caller's own file (see deck.ts).
+    if (existsSync(target)) { writeFileSync(`${target}.src`, String(f.id)); done++; }
   }
   console.log(`\nDone: ${done}/${files.length} decks cached under ${outDir}`);
 })();

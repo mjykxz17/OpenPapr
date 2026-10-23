@@ -6,6 +6,7 @@ import { loadEnv, sessionSigningKey } from "@/lib/env";
 import { eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { users } from "@/db/schema";
+import type { Db } from "@/db/client";
 import { getDb } from "./db";
 
 // The account a session cookie belongs to, or null. A signed cookie outlives
@@ -63,7 +64,7 @@ export function clearSessionCookie(res: NextResponse): NextResponse {
 
 // The public demo account is shared by everyone who opens it, so its
 // settings stay as they are.
-export function isDemoUser(userId: number): boolean {
-  return Boolean(getDb().select({ d: users.isDemo }).from(users).where(eq(users.id, userId)).get()?.d);
+export function isDemoUser(userId: number, db: Db = getDb()): boolean {
+  return Boolean(db.select({ d: users.isDemo }).from(users).where(eq(users.id, userId)).get()?.d);
 }
 export const DEMO_LOCKED = "This is the shared demo account, so its settings can't be changed. Create your own account to connect Canvas and an AI key.";

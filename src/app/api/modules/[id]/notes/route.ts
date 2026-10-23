@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { currentUserId } from "@/server/session";
+import { requireJson } from "@/server/http";
 import { getDb } from "@/server/db";
 import { modules } from "@/db/schema";
 import { getSlideNote, listSlideNotes, upsertSlideNote } from "@/db/repo";
@@ -39,6 +40,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const moduleId = Number(id);
   if (!Number.isFinite(moduleId) || !ownsModule(userId, moduleId)) return NextResponse.json({ error: "not found" }, { status: 404 });
 
+  const notJson = requireJson(request);
+  if (notJson) return notJson;
   const body = await request.json().catch(() => null);
   const deck = typeof body?.deck === "string" ? body.deck.trim() : "";
   const page = Number(body?.page);

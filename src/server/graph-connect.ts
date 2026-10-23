@@ -1,5 +1,7 @@
 import { eq } from "drizzle-orm";
+import type { Db } from "@/db/client";
 import { getDb } from "./db";
+import { DEMO_NO_OUTLOOK, isDemoUser } from "./demo-guard";
 import { users } from "@/db/schema";
 import { encrypt } from "@/lib/crypto";
 import { loadEnv } from "@/lib/env";
@@ -18,7 +20,10 @@ const prune = (now: number) => {
 
 export type ConnectStart = { verificationUri: string; userCode: string; intervalMs: number };
 
-export async function beginGraphConnect(userId: number, now = Date.now()): Promise<ConnectStart> {
+export async function beginGraphConnect(userId: number, now = Date.now(), db: Db = getDb()): Promise<ConnectStart> {
+  // The routes refuse the demo account too; this keeps any other caller from
+  // linking a mailbox every demo visitor would then share.
+  if (isDemoUser(userId, db)) throw new Error(DEMO_NO_OUTLOOK);
   prune(now);
   const { MS_CLIENT_ID } = loadEnv();
   if (!MS_CLIENT_ID) throw new Error("Outlook is not configured on this instance");

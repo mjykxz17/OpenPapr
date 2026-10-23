@@ -3,6 +3,7 @@ import { getDb } from "@/server/db";
 import { accountRequest, str } from "@/server/account-request";
 import { checkLlmProvider } from "@/server/llm-check";
 import { currentUserId } from "@/server/session";
+import { demoLocked } from "@/server/demo-guard";
 import { clearLlmProvider, getUser, setLlmProvider, type LlmSlot } from "@/db/repo";
 import { loadEnv } from "@/lib/env";
 import { checkBaseUrl, parseExtra, RPM_MAX, secretHint, userLlmSlot } from "@/lib/llm-provider";
@@ -62,6 +63,8 @@ export async function PUT(request: Request) {
 export async function DELETE(request: Request) {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const locked = demoLocked(userId);
+  if (locked) return locked;
   clearLlmProvider(getDb(), userId, slotOf(new URL(request.url).searchParams.get("slot")));
   return NextResponse.json({ ok: true });
 }

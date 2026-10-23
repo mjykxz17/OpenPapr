@@ -2,9 +2,7 @@ import { NextResponse } from "next/server";
 import { currentUserId } from "@/server/session";
 import { getDb } from "@/server/db";
 import { existsSync, statSync } from "node:fs";
-import { eq } from "drizzle-orm";
-import { modules } from "@/db/schema";
-import { loadDeckPdf, deckStem, deckCachePath } from "@/server/deck";
+import { loadDeckPdf, deckStem } from "@/server/deck";
 import { streamFile } from "@/server/files";
 
 // Streams a module's source slide deck (PDF) so the study guide's slide
@@ -22,21 +20,23 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const res = await loadDeckPdf(getDb(), userId, moduleId, name);
   if ("error" in res) return NextResponse.json({ error: res.error }, { status: res.status });
+  // The file's stored name, never the one in the query string.
+  const filename = `${deckStem(res.deck.file.displayName).replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_")}.pdf`;
   // Stream the cached copy (with ranges) rather than holding another copy of
-  // a 20MB deck in memory for the response.
-  const mod = getDb().select().from(modules).where(eq(modules.id, moduleId)).get()!;
-  const cached = deckCachePath(mod.canvasCourseId, name);
-  if (existsSync(cached)) {
+  // a 20MB deck in memory for the response. Only when the file there is this
+  // upload's: a classmate's same-named deck may sit at the same path.
+  const cached = res.deck.path;
+  if (res.onDisk && existsSync(cached)) {
     const s = statSync(cached);
     return streamFile({ path: cached, size: s.size, mtimeMs: s.mtimeMs }, request, {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${deckStem(name).replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_")}.pdf"`,
+      "Content-Disposition": `inline; filename="${filename}"`,
     });
   }
   return new NextResponse(Buffer.from(res.bytes), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `inline; filename="${deckStem(name)}.pdf"`,
+      "Content-Disposition": `inline; filename="${filename}"`,
       "Cache-Control": "private, max-age=3600",
     },
   });

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { DEMO_LOCKED, currentUserId, isDemoUser } from "./session";
+import { currentUserId } from "./session";
+import { demoLocked } from "./demo-guard";
 import { rateLimit } from "./rate-limit";
+import { requireJson } from "./http";
 
 // Shared gate for the account routes. JSON only: a cross-site form can post
 // text/plain without a preflight, but not application/json, so insisting on
@@ -9,10 +11,10 @@ export async function accountRequest(request: Request):
   Promise<{ userId: number; body: Record<string, unknown> } | { res: NextResponse }> {
   const userId = await currentUserId();
   if (userId === null) return { res: NextResponse.json({ error: "unauthorized" }, { status: 401 }) };
-  if (isDemoUser(userId)) return { res: NextResponse.json({ error: DEMO_LOCKED }, { status: 403 }) };
-  if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
-    return { res: NextResponse.json({ error: "expected a JSON body" }, { status: 415 }) };
-  }
+  const locked = demoLocked(userId);
+  if (locked) return { res: locked };
+  const notJson = requireJson(request);
+  if (notJson) return { res: notJson };
   if (!rateLimit(`account:${userId}`, 20, 10 * 60_000)) {
     return { res: NextResponse.json({ error: "too many changes, try again in a few minutes" }, { status: 429 }) };
   }
