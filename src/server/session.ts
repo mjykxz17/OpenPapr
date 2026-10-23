@@ -4,6 +4,7 @@ import { verifySession } from "./auth";
 import { loadEnv, sessionSigningKey } from "@/lib/env";
 import { eq } from "drizzle-orm";
 import { users } from "@/db/schema";
+import type { Db } from "@/db/client";
 import { getDb } from "./db";
 
 // The authenticated user, or null. Middleware already turns anonymous traffic
@@ -28,7 +29,7 @@ export async function requireUserId(): Promise<number> {
 
 // The public demo account is shared by everyone who opens it, so its
 // settings stay as they are.
-export function isDemoUser(userId: number): boolean {
-  return Boolean(getDb().select({ d: users.isDemo }).from(users).where(eq(users.id, userId)).get()?.d);
+export function isDemoUser(userId: number, db: Db = getDb()): boolean {
+  return Boolean(db.select({ d: users.isDemo }).from(users).where(eq(users.id, userId)).get()?.d);
 }
 export const DEMO_LOCKED = "This is the shared demo account, so its settings can't be changed. Create your own account to connect Canvas and an AI key.";

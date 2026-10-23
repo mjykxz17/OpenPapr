@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createDb } from "@/db/client";
 import { users } from "@/db/schema";
-import { DEMO_NO_OUTLOOK, demoLocked, isDemoAccount } from "./demo-guard";
+import { DEMO_NO_OUTLOOK, demoLocked, isDemoUser } from "./demo-guard";
 import { beginGraphConnect } from "./graph-connect";
 
 const db = () => {
@@ -15,7 +15,7 @@ const db = () => {
 describe("demoLocked", () => {
   it("refuses the demo account and lets anyone else through", async () => {
     const d = db();
-    expect(isDemoAccount(1, d)).toBe(true);
+    expect(isDemoUser(1, d)).toBe(true);
     const res = demoLocked(1, "nope", d);
     expect(res?.status).toBe(403);
     expect(await res?.json()).toEqual({ error: "nope" });
@@ -101,7 +101,7 @@ describe("demo audit of the API routes", () => {
       const methods = LOCKED_GETS.has(name) ? "GET|POST|PUT|PATCH|DELETE" : "POST|PUT|PATCH|DELETE";
       const handlers = route!.src.match(new RegExp(`export (async )?function (${methods})\\b`, "g"))?.length ?? 0;
       expect(handlers, name).toBeGreaterThan(0);
-      const guards = route!.src.match(/demoLocked\(|accountRequest\(/g)?.length ?? 0;
+      const guards = route!.src.match(/demoLocked\(|isDemoUser\(|accountRequest\(/g)?.length ?? 0;
       expect(guards, name).toBeGreaterThanOrEqual(handlers);
     }
   });
