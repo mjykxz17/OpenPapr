@@ -144,8 +144,10 @@ async function fetchDeck(db: Db, userId: number, { mod, file, path: cached }: De
 // means parsing the whole PDF (IFS4103's decks are 22MB), and the slide
 // panel asks for the current page plus a strip of thumbnails on every page
 // turn, so without this each turn re-parsed the deck half a dozen times.
+// The "f" marks images drawn with pdf.js's own standard fonts: ones cached
+// before that came out in a serif fallback and are left for eviction.
 export const slidePngPath = (courseId: number, name: string, page: number, scale: number, dbPath?: string) =>
-  deckCachePath(courseId, name, dbPath).replace(/\.pdf$/, `-pages/${page}@${scale}.png`);
+  deckCachePath(courseId, name, dbPath).replace(/\.pdf$/, `-pages/${page}@${scale}f.png`);
 
 export type SlideResult = { png: Uint8Array } | Failure;
 
