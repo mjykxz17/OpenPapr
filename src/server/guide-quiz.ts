@@ -7,7 +7,7 @@ import { getStudyGuide, listModuleFiles } from "@/db/repo";
 import { splitGuideIntoChapters, type GuideChapter } from "@/lib/study-chapters";
 import { citedPagesByDeck, parseSlideCitation } from "@/lib/slide-citation";
 import { chapterHash } from "@/lib/guide-chapters";
-import { chatJson, type CompatConfig } from "@/enrich/openai-compat";
+import { chatJson, isNoAnswer, isOutOfBudget, type CompatConfig } from "@/enrich/openai-compat";
 import { deckStem } from "./deck";
 
 // Practice questions for one chapter of the guide: multiple choice, each with
@@ -170,13 +170,21 @@ export async function chapterQuiz(
   const decks = deckPagesFor(db, moduleId);
   const prompt = `Module: ${mod.code} ${mod.name}\n\nCHAPTER\n${quizSource(chapter.markdown)}`;
   let questions: QuizQuestion[] = [];
+  // A first reply that was empty or cut off gets the second round, with
+  // twice the budget (and time) when the reasoning spent the first.
+  let budget = 4000;
   for (let round = 0; round < 2 && questions.length < WANT_QUESTIONS; round++) {
     let raw: unknown;
     try {
-      raw = await chatJson(cfg, opts.fetchFn ?? fetch, QUIZ_SYSTEM, prompt, 4000, 120_000);
-    } catch {
-      if (round === 0) return { error: "The AI model didn't answer. Try again in a minute.", status: 502 };
-      break;
+      raw = await chatJson(cfg, opts.fetchFn ?? fetch, QUIZ_SYSTEM, prompt, budget, budget * 30);
+    } catch (err) {
+      if (round > 0) {
+        if (!questions.length) return { error: "The AI model didn't answer. Try again in a minute.", status: 502 };
+        break;
+      }
+      if (!isNoAnswer(err)) return { error: "The AI model didn't answer. Try again in a minute.", status: 502 };
+      if (isOutOfBudget(err)) budget *= 2;
+      raw = null;
     }
     const seen = new Set(questions.map((q) => norm(q.q)));
     questions = [...questions, ...cleanQuiz(raw, chapter.markdown, decks).filter((q) => !seen.has(norm(q.q)))].slice(0, 8);
