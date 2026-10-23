@@ -1,8 +1,8 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { eq } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { files, modules, users } from "@/db/schema";
+import { files, guideProgress, modules, quizAttempts, users } from "@/db/schema";
 import { DEMO_DECKS, seedSemester } from "@/demo/semester";
 import { deckSignature } from "@/lib/deck-versions";
 import { extractPdfText } from "@/lib/pdf-text";
@@ -38,7 +38,8 @@ export function demoDue(user: { demoResetAt: number | null } | null, now: number
 const deckDir = () => join(process.cwd(), "src", "demo", "decks");
 
 // Puts the shipped decks where the slide viewer and guide look for them, and
-// fingerprints them so they count as the module's lecture decks.
+// fingerprints them so they count as the module's lecture decks. Pages drawn
+// from an older copy of a deck are thrown away with it.
 async function installDecks(db: Db, moduleIds: number[], dbPath?: string): Promise<number> {
   let installed = 0;
   for (const moduleId of moduleIds) {
@@ -52,6 +53,7 @@ async function installDecks(db: Db, moduleIds: number[], dbPath?: string): Promi
       const target = deckCachePath(mod.canvasCourseId, f.displayName, dbPath);
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(src, target);
+      rmSync(target.replace(/\.pdf$/, "-pages"), { recursive: true, force: true });
       writeFileSync(`${target}.src`, String(f.canvasFileId));
       const text = await extractPdfText(new Uint8Array(readFileSync(src)));
       if (text.trim()) db.update(files).set({ textSigJson: JSON.stringify(deckSignature(text)), sizeBytes: readFileSync(src).length, contentType: "application/pdf" }).where(eq(files.id, f.id)).run();
@@ -73,12 +75,16 @@ export function resetDemo(db: Db, now: number, dbPath?: string): Promise<number>
           major: "Computer Science", studyYear: 2,
         }).returning().get();
       } else {
+        // Yesterday's visitors' answers and ticked-off chapters go too.
+        db.delete(quizAttempts).where(eq(quizAttempts.userId, user.id)).run();
+        db.delete(guideProgress).where(eq(guideProgress.userId, user.id)).run();
         wipeUserData(db, user.id);
       }
       db.update(users).set({
         homeLayoutJson: null, calendarToken: null, lastSeenAt: now - D, onboardedAt: now, demoResetAt: now,
         major: "Computer Science", studyYear: 2, tasksRequestedAt: null, profileRequestedAt: null, syncRequestedAt: null,
       }).where(eq(users.id, user.id)).run();
+      // The semester also stamps the account's last Canvas sync and profile.
       const { moduleIds } = seedSemester(db, user.id, now, DEMO_COURSE_BASE);
       await installDecks(db, moduleIds, dbPath);
       return user.id;
