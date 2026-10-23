@@ -43,6 +43,18 @@ async function send(taskId: number, body: Record<string, unknown>): Promise<bool
   } catch { return false; }
 }
 
+// Runs jobs with the same key one after another (a job that fails does not
+// stop the next). Jobs with different keys still run side by side.
+export function queueBy() {
+  const tails = new Map<string, Promise<unknown>>();
+  return <T,>(key: string, job: () => Promise<T>): Promise<T> => {
+    const run = (tails.get(key) ?? Promise.resolve()).catch(() => {}).then(job);
+    tails.set(key, run);
+    void run.catch(() => {}).finally(() => { if (tails.get(key) === run) tails.delete(key); });
+    return run;
+  };
+}
+
 // Ticks optimistically; the page refreshes from the server afterwards so
 // progress bars and "done" states agree everywhere.
 function useTick() {
@@ -50,11 +62,14 @@ function useTick() {
   const [, start] = useTransition();
   const [local, setLocal] = useState<Record<string, boolean>>({});
   const [failed, setFailed] = useState(false);
+  // A quick Undo sends "not done" while "done" may still be on its way; one
+  // step's requests go in order, so the server cannot end up with the tick.
+  const [queue] = useState(queueBy);
   const isDone = (taskId: number, s: TaskStep) => local[`${taskId}:${s.id}`] ?? s.done;
   const set = async (taskId: number, s: TaskStep, next: boolean) => {
     const k = `${taskId}:${s.id}`;
     setLocal((m) => ({ ...m, [k]: next }));
-    const ok = await send(taskId, { stepId: s.id, done: next });
+    const ok = await queue(k, () => send(taskId, { stepId: s.id, done: next }));
     setFailed(!ok);
     if (!ok) setLocal((m) => ({ ...m, [k]: !next }));
     start(() => router.refresh());
@@ -64,10 +79,11 @@ function useTick() {
 }
 
 function Check({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
-  // A 20px box with a 24px target around it.
+  // A 20px box with a 24px target around it: the target hangs off the inside
+  // of the 1px border, so 18px + 3px each side.
   return (
     <button type="button" role="checkbox" aria-checked={checked} aria-label={label} onClick={onChange}
-      className={`relative mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition-colors before:absolute before:-inset-0.5 before:content-[''] ${checked ? "border-accent bg-accent text-white" : "border-ink-3/60 hover:border-accent"}`}>
+      className={`relative mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition-colors before:absolute before:-inset-[3px] before:content-[''] ${checked ? "border-accent bg-accent text-white" : "border-ink-3/60 hover:border-accent"}`}>
       {checked && <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden><path d="m3.5 8.5 3 3 6-7" /></svg>}
     </button>
   );
@@ -176,10 +192,15 @@ function TodayList({ hold, nextDay, today }: { hold: Hold; nextDay: TasksView["n
             const d = tick.isDone(s.taskId, s);
             const h = held.find((x) => keyOf(x.step) === k);
             return (
-              // Folds to nothing when it leaves, so the rows below slide up instead of jumping.
+              // Folds to nothing when it leaves, so the rows below slide up
+              // instead of jumping. The padding and the line under it sit
+              // inside the part that folds, or the row would stop at ~21px;
+              // that part reaches 4px past the row on each side so the box's
+              // target is not clipped.
               <li key={k} data-step={k} onBlur={(e) => hold.onBlur(k, e)}
-                className={`grid border-b border-line/70 transition-[grid-template-rows,opacity] duration-200 ease-out last:border-0 motion-reduce:transition-none ${h?.leaving ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]"}`}>
-                <div className="flex min-h-0 items-start gap-2.5 overflow-hidden py-2.5">
+                className={`group/step grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none ${h?.leaving ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr]"}`}>
+                <div className="-mx-1 min-h-0 overflow-hidden px-1">
+                <div className="flex items-start gap-2.5 border-b border-line/70 py-2.5 group-last/step:border-0">
                   <Check checked={d} onChange={() => hold.toggle(s)} label={s.text} />
                   <div className="min-w-0 flex-1">
                     <p className={`text-[14px] leading-snug ${d ? "text-ink-3 line-through" : "text-ink"}`}>{s.text}</p>
@@ -193,6 +214,7 @@ function TodayList({ hold, nextDay, today }: { hold: Hold; nextDay: TasksView["n
                     <button type="button" data-undo={k} onClick={() => hold.toggle(s)} aria-label={`Undo: ${s.text}`}
                       className="-my-0.5 h-6 shrink-0 rounded-md px-2 text-[12.5px] font-medium text-accent hover:bg-accent-soft">Undo</button>
                   ) : <span className="shrink-0 text-[12px] tabular-nums text-ink-3">{fmtMin(s.minutes)}</span>}
+                </div>
                 </div>
               </li>
             );
