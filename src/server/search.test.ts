@@ -50,6 +50,21 @@ describe("spelling", () => {
     // Short words are too easy to mistake for others.
     expect(termForms("mstr", vocab).forms).toEqual([]);
   });
+  it("only stands for the same word, not a longer one that starts the same", () => {
+    const vocab = ["laboratory", "labors", "labored", "score", "scored", "floral", "florida", "coloured", "colorful"];
+    expect(termForms("labour", vocab).forms).toEqual(["labors", "labored"]);
+    expect(termForms("scour", vocab).forms).toEqual([]);
+    expect(termForms("flour", vocab).forms).toEqual([]);
+    expect(termForms("color", vocab).forms).toEqual(["coloured"]);
+    for (const w of ["flour", "scour", "detour", "contours", "devoured"]) expect(canonical(w)).toBe(w);
+  });
+  it("leaves very long tokens alone, and quickly", () => {
+    const long = "abcdefghij".repeat(4000) + "ise";
+    const t = performance.now();
+    expect(canonical(long)).toBe(long);
+    expect(termForms("amortzied", [long, "amortised"]).forms).toEqual(["amortised"]);
+    expect(performance.now() - t).toBeLessThan(50);
+  });
 });
 
 describe("search", () => {

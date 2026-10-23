@@ -127,20 +127,26 @@ const SPELLING: [RegExp, string | ((...m: string[]) => string)][] = [
   [/(\w{3,})isation(s|al|ally)?$/, "$1ization$2"],
   [/(\w{3,})is(e|es|ed|er|ers|ing)$/, "$1iz$2"],
   [/(\w{2,})ys(e|es|ed|er|ers|ing)$/, "$1yz$2"],
-  [/(\w{2,})our(s|ed|ing|ite|ites|able|ful|less|er|ers)?$/, "$1or$2"],
+  [/(\w{2,})our(s|ed|ing|ite|ites|able|ful|less|er|ers)?$/, (m: string, stem: string, end?: string) => (NOT_OUR.has(stem) ? m : `${stem}or${end ?? ""}`)],
   // centre/center, centres/centers, centred/centered
   [/(\w{2,}[tbgv])re(s|d)?$/, (_, stem: string, end?: string) => `${stem}er${end === "d" ? "ed" : end ?? ""}`],
   [/(\w{3,})ell(ing|ed|er|ers)$/, "$1el$2"],
 ];
+// Words that end in -our in American English too, so "flour" and "scour"
+// never turn into "flor" and "scor" (and from there "floral" and "score").
+const NOT_OUR = new Set(["fl", "sc", "det", "cont", "dev", "am", "vel", "param", "troubad"]);
 // -ce / -se only for the nouns where it is the same word.
 const CE: Record<string, string> = { defence: "defense", licence: "license", offence: "offense", pretence: "pretense", practise: "practice", practised: "practiced", practising: "practicing" };
 
+const MAX_WORD = 30;
 const canonCache = new Map<string, string>();
 export function canonical(word: string): string {
   const hit = canonCache.get(word);
   if (hit !== undefined) return hit;
   let w = CE[word] ?? word;
-  if (w.length >= 5 && !/\d/.test(w)) for (const [re, to] of SPELLING) w = typeof to === "string" ? w.replace(re, to) : w.replace(re, to);
+  // Nothing longer than a real word goes through the rules: their cost grows
+  // with the square of the length, and a pasted hash or URL has no spelling.
+  if (w.length >= 5 && w.length <= MAX_WORD && !/\d/.test(w)) for (const [re, to] of SPELLING) w = typeof to === "string" ? w.replace(re, to) : w.replace(re, to);
   if (canonCache.size > 50_000) canonCache.clear();
   canonCache.set(word, w);
   return w;
@@ -163,6 +169,10 @@ export function editDistance(a: string, b: string, max: number): number {
   return prev[b.length]!;
 }
 
+// What may follow a word and leave it the same word: "colour" stands for
+// "colours" and "coloured", but "labour" does not stand for "laboratory".
+const INFLECTION = new Set(["", "s", "es", "d", "ed", "r", "rs", "er", "ers", "ing", "al", "ally", "ly", "ite", "ites", "able", "ful", "less"]);
+
 // The words a term may stand for, beyond itself: the same word in the other
 // spelling ("amortised" for "amortized", "colours" for "colour"), and — only
 // when nothing has the word as typed — words one typo away (two for long words).
@@ -173,11 +183,12 @@ export function termForms(term: string, words: string[]): TermForms {
   let seen = false;
   for (const v of words) {
     if (v.includes(term)) { seen = true; continue; }
-    if (canonical(v).startsWith(c)) forms.add(v);
+    const cv = canonical(v);
+    if (cv.startsWith(c) && INFLECTION.has(cv.slice(c.length))) forms.add(v);
   }
-  if (seen || forms.size || term.length < 5 || /\d/.test(term)) return { term, forms: [...forms], fuzzy: false };
+  if (seen || forms.size || term.length < 5 || term.length > MAX_WORD || /\d/.test(term)) return { term, forms: [...forms], fuzzy: false };
   const max = term.length >= 8 ? 2 : 1;
-  const near = words.filter((v) => v.length >= 4 && editDistance(c, canonical(v), max) <= max);
+  const near = words.filter((v) => v.length >= 4 && v.length <= MAX_WORD && editDistance(c, canonical(v), max) <= max);
   return { term, forms: near, fuzzy: near.length > 0 };
 }
 

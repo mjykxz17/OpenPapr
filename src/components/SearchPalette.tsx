@@ -15,11 +15,14 @@ const KIND: Record<string, string> = {
 export const OPEN_SEARCH = "openpapr:search";
 export const openSearch = () => window.dispatchEvent(new Event(OPEN_SEARCH));
 
+// Question words and glue: searching for one of these alone finds nothing useful.
+const FILLER = new Set(["what", "what's", "whats", "when", "when's", "where", "where's", "which", "who", "why", "how", "the", "and", "for", "with", "about", "are", "is", "was", "does", "did", "can", "any", "all", "from", "this", "that", "there", "have", "has", "due", "my", "our", "your"]);
+
 // When nothing matches a query of several words: the words worth trying on
 // their own, longest first (usually the one that names the topic).
 export function fewerWords(q: string): string[] {
-  const words = [...new Set(q.trim().toLowerCase().split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")))];
-  const real = words.filter((w) => w.length >= 3);
+  const words = [...new Set(q.trim().toLowerCase().replace(/’/g, "'").split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")))];
+  const real = words.filter((w) => w.length >= 3 && !FILLER.has(w));
   return words.length < 2 ? [] : real.sort((a, b) => b.length - a.length).slice(0, 3);
 }
 
