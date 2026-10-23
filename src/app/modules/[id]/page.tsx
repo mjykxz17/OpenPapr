@@ -5,7 +5,7 @@ import { requireUserId } from "@/server/session";
 import { eq } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { components, items, modules } from "@/db/schema";
-import { getStudyGuide, listModuleFiles } from "@/db/repo";
+import { getStudyGuide, getUser, listModuleFiles } from "@/db/repo";
 import { AppShell } from "@/components/AppShell";
 import { ManualComponentForm } from "@/components/ManualComponentForm";
 import { Materials } from "@/components/Materials";
@@ -27,6 +27,8 @@ import { AskButton } from "@/components/module/AskButton";
 import { tasksView } from "@/server/tasks";
 import { guideStatus } from "@/server/guide-status";
 import { syncedLabel } from "@/lib/format-date";
+import { guideEntry } from "@/components/module/guide-entry";
+import { showCanvasLinks } from "@/components/module/canvas-links";
 
 export const dynamic = "force-dynamic";
 
@@ -129,7 +131,7 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
               ))}
             </ul>
           )}
-          {meta && a.url && (
+          {meta && a.url && canvasLinks && (
             <a href={a.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-[13px] text-accent hover:underline">
               {needsPost ? "Post on Canvas →" : "Read the whole thread on Canvas →"}
             </a>
@@ -143,12 +145,15 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
 
   const env = loadEnv();
   const isCanvas = mod.canvasCourseId > 0;
+  const me = getUser(db, userId);
+  const canvasLinks = showCanvasLinks(me, mod.canvasCourseId);
   const lastSync = overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null;
   const tv = tasksView(db, userId, now);
   const upcoming = [...tv.soon, ...tv.later].filter((t) => t.moduleId === mod.id)
     .sort((a, b) => (a.dueAt ?? Number.MAX_SAFE_INTEGER) - (b.dueAt ?? Number.MAX_SAFE_INTEGER));
   const next = upcoming.find((t) => t.dueAt !== null && t.dueAt >= now) ?? null;
   const gs = guideStatus(db, mod.id);
+  const entry = guideEntry({ hasGuide: Boolean(guide), writing: gs.writing?.title ?? null, ready: gs.ready, total: gs.total, canWrite: canGenerateGuides(db, userId), demo: Boolean(me?.isDemo) });
   const weekAgo = now - 7 * 86_400_000;
   const newThisWeek = announcements.filter((a) => activity(a) >= weekAgo).length;
   const days = (ms: number) => Math.round((new Date(ms).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 86_400_000);
@@ -349,24 +354,28 @@ export default async function ModulePage({ params }: PageProps<"/modules/[id]">)
                 <>
                   <span className="rounded-full bg-[color-mix(in_oklab,#c0392b_10%,transparent)] px-2 py-px text-[11.5px] font-semibold text-[#b03a2e] dark:text-[#f19a8f]">Canvas</span>
                   {lastSync && <span className="inline-flex items-center gap-1.5"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[#16a34a]" />synced {syncedLabel(lastSync, now)}</span>}
-                  <a href={`${env.CANVAS_BASE_URL.replace(/\/$/, "")}/courses/${mod.canvasCourseId}`} target="_blank" rel="noreferrer" className="text-accent hover:underline">Open in Canvas ↗</a>
+                  {canvasLinks && <a href={`${env.CANVAS_BASE_URL.replace(/\/$/, "")}/courses/${mod.canvasCourseId}`} target="_blank" rel="noreferrer" className="text-accent hover:underline">Open in Canvas ↗</a>}
                 </>
               ) : (
                 <span className="rounded-full border border-dashed border-accent/50 bg-accent-soft px-2 py-px text-[11.5px] font-semibold text-accent">Your module</span>
               )}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <AskButton />
+            {/* Filled only when there is a guide to open; otherwise it says
+                what will happen instead of leading to an empty page. */}
             <Link
               href={`/modules/${mod.id}/guide`}
-              className="inline-flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-medium text-on-accent no-underline transition-colors hover:bg-accent-strong"
+              className={`inline-flex h-10 items-center gap-2 rounded-md px-4 text-sm font-medium no-underline transition-colors ${entry.primary
+                ? "bg-accent text-on-accent hover:bg-accent-strong"
+                : "border border-line-2 bg-panel text-ink-2 hover:border-ink-3 hover:text-ink"}`}
             >
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
                 <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
               </svg>
-              {guide ? "Open study guide" : "Study guide"}
+              {entry.label}
             </Link>
           </div>
         </div>
