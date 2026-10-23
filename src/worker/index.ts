@@ -46,6 +46,7 @@ import { getStudyGuide } from "../db/repo";
 import { assembleGuide, mergeChapters, splitChapters } from "../lib/guide-chapters";
 import { ModuleProfile, UserProfile, WritingStyle, readerBrief } from "../enrich/profiles";
 import { extractPdfText } from "../lib/pdf-text";
+import { pdfTextWithOcr, tesseract } from "../lib/ocr";
 import { focusAssessmentText } from "../lib/assessment-focus";
 
 const env = loadEnv();
@@ -441,7 +442,8 @@ const taskDeps: TaskDeps = {
   fileText: async (userId, file, mod) => {
     const served = await ensurePdf(db, userId, { file, mod });
     if ("error" in served) return null;
-    return extractPdfText(new Uint8Array(readFileSync(served.path)));
+    // A scanned deck is read by OCR when it is installed (lib/ocr.ts).
+    return pdfTextWithOcr(new Uint8Array(readFileSync(served.path)), { cachePath: `${served.path}.ocr.txt` });
   },
   pageImage: async (userId, file, mod, page) => {
     const served = await ensurePdf(db, userId, { file, mod });
@@ -648,6 +650,7 @@ const guideDeps: GuideDeps = {
     );
   },
   fileText: (userId, file, mod) => taskDeps.fileText(userId, file, mod),
+  ocrReady: () => tesseract.available(),
   log: (m) => console.log(m),
 };
 

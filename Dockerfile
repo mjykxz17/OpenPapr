@@ -20,6 +20,9 @@ RUN apk add --no-cache libreoffice-impress libreoffice-writer libreoffice-calc \
     font-liberation font-dejavu font-noto font-noto-cjk \
     ghostscript qpdf
 ENV SOFFICE_BIN=/usr/bin/soffice
+# Tesseract reads decks that are scanned images, with no text layer of their
+# own (src/lib/ocr.ts). Alpine names: the engine and its English data.
+RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-eng
 # Litestream backs the database up to object storage (litestream.yml,
 # start.sh). A static binary, pinned and checked against its published sum.
 ARG LITESTREAM_VERSION=0.5.17
