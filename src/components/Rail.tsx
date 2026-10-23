@@ -7,6 +7,7 @@ import { AppearanceMenu } from "./AppearanceMenu";
 import { PapiMark } from "./brand/PapiMark";
 import { openSearch } from "./SearchPalette";
 import { ChangesBell } from "./ChangesBell";
+import { DOCK_ID, TAB_ID } from "./pet/placement";
 
 function HomeIcon() {
   return (
@@ -83,9 +84,10 @@ export function Rail({ showMail = true, changes = null }: { showMail?: boolean; 
   return (
     <>
     {/* On a phone the rail becomes a tab bar along the bottom, where a thumb
-        reaches. Appearance and sign-out move to the Account tab. */}
+        reaches. Papi is the Ask tab; Account (with appearance and sign-out)
+        is reached from the Home header instead, as it is rarely needed. */}
     <nav aria-label="Primary" className="fixed inset-x-0 bottom-0 z-30 flex border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden">
-      {[...nav, { href: "/account", label: "Account", Icon: AccountIcon }].map(({ href, label, Icon }) => {
+      {nav.map(({ href, label, Icon }) => {
         const active = isActive(href);
         return (
           <Link key={href} href={href} aria-current={active ? "page" : undefined}
@@ -95,6 +97,8 @@ export function Rail({ showMail = true, changes = null }: { showMail?: boolean; 
           </Link>
         );
       })}
+      {/* Papi draws itself here (src/components/pet/Papi.tsx). */}
+      <div id={TAB_ID} className="flex h-[60px] flex-1" />
       <button type="button" onClick={openSearch} className="flex h-[60px] flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-ink-3">
         <SearchIcon />
         <span>Search</span>
@@ -126,7 +130,10 @@ export function Rail({ showMail = true, changes = null }: { showMail?: boolean; 
         );
       })}
       {changes !== null && <ChangesBell count={changes} />}
-      <div className="mt-auto flex flex-col items-center gap-1">
+      {/* The free stretch of the rail is Papi's: it sits at the bottom and
+          can be dragged up and down, never out over the page. */}
+      <div id={DOCK_ID} className="relative min-h-14 w-full flex-1" />
+      <div className="flex flex-col items-center gap-1">
         <Link
           href="/account"
           title="Account"

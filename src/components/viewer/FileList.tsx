@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { MiddleEllipsis } from "./MiddleEllipsis";
 
 export type ListFile = { id: number; name: string; group: string; meta: string };
 
@@ -56,7 +57,7 @@ export function FileList({ moduleId, files, currentId }: { moduleId: number; fil
                 className={`block rounded-md px-2 py-1.5 text-[13px] transition-colors ${
                   active ? "bg-accent-soft text-ink" : "text-ink-2 hover:bg-ink/[0.05] hover:text-ink"
                 }`}>
-                <span className="block truncate">{f.name}</span>
+                <MiddleEllipsis text={f.name} />
                 <span className="block text-[11px] tabular-nums text-ink-3">{f.meta}</span>
               </Link>
             </div>

@@ -12,6 +12,7 @@ import { guideStatus } from "@/server/guide-status";
 import { moduleDisplay } from "@/lib/module-display";
 import { canGenerateGuides } from "@/server/llm-access";
 import { deckStem } from "@/server/deck";
+import { guideEmptyText } from "@/components/module/guide-entry";
 
 export const dynamic = "force-dynamic";
 
@@ -39,33 +40,40 @@ export default async function GuidePage({ params }: PageProps<"/modules/[id]/gui
 
   const { title } = moduleDisplay(mod);
   const guide = getStudyGuide(db, mod.id);
+  const me = getUser(db, userId);
+  const canWrite = canGenerateGuides(db, userId);
+  const gs = guideStatus(db, mod.id);
   // Every PDF the module has, as deck stems: the panel's "open another" list.
   const decks = [...new Set(listModuleFiles(db, mod.id).filter((f) => /\.pdf$/i.test(f.displayName)).map((f) => deckStem(f.displayName)))].sort();
 
   return (
     <AppShell wide>
-      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-line pb-4">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <BackLink href={`/modules/${mod.id}`}>{mod.code} overview</BackLink>
+      {/* On a phone the way back and the title share one row, so the guide
+          starts sooner: the back button shows only the code (a screen reader
+          still hears "overview"), the title is cut to one line. From sm up
+          the title wraps as usual. */}
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-line pb-3 sm:gap-y-3 sm:pb-4">
+        <div className="flex w-full min-w-0 items-center gap-x-3 sm:w-auto sm:min-w-[18rem] sm:flex-1 sm:gap-x-4">
+          <BackLink href={`/modules/${mod.id}`}>{mod.code}<span className="sr-only sm:not-sr-only"> overview</span></BackLink>
           <span aria-hidden className="hidden h-4 w-px bg-line sm:block" />
-          <h1 className="text-base font-semibold text-ink">
-            {title} <span className="font-normal text-ink-2">· Study guide</span>
+          <h1 className="min-w-0 truncate text-base font-semibold text-ink sm:overflow-visible sm:whitespace-normal" title={`${title} · Study guide`}>
+            {title} <span className="sr-only font-normal text-ink-2 sm:not-sr-only">· Study guide</span>
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           {/* The demo's guide is written by hand and reset nightly; nothing to rebuild. */}
-          {!getUser(db, userId)?.isDemo && <GuideStatus moduleId={mod.id} initial={guideStatus(db, mod.id)} canGenerate={canGenerateGuides(db, userId)} />}
+          {!me?.isDemo && <GuideStatus moduleId={mod.id} initial={gs} canGenerate={canWrite} />}
         </div>
       </header>
 
       {guide ? (
-        <section id="study" className="mt-7">
+        <section id="study" className="mt-4 sm:mt-7">
           <StudyGuide markdown={guide.markdown} moduleId={mod.id} decks={decks} />
         </section>
       ) : (
         <section className="mt-10">
           <p className="max-w-prose text-sm text-ink-2">
-            No guide yet. It writes itself from this module&apos;s lecture slides: each topic appears here as soon as it is written, newest slides first.
+            {guideEmptyText({ writing: gs.writing?.title ?? null, ready: gs.ready, total: gs.total, canWrite, demo: Boolean(me?.isDemo) })}
           </p>
         </section>
       )}

@@ -53,7 +53,7 @@ test("a wrong invite code is refused before Canvas is ever contacted", async ({ 
   await expect(page).toHaveURL(/\/login/);
 });
 
-test("a session reaches the dashboard, modules, reminders and mail", async ({ page, context }) => {
+test("a session reaches the dashboard, modules and reminders, and /mail is a 404 without Outlook",async ({ page, context }) => {
   await context.addCookies([{ name: "session", value: session(1), url: "http://localhost:3777" }]);
 
   await page.goto("/");
@@ -71,7 +71,10 @@ test("a session reaches the dashboard, modules, reminders and mail", async ({ pa
   await page.getByRole("tab", { name: /^Materials/ }).click();
   await expect(page.getByRole("tabpanel", { name: /^Materials/ })).toBeVisible();
   // Not getByRole by name: the rail's "Study guides" link matches the same words.
-  await expect(page.locator('main a[href="/modules/2/guide"]').first()).toContainText(/study guide/i);
+  // With no guide yet, the header's button says what will happen rather than
+  // "Open" (which one depends on whether this server has an AI provider).
+  await expect(page.locator('main header a[href="/modules/2/guide"]'))
+    .toHaveText(/^Guide: (needs AI turned on|writes itself when slides arrive)$/);
 
   // The guide has its own page and writes itself; the demo module has none
   // yet. Without an AI provider the page says how to turn that on.
@@ -87,8 +90,8 @@ test("a session reaches the dashboard, modules, reminders and mail", async ({ pa
   await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
   await expect(page.getByText(/overdue/i).first()).toBeVisible();
 
-  await page.goto("/mail");
-  await expect(page.getByText(/filtered/i)).toBeVisible();
+  // This server has no Outlook app set up, so there is no Mail page.
+  expect((await page.goto("/mail"))?.status()).toBe(404);
 });
 
 test("an unsigned session cannot reach the dashboard", async ({ page, context }) => {

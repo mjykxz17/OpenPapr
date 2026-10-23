@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { requireUserId } from "@/server/session";
+import { mailEnabled } from "@/components/mail-access";
 import { eq, and } from "drizzle-orm";
 import { getDb } from "@/server/db";
 import { items } from "@/db/schema";
@@ -12,6 +14,8 @@ import { loadEnv } from "@/lib/env";
 export const dynamic = "force-dynamic";
 
 export default async function MailPage({ searchParams }: PageProps<"/mail">) {
+  // Without an Outlook app on this instance there is no mail to show.
+  if (!mailEnabled(loadEnv())) notFound();
   const sp = await searchParams;
   const showFiltered = sp.filtered === "1";
   const userId = await requireUserId();
@@ -33,7 +37,7 @@ export default async function MailPage({ searchParams }: PageProps<"/mail">) {
       <h1 className="mb-6 text-2xl font-semibold tracking-[-0.01em] text-ink">Mail</h1>
 
       <div className="mb-8 max-w-3xl">
-        <OutlookConnect connected={Boolean(me?.msRefreshTokenEnc)} configured={Boolean(loadEnv().MS_CLIENT_ID)} />
+        <OutlookConnect connected={Boolean(me?.msRefreshTokenEnc)} />
       </div>
 
       <section>

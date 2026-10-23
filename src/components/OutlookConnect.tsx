@@ -9,7 +9,8 @@ type Phase =
   | { kind: "waiting"; verificationUri: string; userCode: string; intervalMs: number }
   | { kind: "error"; message: string };
 
-export function OutlookConnect({ connected, configured }: { connected: boolean; configured: boolean }) {
+// Only shown when this instance has Outlook set up (the Mail page is a 404 otherwise).
+export function OutlookConnect({ connected }: { connected: boolean }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [copied, setCopied] = useState(false);
@@ -65,14 +66,6 @@ export function OutlookConnect({ connected, configured }: { connected: boolean; 
   async function disconnect() {
     await fetch("/api/graph/disconnect", { method: "POST" });
     router.refresh();
-  }
-
-  if (!configured) {
-    return (
-      <p className="border border-line px-4 py-3 text-xs text-ink-3">
-        Outlook is not configured on this instance, so mail is unavailable. Canvas still works.
-      </p>
-    );
   }
 
   if (connected) {
