@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { items, modules, taskFeedback, taskPlans, tasks, users } from "@/db/schema";
 import { capWithClasses, dayLoads, fitSteps, type DayLoad, type TaskKind, type TaskSource, type TaskStep } from "@/enrich/tasks";

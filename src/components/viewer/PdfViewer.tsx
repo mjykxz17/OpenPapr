@@ -37,18 +37,19 @@ export function PdfViewer({ src, storageKey, preparing }: { src: string; storage
   const [box, setBox] = useState({ w: 0, h: 0 });
   const [current, setCurrent] = useState(1);
   const [pageInput, setPageInput] = useState("1");
-  const pdfjsRef = useRef<PdfJs | null>(null);
+  // Kept with the document, so a page never renders before pdf.js is there.
+  const [pdfjs, setPdfjs] = useState<PdfJs | null>(null);
 
   // --- load -----------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
     let task: ReturnType<PdfJs["getDocument"]> | null = null;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a new file clears the old one before this effect loads it
     setDoc(null); setSizes([]); setError(null); setLoaded(0);
     (async () => {
       try {
-        const pdfjs = await loadPdfJs();
-        pdfjsRef.current = pdfjs;
-        task = pdfjs.getDocument({
+        const lib = await loadPdfJs();
+        task = lib.getDocument({
           url: src,
           rangeChunkSize: 256 * 1024,
           cMapUrl: "/pdfjs/cmaps/",
@@ -70,6 +71,7 @@ export function PdfViewer({ src, storageKey, preparing }: { src: string; storage
         if (cancelled) return;
         setFit(first.width >= first.height ? "page" : "width");
         setSizes(initial);
+        setPdfjs(lib);
         setDoc(d);
       } catch (err) {
         if (cancelled) return;
@@ -160,6 +162,7 @@ export function PdfViewer({ src, storageKey, preparing }: { src: string; storage
   }, [current, doc, storageKey]);
 
   // --- keyboard ---------------------------------------------------------
+  const zoom = (factor: number) => setFit(Math.min(4, Math.max(0.25, Math.round(scale * factor * 100) / 100)));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -177,7 +180,6 @@ export function PdfViewer({ src, storageKey, preparing }: { src: string; storage
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  const zoom = (factor: number) => setFit(Math.min(4, Math.max(0.25, Math.round(scale * factor * 100) / 100)));
 
   // --- which pages to draw ----------------------------------------------
   const viewH = box.h || 800;
@@ -236,7 +238,7 @@ export function PdfViewer({ src, storageKey, preparing }: { src: string; storage
             {sizes.map((s, i) => {
               const page = i + 1;
               return (
-                <PdfPage key={page} doc={doc} pdfjs={pdfjsRef.current!} page={page} scale={scale} size={s}
+                <PdfPage key={page} doc={doc} pdfjs={pdfjs!} page={page} scale={scale} size={s}
                   top={offsets.tops[i]!} draw={keep.has(page)} onSize={onSize} />
               );
             })}
@@ -273,6 +275,7 @@ const PdfPage = memo(function PdfPage({ doc, pdfjs, page, scale, size, top, draw
       if (c) { c.width = 0; c.height = 0; }
       if (textRef.current) textRef.current.replaceChildren();
       drawnRef.current = null;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- freeing the canvas of a page far from view, which this effect draws
       setDrawn(null);
       return;
     }

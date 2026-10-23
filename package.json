@@ -12,6 +12,7 @@
     "build:worker": "node scripts/build-worker.mjs",
     "start": "next start",
     "test": "vitest run",
+    "lint": "eslint .",
     "worker": "tsx src/worker/index.ts",
     "demo:seed": "tsx scripts/seed-showcase.ts"
   },
@@ -41,6 +42,8 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.31.10",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
     "typescript": "^5",

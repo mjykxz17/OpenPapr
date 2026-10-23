@@ -32,6 +32,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const userId = await requireUserId();
+  // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this is that request's time
   const now = Date.now();
   const overview = getOverview(getDb(), userId, now, loadEnv().POLL_INTERVAL_MS);
   const user = getUser(getDb(), userId);

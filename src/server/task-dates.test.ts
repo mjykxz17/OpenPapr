@@ -7,7 +7,6 @@ import { classesOn, tasksView, updateTask } from "./tasks";
 import { resolveChange } from "./changes";
 
 const now = Date.parse("2026-10-01T10:00:00+08:00"); // Thu 1 Oct 2026
-const D = 86_400_000;
 const sgt = (s: string) => Date.parse(`${s}+08:00`);
 const st = (text: string, doBy: string, done = false, minutes = 30): TaskStep => ({ id: text, text, minutes, doBy, done });
 

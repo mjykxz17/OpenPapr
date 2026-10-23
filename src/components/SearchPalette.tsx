@@ -57,6 +57,7 @@ export function SearchPalette({ ask = true }: { ask?: boolean }) {
   useEffect(() => {
     if (!open) return;
     const query = q.trim();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a query too short to search clears the results this effect fetches
     if (query.length < 2) { setHits(null); return; }
     const ctl = new AbortController();
     const timer = setTimeout(async () => {

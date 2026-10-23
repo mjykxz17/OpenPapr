@@ -149,13 +149,9 @@ function Body({ markdown, moduleId }: { markdown: string; moduleId: number }) {
 }
 
 
-// Collapsed-outline bar length, scaled to the heading it stands for and
-// clamped so the rail stays a tidy ragged edge rather than a jagged one.
 // Chapter labels carry their number ("1. Basics"); the nav adds its own.
 const bare = (label: string) => label.replace(/^\d+\.\s*/, "");
 
-const barWidth = (label: string, min = 14, max = 30) =>
-  `${Math.round(min + Math.min(1, label.length / 46) * (max - min))}px`;
 const posKey = (moduleId: number) => `sg-pos:${moduleId}`;
 
 type PanelState = { open: boolean; tabs: OpenDeck[]; active: string; mode: PanelMode };
@@ -233,6 +229,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
       const c = chapters.findIndex((ch) => slugifyHeading(ch.markdown.split("\n")[0]!.replace(/^#+\s*/, "")) === hash || extractSubheadings(ch.markdown).some((h) => h.slug === hash));
       if (c >= 0) {
         pendingScroll.current = hash;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- the URL's #section, read after mount so the server render and hydration agree
         setActive(c);
         restored.current = true;
         return;
@@ -317,6 +314,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
       const raw = localStorage.getItem(panelKey(moduleId));
       if (raw) {
         const p = JSON.parse(raw) as Partial<PanelState>;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only state, read after mount so the server render and hydration agree
         if (Array.isArray(p.tabs)) setPanel({ open: !!p.open && p.tabs.length > 0, tabs: p.tabs, active: p.active ?? p.tabs[0]?.deck ?? "", mode: p.mode === "split" || p.mode === "notes" ? p.mode : "slide" });
       }
     } catch {}
@@ -345,6 +343,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
     window.addEventListener(SHOW_SLIDE, onShow);
     const q = new URLSearchParams(window.location.search);
     const deck = q.get("slide"), page = Number(q.get("page"));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the URL's ?slide=, read after mount so the server render and hydration agree
     if (deck && page > 0) showSlide({ deck, page });
     return () => window.removeEventListener(SHOW_SLIDE, onShow);
   }, [moduleId, showSlide]);
@@ -363,6 +362,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   useEffect(() => {
     try {
       const raw = localStorage.getItem(LAYOUT_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only state, read after mount so the server render and hydration agree
       if (raw) setLayout({ ...DEFAULT_LAYOUT, ...JSON.parse(raw) });
     } catch {}
     layoutLoaded.current = true;
@@ -446,6 +446,27 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   const chaptersFit = isLg && (!docked || is2xl);
   const outlineFits = isLg && !docked;
 
+  // The chapter bar is the top of the reading area. Once it is stuck, nothing
+  // should scroll above it — the guide's title and its long preamble are read
+  // once, and jumping back to them on every tab or outline click loses the
+  // reader's place. The sentinel sits at the bar's resting position, so its
+  // document offset is exactly the point past which the bar is pinned.
+  function tabsCeiling(): number {
+    const el = tabsAnchor.current;
+    return el ? Math.round(el.getBoundingClientRect().top + window.scrollY) : 0;
+  }
+
+  function scrollToY(y: number) {
+    window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
+  }
+
+  // Switching chapters starts that chapter at the bar, not at the guide title.
+  function selectChapter(i: number) {
+    pendingScroll.current = null;
+    setActive(i);
+    scrollToY(tabsCeiling());
+  }
+
   // The reading bar: one strip pinned to the top of the reading area, the
   // same buttons in the same order on every page and in every state. The
   // chapter picker lives at its left so the current chapter is always named.
@@ -515,27 +536,6 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
     return [...set];
   }, [decks, panel.tabs]);
 
-  // The chapter bar is the top of the reading area. Once it is stuck, nothing
-  // should scroll above it — the guide's title and its long preamble are read
-  // once, and jumping back to them on every tab or outline click loses the
-  // reader's place. The sentinel sits at the bar's resting position, so its
-  // document offset is exactly the point past which the bar is pinned.
-  function tabsCeiling(): number {
-    const el = tabsAnchor.current;
-    return el ? Math.round(el.getBoundingClientRect().top + window.scrollY) : 0;
-  }
-
-  function scrollToY(y: number) {
-    window.scrollTo({ top: Math.max(0, y), behavior: "smooth" });
-  }
-
-  // Switching chapters starts that chapter at the bar, not at the guide title.
-  function selectChapter(i: number) {
-    pendingScroll.current = null;
-    setActive(i);
-    scrollToY(tabsCeiling());
-  }
-
   // Outline clicks land the heading just under the bar, and never above it.
   function scrollToHeading(slug: string) {
     const el = document.getElementById(slug);
@@ -551,6 +551,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   useEffect(() => {
     const ids = spyKey ? spyKey.split("|") : [];
     if (ids.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- a chapter with no headings has nothing to spy on
       setActiveSlug(null);
       return;
     }

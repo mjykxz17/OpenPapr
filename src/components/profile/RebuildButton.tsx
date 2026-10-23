@@ -30,9 +30,11 @@ export function RebuildButton({ scope, moduleId, status, noun = "profile" }: {
 
   // A save elsewhere on the page (a staff page, About you) can ask for a
   // rebuild; the refreshed props then say so.
-  useEffect(() => {
+  const [seen, setSeen] = useState(status);
+  if (status.pending !== seen.pending || status.builtAt !== seen.builtAt) {
+    setSeen(status);
     if (status.pending) setPending(true);
-  }, [status.pending, status.builtAt]);
+  }
 
   const q = `/api/profile?scope=${scope}${moduleId ? `&moduleId=${moduleId}` : ""}`;
   useEffect(() => {

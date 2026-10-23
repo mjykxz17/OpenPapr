@@ -39,7 +39,8 @@ async function act(id: number, action: string): Promise<boolean> {
 function useChanges(initial: number) {
   const router = useRouter();
   const [count, setCount] = useState(initial);
-  useEffect(() => setCount(initial), [initial]);
+  const [was, setWas] = useState(initial);
+  if (initial !== was) { setWas(initial); setCount(initial); }
   const [list, setList] = useState<ChangeView[] | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
@@ -80,7 +81,7 @@ function Panel({ c, onClose }: { c: ReturnType<typeof useChanges>; onClose: () =
           <button type="button" onClick={onClose} aria-label="Close" className="h-7 w-7 rounded-md text-ink-3 hover:bg-sunken hover:text-ink">✕</button>
         </div>
       </div>
-      {c.failed && <p role="alert" className="px-4 pt-2 text-[12.5px] text-danger">That didn't save. Try again.</p>}
+      {c.failed && <p role="alert" className="px-4 pt-2 text-[12.5px] text-danger">That didn&rsquo;t save. Try again.</p>}
       {c.list === null ? <p className="px-4 py-6 text-[13px] text-ink-3">Loading…</p>
         : !c.list.length ? <p className="px-4 py-6 text-[13px] leading-relaxed text-ink-2">Nothing has changed. When a course moves a date or adds work, it shows up here.</p>
         : (

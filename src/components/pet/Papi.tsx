@@ -102,6 +102,7 @@ export function Papi() {
 
   // --- restore preferences --------------------------------------------------
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only state, read after mount so the server render and hydration agree
     setQuiet(store.get(KEYS.quiet) === "1");
     setDockY(Number(store.get(KEYS.dock)) || 0);
     // Left over from when Papi floated over the page and came in sizes.
@@ -135,6 +136,7 @@ export function Papi() {
   useEffect(() => {
     if (!ready) return;
     const el = document.getElementById(phone ? TAB_ID : DOCK_ID);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the slot is a DOM node found after mount
     setSlot(el);
     if (!el) return;
     const measure = () => { const r = el.getBoundingClientRect(); setSlotRect({ left: r.left, top: r.top, width: r.width, height: r.height }); };
@@ -152,6 +154,7 @@ export function Papi() {
 
   // --- idle life -----------------------------------------------------------
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- falling asleep switches the idle timers this effect runs
     if (asleep) { setMood("sleep"); return; }
     let alive = true;
     const timers: ReturnType<typeof setTimeout>[] = [];
@@ -169,6 +172,7 @@ export function Papi() {
 
   // Eyes follow the pointer when it is near.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- falling asleep stops the pointer tracking this effect runs
     if (asleep) { setGaze(null); return; }
     let raf = 0;
     const onMove = (e: PointerEvent) => {
@@ -233,6 +237,7 @@ export function Papi() {
   function onPointerDown(e: React.PointerEvent<HTMLButtonElement>) {
     if (e.button !== 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
+    // eslint-disable-next-line react-hooks/purity -- an event handler, run on pointerdown, not during render
     drag.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, b0: safeBottom, moved: false, lastX: e.clientX, lastY: e.clientY, lastT: performance.now(), flips: 0, dir: 0 };
   }
   function onPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
@@ -264,6 +269,7 @@ export function Papi() {
       setTimeout(() => setAnim(""), 600);
       store.set(KEYS.dock, String(safeBottom));
       if (d.flips >= 6) { setMood("dizzy"); if (!open) say(pick(DIZZY_LINES), 3500); setTimeout(() => setMood((m) => (m === "dizzy" ? "idle" : m)), 2600); }
+      // eslint-disable-next-line react-hooks/purity -- an event handler, run on pointerup, not during render
       else { setMood("happy"); setTimeout(() => setMood((m) => (m === "happy" ? "idle" : m)), 800); if (!open && Math.random() < 0.35) say(pick(DROP_LINES), 2500); }
       return;
     }
@@ -310,6 +316,7 @@ export function Papi() {
   // Opening the chat hands it the waiting line, as Papi's latest message.
   useEffect(() => {
     if (!open || !note) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the waiting line is handed over when the chat opens, however it opened
     setMessages((m) => [...m, { role: "assistant", content: note.text, at: Date.now() }]);
     setNote(null);
   }, [open, note]);

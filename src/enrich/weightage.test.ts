@@ -39,7 +39,7 @@ describe("createWeightageExtractor", () => {
     const parse = vi.fn(async () => ({ parsed_output: good }));
     const ex = createWeightageExtractor({ messages: { parse } } as never, "m");
     await ex([{ label: "s", text: "x" }], [{ label: "syllabus.pdf", base64: "QUJD" }]);
-    const req = (parse.mock.calls[0] as any[])[0] as { messages: { content: { type: string }[] }[] };
+    const req = (parse.mock.calls[0] as unknown[])[0] as { messages: { content: { type: string }[] }[] };
     expect(req.messages[0].content.some((b) => b.type === "document")).toBe(true);
   });
 });

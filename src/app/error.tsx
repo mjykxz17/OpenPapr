@@ -17,6 +17,7 @@ export default function PageError({ error, reset }: { error: Error & { digest?: 
         {error.digest && <p className="mt-2 font-mono text-[12px] text-ink-3">ref {error.digest}</p>}
         <div className="mt-5 flex justify-center gap-2">
           <button type="button" onClick={reset} className="h-10 rounded-md bg-accent px-4 text-sm font-medium text-on-accent hover:bg-accent-strong">Try again</button>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a full load, so whatever broke this page does not come along home */}
           <a href="/" className="inline-flex h-10 items-center rounded-md border border-line-2 px-4 text-sm text-ink hover:bg-ink/[0.05]">Home</a>
         </div>
       </div>

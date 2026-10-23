@@ -36,7 +36,6 @@ export function FileList({ moduleId, files, currentId }: { moduleId: number; fil
     return () => window.removeEventListener("keydown", onKey);
   }, [shown, currentId, moduleId, router]);
 
-  let lastGroup = "";
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="shrink-0 p-2">
@@ -46,9 +45,8 @@ export function FileList({ moduleId, files, currentId }: { moduleId: number; fil
       </div>
       <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto px-1 pb-3">
         {shown.length === 0 && <p className="px-2 py-3 text-[13px] text-ink-3">No match.</p>}
-        {shown.map((f) => {
-          const header = f.group !== lastGroup ? f.group : null;
-          lastGroup = f.group;
+        {shown.map((f, i) => {
+          const header = f.group !== (i > 0 ? shown[i - 1]!.group : "") ? f.group : null;
           const active = f.id === currentId;
           return (
             <div key={f.id}>

@@ -23,6 +23,7 @@ export const dynamic = "force-dynamic";
 export default async function TasksPage() {
   const userId = await requireUserId();
   const db = getDb();
+  // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this is that request's time
   const now = Date.now();
   const view = tasksView(db, userId, now);
   const hasModel = canGenerateGuides(db, userId);
@@ -37,7 +38,7 @@ export default async function TasksPage() {
       <header className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">Tasks</h1>
-          <p className="text-[13px] text-ink-3">What your courses have posted and what you've added, in one list.</p>
+          <p className="text-[13px] text-ink-3">What your courses have posted and what you&rsquo;ve added, in one list.</p>
         </div>
         {hasModel
           ? <RebuildButton scope="tasks" status={taskPlanStatus(db, userId)} noun="tasks" />
