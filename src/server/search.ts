@@ -114,27 +114,119 @@ function collect(db: Db, userId: number): Doc[] {
   return docs;
 }
 
+// --- spelling ------------------------------------------------------------------
+// Course notes are written in British or American English, and students type
+// fast. Words are compared in one spelling (American, the shorter one), and a
+// word nobody wrote at all gets matched to the nearest word that is there.
+
+// Word endings that differ only by spelling. Each side of a comparison goes
+// through the same rules, so a rule that also fires on an unrelated word
+// (exercise → exercize) is harmless as long as it never turns one real word
+// into another; the stems are long enough that "rise", "four" and "hour" stay.
+const SPELLING: [RegExp, string | ((...m: string[]) => string)][] = [
+  [/(\w{3,})isation(s|al|ally)?$/, "$1ization$2"],
+  [/(\w{3,})is(e|es|ed|er|ers|ing)$/, "$1iz$2"],
+  [/(\w{2,})ys(e|es|ed|er|ers|ing)$/, "$1yz$2"],
+  [/(\w{2,})our(s|ed|ing|ite|ites|able|ful|less|er|ers)?$/, "$1or$2"],
+  // centre/center, centres/centers, centred/centered
+  [/(\w{2,}[tbgv])re(s|d)?$/, (_, stem: string, end?: string) => `${stem}er${end === "d" ? "ed" : end ?? ""}`],
+  [/(\w{3,})ell(ing|ed|er|ers)$/, "$1el$2"],
+];
+// -ce / -se only for the nouns where it is the same word.
+const CE: Record<string, string> = { defence: "defense", licence: "license", offence: "offense", pretence: "pretense", practise: "practice", practised: "practiced", practising: "practicing" };
+
+const canonCache = new Map<string, string>();
+export function canonical(word: string): string {
+  const hit = canonCache.get(word);
+  if (hit !== undefined) return hit;
+  let w = CE[word] ?? word;
+  if (w.length >= 5 && !/\d/.test(w)) for (const [re, to] of SPELLING) w = typeof to === "string" ? w.replace(re, to) : w.replace(re, to);
+  if (canonCache.size > 50_000) canonCache.clear();
+  canonCache.set(word, w);
+  return w;
+}
+
+// Levenshtein distance, giving up once it is past `max`.
+export function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let best = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      best = Math.min(best, cur[j]!);
+    }
+    if (best > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length]!;
+}
+
+// The words a term may stand for, beyond itself: the same word in the other
+// spelling ("amortised" for "amortized", "colours" for "colour"), and — only
+// when nothing has the word as typed — words one typo away (two for long words).
+export type TermForms = { term: string; forms: string[]; fuzzy: boolean };
+export function termForms(term: string, words: string[]): TermForms {
+  const c = canonical(term);
+  const forms = new Set<string>();
+  let seen = false;
+  for (const v of words) {
+    if (v.includes(term)) { seen = true; continue; }
+    if (canonical(v).startsWith(c)) forms.add(v);
+  }
+  if (seen || forms.size || term.length < 5 || /\d/.test(term)) return { term, forms: [...forms], fuzzy: false };
+  const max = term.length >= 8 ? 2 : 1;
+  const near = words.filter((v) => v.length >= 4 && editDistance(c, canonical(v), max) <= max);
+  return { term, forms: near, fuzzy: near.length > 0 };
+}
+
+const wordsOf = (s: string) => s.split(/[^a-z0-9]+/).filter(Boolean);
+
+// Words a file name has that say nothing about which file it is.
+const GENERIC = new Set(["the", "and", "for", "with", "from", "notes", "note", "lecture", "lec", "slides", "slide", "week", "pdf", "docx", "pptx", "file", "tutorial", "tut", "chapter", "part"]);
+
 export function search(db: Db, userId: number, query: string, now: number, limit = 30): SearchHit[] {
   const words = terms(query);
   if (!words.length) return [];
   const phrase = norm(query.trim());
-  const hits: SearchHit[] = [];
-  for (const d of collect(db, userId)) {
+  const docs = collect(db, userId).map((d) => {
     const title = norm(d.title);
-    const all = `${title} ${norm(d.code ?? "")} ${norm(d.text)}`;
-    if (!words.every((w) => all.includes(w))) continue;
-    let score = 0;
-    for (const w of words) {
-      if (title.includes(w)) score += 3;
-      if (new RegExp(`\\b${w}`).test(all)) score += 1;
-      // More mentions, more about it — with a ceiling, so a long section does not swamp.
-      score += Math.min(3, all.split(w).length - 1) * 0.3;
+    return { d, title, all: `${title} ${norm(d.code ?? "")} ${norm(d.text)}` };
+  });
+  const vocab = new Set<string>();
+  for (const x of docs) for (const w of wordsOf(x.all)) vocab.add(w);
+  const known = [...vocab];
+  const expanded = words.map((w) => termForms(w, known));
+  const hits: SearchHit[] = [];
+  for (const { d, title, all } of docs) {
+    // Per term: the form this doc has (the term itself first), or null.
+    const found = expanded.map((t) => (all.includes(t.term) ? t.term : t.forms.find((f) => all.includes(f)) ?? null));
+    const matched = found.filter((f): f is string => f !== null);
+    let partial = 1;
+    if (matched.length < words.length) {
+      // A file is found by its name even when the rest of the query is about
+      // what is in it ("master theorem" → L4-master.pdf): its name has to
+      // carry a real word of the query, not just "4" or "notes".
+      if (d.kind !== "file" || !matched.some((f) => title.includes(f) && f.length >= 4 && !/^\d+$/.test(f) && !GENERIC.has(f))) continue;
+      partial = 0.5 * (matched.length / words.length);
     }
+    let score = 0;
+    found.forEach((w, i) => {
+      if (!w) return;
+      let s = 0;
+      if (title.includes(w)) s += 3;
+      if (new RegExp(`\\b${w}`).test(all)) s += 1;
+      // More mentions, more about it — with a ceiling, so a long section does not swamp.
+      s += Math.min(3, all.split(w).length - 1) * 0.3;
+      // The word as typed beats its other spelling, which beats a typo's guess.
+      score += w === expanded[i]!.term ? s : expanded[i]!.fuzzy ? s * 0.7 : s * 0.9;
+    });
     if (phrase.length > 3 && all.includes(phrase)) score += 4;
     if (title === phrase || norm(d.code ?? "") === phrase) score += 6;
     // Newer is likelier what they want, within a semester.
     if (d.at) score += Math.max(0, 1 - Math.abs(now - d.at) / (120 * 86_400_000));
-    hits.push({ kind: d.kind, title: d.title, snippet: snippet(d.text, words), href: d.href, external: d.external, code: d.code, at: d.at, score: score * d.boost });
+    hits.push({ kind: d.kind, title: d.title, snippet: snippet(d.text, matched), href: d.href, external: d.external, code: d.code, at: d.at, score: score * d.boost * partial });
   }
   return hits.sort((a, b) => b.score - a.score).slice(0, limit);
 }

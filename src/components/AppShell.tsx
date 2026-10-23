@@ -38,7 +38,7 @@ export async function AppShell({ children, wide = false, bleed = false }: { chil
       {/* The study buddy lives on every page except the file viewer, whose
           controls sit where it would. */}
       {!bleed && <Papi />}
-      <SearchPalette />
+      <SearchPalette ask={!bleed} />
     </div>
   );
 }

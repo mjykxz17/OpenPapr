@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { OPEN_ASK } from "./pet/Papi";
 
 type Hit = { kind: string; title: string; snippet: string; href: string; external: boolean; code: string | null; at: number | null };
 
@@ -14,9 +15,18 @@ const KIND: Record<string, string> = {
 export const OPEN_SEARCH = "openpapr:search";
 export const openSearch = () => window.dispatchEvent(new Event(OPEN_SEARCH));
 
+// When nothing matches a query of several words: the words worth trying on
+// their own, longest first (usually the one that names the topic).
+export function fewerWords(q: string): string[] {
+  const words = [...new Set(q.trim().toLowerCase().split(/\s+/).map((w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")))];
+  const real = words.filter((w) => w.length >= 3);
+  return words.length < 2 ? [] : real.sort((a, b) => b.length - a.length).slice(0, 3);
+}
+
 // ⌘K (or Ctrl+K, or "/") from anywhere: one box over guides, announcements,
-// what lecturers said, Canvas work, tasks and files.
-export function SearchPalette() {
+// what lecturers said, Canvas work, tasks and files. `ask` offers Papi when
+// nothing matches, on pages where Papi is there to ask.
+export function SearchPalette({ ask = true }: { ask?: boolean }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<Hit[] | null>(null);
@@ -57,6 +67,10 @@ export function SearchPalette() {
     return () => { clearTimeout(timer); ctl.abort(); };
   }, [q, open]);
 
+  const askPapi = () => {
+    setOpen(false);
+    window.dispatchEvent(new CustomEvent(OPEN_ASK, { detail: { prompt: q.trim() } }));
+  };
   const go = (h: Hit) => {
     setOpen(false);
     if (h.external) window.open(h.href, "_blank", "noreferrer");
@@ -82,13 +96,13 @@ export function SearchPalette() {
             className="h-14 min-w-0 flex-1 bg-transparent text-[16px] text-ink outline-none placeholder:text-ink-3" />
           <button type="button" onClick={() => setOpen(false)} className="shrink-0 rounded border border-line px-1.5 py-0.5 text-[11px] text-ink-3 hover:text-ink">Esc</button>
         </div>
-        <ul ref={list} id="search-results" role="listbox" className="min-h-0 flex-1 overflow-y-auto py-1">
-          {q.trim().length < 2 ? (
-            <li className="px-4 py-6 text-center text-[13px] text-ink-3">Type a topic, a lecturer&apos;s name, a quiz, a file… <span className="hidden sm:inline">· ⌘K or / opens this anywhere</span></li>
-          ) : hits && hits.length === 0 && !loading ? (
-            <li className="px-4 py-6 text-center text-[13px] text-ink-3">Nothing matches “{q.trim()}”.</li>
-          ) : (
-            hits?.map((h, i) => (
+        {q.trim().length < 2 ? (
+          <p className="px-4 py-6 text-center text-[13px] text-ink-3">Type a topic, a lecturer&apos;s name, a quiz, a file… <span className="hidden sm:inline">· ⌘K or / opens this anywhere</span></p>
+        ) : hits && hits.length === 0 && !loading ? (
+          <NoResults q={q.trim()} onPick={(w) => { setQ(w); input.current?.focus(); }} onAsk={ask ? askPapi : null} />
+        ) : (
+          <ul ref={list} id="search-results" role="listbox" aria-label="Results" className="min-h-0 flex-1 overflow-y-auto py-1">
+            {hits?.map((h, i) => (
               <li key={`${h.href}-${i}`} id={`search-hit-${i}`} data-i={i} role="option" aria-selected={i === sel}
                 onMouseMove={() => setSel(i)} onClick={() => go(h)}
                 className={`mx-1 cursor-pointer rounded-md px-3 py-2.5 ${i === sel ? "bg-accent-soft" : ""}`}>
@@ -100,10 +114,32 @@ export function SearchPalette() {
                 </div>
                 {h.snippet && <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug text-ink-2">{h.snippet}</p>}
               </li>
-            ))
-          )}
-        </ul>
+            ))}
+          </ul>
+        )}
+        <p className="sr-only" aria-live="polite">{hits && q.trim().length >= 2 && !loading ? (hits.length ? `${hits.length} result${hits.length > 1 ? "s" : ""}` : "No results") : ""}</p>
       </div>
+    </div>
+  );
+}
+
+function NoResults({ q, onPick, onAsk }: { q: string; onPick: (w: string) => void; onAsk: (() => void) | null }) {
+  const words = fewerWords(q);
+  const chip = "h-8 rounded-full border border-line-2 px-3 text-[13px] text-ink-2 hover:border-accent hover:text-accent";
+  return (
+    <div className="flex flex-col items-center gap-3 px-4 py-6 text-center text-[13px] text-ink-3">
+      <p>Nothing matches “{q}”.</p>
+      {words.length > 0 && (
+        <div className="flex flex-wrap items-center justify-center gap-1.5">
+          <span>Try fewer words:</span>
+          {words.map((w) => <button key={w} type="button" onClick={() => onPick(w)} className={chip}>{w}</button>)}
+        </div>
+      )}
+      {onAsk && (
+        <button type="button" onClick={onAsk} className="h-8 rounded-md bg-accent-soft px-3 text-[13px] font-medium text-accent hover:bg-accent hover:text-on-accent">
+          Ask Papi about “{q.length > 40 ? `${q.slice(0, 40)}…` : q}”
+        </button>
+      )}
     </div>
   );
 }
