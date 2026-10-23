@@ -1,13 +1,26 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
 type Mode = "signin" | "setup";
+const MODES: Mode[] = ["signin", "setup"];
 
-export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
+// The tab an arrow, Home or End key moves to from `current`, or null for any
+// other key. Arrows wrap, as the ARIA tabs pattern expects.
+export function tabKeyTarget(key: string, current: Mode): Mode | null {
+  const i = MODES.indexOf(current);
+  if (key === "ArrowRight") return MODES[(i + 1) % MODES.length]!;
+  if (key === "ArrowLeft") return MODES[(i - 1 + MODES.length) % MODES.length]!;
+  if (key === "Home") return MODES[0]!;
+  if (key === "End") return MODES[MODES.length - 1]!;
+  return null;
+}
+
+export function LoginForm({ canvasBaseUrl, demoEnabled = false }: { canvasBaseUrl: string; demoEnabled?: boolean }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("signin");
+  const tabs = useRef<Partial<Record<Mode, HTMLButtonElement | null>>>({});
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [inviteCode, setInviteCode] = useState("");
@@ -50,15 +63,30 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
   const field = "h-10 rounded-md border border-line-2 bg-surface px-3 text-ink outline-none focus:border-accent focus:ring-2 focus:ring-accent-soft";
   const label = "flex flex-col gap-1.5 text-sm text-ink-2";
 
+  const pick = (m: Mode) => { setMode(m); setError(null); };
+  // Only the selected tab is in the Tab order; arrows move between the two.
+  function onTabKey(e: KeyboardEvent) {
+    const next = tabKeyTarget(e.key, mode);
+    if (!next) return;
+    e.preventDefault();
+    pick(next);
+    tabs.current[next]?.focus();
+  }
+
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      <div className="flex gap-1 border-b border-line text-[13px]">
-        {(["signin", "setup"] as Mode[]).map((m) => (
+    <div className="flex flex-col gap-4">
+      <div role="tablist" aria-label="Sign in or create an account" onKeyDown={onTabKey} className="flex gap-1 border-b border-line text-[13px]">
+        {MODES.map((m) => (
           <button
             key={m}
+            ref={(el) => { tabs.current[m] = el; }}
+            id={`login-tab-${m}`}
             type="button"
-            onClick={() => { setMode(m); setError(null); }}
+            role="tab"
             aria-selected={mode === m}
+            aria-controls="login-panel"
+            tabIndex={mode === m ? 0 : -1}
+            onClick={() => pick(m)}
             className={`-mb-px border-b-2 px-2 py-1.5 transition-colors ${
               mode === m ? "border-accent text-ink" : "border-transparent text-ink-2 hover:text-ink"
             }`}
@@ -68,76 +96,81 @@ export function LoginForm({ canvasBaseUrl }: { canvasBaseUrl: string }) {
         ))}
       </div>
 
-      {mode === "setup" && (
-        <>
-          <label className={label}>
-            Invite code
-            <input type="password" autoComplete="off" required value={inviteCode}
-              onChange={(e) => setInviteCode(e.target.value)} className={field} />
-          </label>
-        </>
-      )}
-      <label className={label}>
-        Username
-        <input
-          name="username"
-          autoComplete="username"
-          required
-          spellCheck={false}
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          className={field}
-        />
-      </label>
+      <form id="login-panel" role="tabpanel" aria-labelledby={`login-tab-${mode}`} onSubmit={onSubmit} className="flex flex-col gap-4">
+        {mode === "setup" && (
+          <>
+            <label className={label}>
+              Invite code
+              <input type="password" autoComplete="off" required value={inviteCode} aria-describedby="invite-hint"
+                onChange={(e) => setInviteCode(e.target.value)} className={field} />
+            </label>
+            <p id="invite-hint" className="-mt-2.5 text-[12px] leading-relaxed text-ink-3">
+              Ask the person who runs this OpenPapr for one.{demoEnabled && " Or try the demo below — no code needed."}
+            </p>
+          </>
+        )}
+        <label className={label}>
+          Username
+          <input
+            name="username"
+            autoComplete="username"
+            required
+            spellCheck={false}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            className={field}
+          />
+        </label>
 
-      <label className={label}>
-        Password
-        <input
-          type="password"
-          name="password"
-          autoComplete={mode === "signin" ? "current-password" : "new-password"}
-          required
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className={field}
-        />
-      </label>
+        <label className={label}>
+          Password
+          <input
+            type="password"
+            name="password"
+            autoComplete={mode === "signin" ? "current-password" : "new-password"}
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className={field}
+          />
+        </label>
 
-      {mode === "setup" && (
-        <>
-          <p className="-mt-1 text-[13px] leading-relaxed text-ink-2">
-            Pick a username and password: that is how you sign in from now on.
-          </p>
-          {!withCanvas ? (
-            <button type="button" onClick={() => setWithCanvas(true)} className="self-start text-[13px] text-accent hover:underline">
-              Have a Canvas access token? Add it now (optional)
-            </button>
-          ) : (
-            <>
-              <label className={label}>
-                Canvas access token <span className="text-ink-3">(optional)</span>
-                <input type="password" autoComplete="off" spellCheck={false} value={canvasToken}
-                  onChange={(e) => setCanvasToken(e.target.value)} className={field} />
-              </label>
-              <p className="-mt-1 text-[13px] leading-relaxed text-ink-2">
-                Create one in Canvas under{" "}
-                <a href={`${canvasBaseUrl}/profile/settings`} target="_blank" rel="noreferrer"
-                   className="text-accent underline underline-offset-2">
-                  Account → Settings → New access token
-                </a>
-                . It is stored encrypted. You can also add it later.
-              </p>
-            </>
-          )}
-        </>
-      )}
+        {mode === "setup" && (
+          <>
+            <p className="-mt-1 text-[13px] leading-relaxed text-ink-2">
+              Pick a username and password: that is how you sign in from now on.
+            </p>
+            {!withCanvas ? (
+              <button type="button" onClick={() => setWithCanvas(true)} className="self-start text-[13px] text-accent hover:underline">
+                Have a Canvas access token? Add it now (optional)
+              </button>
+            ) : (
+              <>
+                <label className={label}>
+                  Canvas access token <span className="text-ink-3">(optional)</span>
+                  <input type="password" autoComplete="off" spellCheck={false} value={canvasToken}
+                    onChange={(e) => setCanvasToken(e.target.value)} className={field} />
+                </label>
+                <p className="-mt-1 text-[13px] leading-relaxed text-ink-2">
+                  Create one in Canvas under{" "}
+                  <a href={`${canvasBaseUrl}/profile/settings`} target="_blank" rel="noreferrer"
+                     className="text-accent underline underline-offset-2">
+                    Account → Settings → New access token
+                  </a>
+                  . It is stored encrypted. You can also add it later.
+                </p>
+              </>
+            )}
+          </>
+        )}
 
-      {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
 
-      <button type="submit" disabled={pending}
-        className="h-10 rounded-md bg-accent px-3 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong disabled:opacity-50">
-        {pending ? "Signing in…" : mode === "signin" ? "Sign in" : "Create account"}
-      </button>
-    </form>
+        <button type="submit" disabled={pending}
+          className="h-10 rounded-md bg-accent px-3 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong disabled:opacity-50">
+          {pending ? "Signing in…" : mode === "signin" ? "Sign in" : "Create account"}
+        </button>
+      </form>
+    </div>
   );
 }
