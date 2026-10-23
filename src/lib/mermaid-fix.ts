@@ -4,6 +4,8 @@
 // syntax. Quoting the label makes it plain text, so the diagram renders. This
 // only rewrites labels that need it; everything else passes through.
 
+import { fenceRoles } from "./md-fences";
+
 const RISKY = /[()[\]{}:;,"'#&<>|=%@`]|[^\x00-\x7f]/;
 const esc = (label: string) => label.trim().replace(/"/g, "#quot;");
 
@@ -54,7 +56,21 @@ export function repairMermaid(src: string): string {
 }
 
 // Applies repairMermaid to every ```mermaid block of a markdown document, so
-// guides are stored with diagrams that already render.
+// guides are stored with diagrams that already render. Fences are found the
+// way renderers find them: a pattern match for "```mermaid … ```" ran past an
+// indented closing fence (a diagram in a list item) into the prose after it.
 export function repairMermaidBlocks(markdown: string): string {
-  return markdown.replace(/```mermaid[ \t]*\n([\s\S]*?)\n```/g, (_m, body: string) => "```mermaid\n" + repairMermaid(body) + "\n```");
+  const lines = markdown.split("\n");
+  const { roles } = fenceRoles(lines);
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    out.push(lines[i]!);
+    if (roles[i] !== "open" || !/^\s*(`{3,}|~{3,})\s*mermaid\s*$/i.test(lines[i]!)) continue;
+    let j = i + 1;
+    while (j < lines.length && roles[j] === "code") j++;
+    if (j === lines.length) continue;   // never closed: left as it is
+    out.push(repairMermaid(lines.slice(i + 1, j).join("\n")), lines[j]!);
+    i = j;
+  }
+  return out.join("\n");
 }

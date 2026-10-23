@@ -97,6 +97,55 @@ describe("normalizeFences", () => {
   it("does not touch content inside a fence", () => {
     const md = "```\nline one\n\nline two\n```\n";
     expect(normalizeFences(md)).toContain("line one\n\nline two");
+    expect(normalizeFences("```py\na\n\n\nb\n```")).toContain("a\n\n\nb");
+  });
+
+  // The shapes behind the "fence at line N is not followed by a blank line"
+  // problems on stored chapters. Each went through normalizeFences and still
+  // failed validateChapter, because both treated every ``` line as a toggle.
+  const cite = "[slide 1](slide:Deck#1)";
+  const clean = (md: string) => validateChapter(normalizeFences(md), "Deck", 48);
+
+  it("leaves a ``` shown inside a longer fence alone", () => {
+    const md = `### S\n\n${cite}\n\n\`\`\`\`markdown\n\`\`\`mermaid\ngraph TD\n\`\`\`\nThe fence above is an example.\n\`\`\`\`\n\nAfter.`;
+    expect(normalizeFences(md)).toBe(md);
+    expect(clean(md)).toEqual([]);
+  });
+
+  it("does not end a fence at a line that opens another, and says the first was never closed", () => {
+    const md = `### S\n\n${cite}\n\n\`\`\`\nbefore\n\`\`\`python\nprint(1)\n\`\`\`\nAfter.`;
+    expect(normalizeFences(md)).toContain("before\n```python\nprint(1)\n```\n\nAfter.");
+    expect(clean(md).join(" ")).toMatch(/line 7 is inside the code block opened at line 5/);
+    expect(clean(md).join(" ")).not.toMatch(/not followed/);
+  });
+
+  it("reads tilde fences", () => {
+    const md = `### S\n\n${cite}\n\n~~~\n\`\`\`\n~~~\nAfter.`;
+    expect(normalizeFences(md)).toContain("~~~\n\nAfter.");
+    expect(clean(md)).toEqual([]);
+  });
+
+  it("keeps an indented fence in a list item apart from the next item", () => {
+    const md = `### S\n\n${cite}\n\n1. Run it:\n   \`\`\`bash\n   ls\n   \`\`\`\n2. Next.`;
+    expect(normalizeFences(md)).toContain("   ```\n\n2. Next.");
+    expect(clean(md)).toEqual([]);
+  });
+
+  it("closes a fence a cut-off section left open, so the next section's fences read the right way round", () => {
+    const one = `### 1.1 A\n\n${cite}\n\n\`\`\`c\nint x = INT_MAX;`;
+    const two = "### 1.2 B\n\n```mermaid\ngraph TD\n  A --> B\n```\n\nText.";
+    // Before: the chapter carried the open fence into 1.2, which reads as code.
+    expect(validateChapter([one, two].join("\n\n"), "Deck", 48).join(" ")).toMatch(/inside the code block opened at line 5, which was never closed/);
+    const fixed = normalizeFences(one).trim();
+    expect(fixed.endsWith("int x = INT_MAX;\n```")).toBe(true);
+    expect(validateChapter([fixed, normalizeFences(two).trim()].join("\n\n"), "Deck", 48)).toEqual([]);
+  });
+
+  it("survives cleanCitations dropping a figure line right after a closing fence", () => {
+    const md = normalizeFences(`### S\n\n${cite}\n\n\`\`\`c\nx\n\`\`\`\n![gone](slide-img:Deck#99)\nNext paragraph.`);
+    const out = cleanCitations(md, new Map([["Deck", 48]])).markdown;
+    expect(out).toContain("```\n\nNext paragraph.");
+    expect(validateChapter(out, "Deck", 48)).toEqual([]);
   });
 });
 

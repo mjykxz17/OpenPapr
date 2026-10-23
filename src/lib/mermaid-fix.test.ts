@@ -51,4 +51,9 @@ describe("repairMermaidBlocks", () => {
     const md = "Text A[x (y)]\n\n```mermaid\nflowchart LR\n  A[x (y)] --> B\n```\n\n```js\nA[x (y)]\n```";
     expect(repairMermaidBlocks(md)).toBe("Text A[x (y)]\n\n```mermaid\nflowchart LR\n  A[\"x (y)\"] --> B\n```\n\n```js\nA[x (y)]\n```");
   });
+
+  it("stops at an indented closing fence instead of running into the prose after it", () => {
+    const md = "1. Flow:\n   ```mermaid\n   flowchart LR\n     A --> B\n   ```\n\nProse with A[x (y)] in it.\n\n```js\nA[x (y)]\n```";
+    expect(repairMermaidBlocks(md)).toBe(md.replace("   flowchart LR\n     A --> B", "flowchart LR\n     A --> B"));
+  });
 });

@@ -669,6 +669,9 @@ const guideDeps: GuideDeps = {
     );
   },
   fileText: (userId, file, mod) => taskDeps.fileText(userId, file, mod),
+  // The task planner's renderer, at the same modest scale: the guide writer
+  // shows a model that reads images the figure slides it embeds.
+  pageImage: (userId, file, mod, page) => taskDeps.pageImage!(userId, file, mod, page),
   ocrReady: () => tesseract.available(),
   log: (m) => console.log(m),
 };

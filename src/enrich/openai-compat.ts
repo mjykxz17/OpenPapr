@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { checkBaseUrlAddress } from "../lib/llm-address";
 import { providerDetail, requestBody, requestHeaders, tokenParams } from "../lib/llm-provider";
 import { gateFor } from "../lib/rate-gate";
+import { fenceRoles } from "../lib/md-fences";
 
 // OpenAI-compatible provider (Agnes agrouter). Same contracts as ./llm and
 // ./weightage, but JSON is requested in the prompt and validated with zod —
@@ -103,7 +104,36 @@ async function errorFor(res: Response): Promise<string> {
   return detail ? `llm ${res.status}: ${detail}` : `llm ${res.status}`;
 }
 
-async function callOnce(cfg: CompatConfig, messages: Message[], params: Record<string, number>, timeoutMs: number, fetchFn: typeof fetch): Promise<string> {
+// Why the model stopped. "length" (OpenAI and most compatible gateways) or
+// "max_tokens" (some Anthropic-style ones) means it hit the token budget —
+// and on a thinking model the hidden reasoning spends that same budget, so a
+// reply can stop mid-sentence or never start at all.
+type Reply = { text: string; cut: boolean };
+const CUT_REASONS = new Set(["length", "max_tokens"]);
+const NO_BUDGET = "llm: the model ran out of its token budget before answering";
+const EMPTY = "llm: the model returned an empty reply";
+const CUT_JSON = "llm: the model's reply was cut off at its token budget";
+
+// A reply that never came, or stopped at the budget — worth one more try
+// where a caller retries, unlike a refused key or a dead host.
+export const isNoAnswer = (err: unknown) =>
+  /llm: the model(?: ran out of its token budget| returned an empty reply|'s reply was cut off)/.test(String(err instanceof Error ? err.message : err));
+
+// The model stopped at its token budget with nothing (or, for JSON, nothing
+// usable) to show: the try after it needs more room, not the same again.
+export const isOutOfBudget = (err: unknown) =>
+  /llm: the model(?: ran out of its token budget|'s reply was cut off)/.test(String(err instanceof Error ? err.message : err));
+
+// A request that ran out of time (AbortSignal.timeout), on every provider
+// tried. Worth one more try where a caller retries.
+export const isTimeout = (err: unknown) =>
+  /aborted due to timeout|TimeoutError|timed out/i.test(String(err instanceof Error ? `${err.name} ${err.message}` : err));
+
+// An empty reply means the provider answered: the budget was short, not the
+// provider broken, so it must not count toward the breaker below.
+const answeredEmpty = (msg: string) => msg === NO_BUDGET || msg === EMPTY;
+
+async function callOnce(cfg: CompatConfig, messages: Message[], params: Record<string, number>, timeoutMs: number, fetchFn: typeof fetch): Promise<Reply> {
   for (let attempt = 0; ; attempt++) {
     await assertPublicBaseUrl(cfg, "llm");
     await gateFor(gateKey(cfg), cfg.rpm).acquire();
@@ -123,8 +153,14 @@ async function callOnce(cfg: CompatConfig, messages: Message[], params: Record<s
       if (wait !== null) { await res.body?.cancel().catch(() => {}); await new Promise((r) => setTimeout(r, wait)); continue; }
     }
     if (!res.ok) throw new Error(await errorFor(res));
-    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    return data.choices?.[0]?.message?.content ?? "";
+    const data = (await res.json()) as { choices?: { message?: { content?: string | null }; finish_reason?: string | null }[] };
+    const choice = data.choices?.[0];
+    const text = choice?.message?.content ?? "";
+    const cut = CUT_REASONS.has(String(choice?.finish_reason ?? ""));
+    // Nothing to show is a failure, never an empty success: it sends the
+    // call on to the fallback provider and to the caller's own retries.
+    if (!text.trim()) throw new Error(cut ? NO_BUDGET : EMPTY);
+    return { text, cut };
   }
 }
 
@@ -157,9 +193,18 @@ export async function complete(
   cfg: CompatConfig, messages: Message[],
   opts: { maxTokens: number; temperature?: number; timeoutMs: number; fetchFn?: typeof fetch },
 ): Promise<string> {
+  return (await completion(cfg, messages, opts)).text;
+}
+
+// complete(), also saying whether the reply stopped at the token budget.
+async function completion(
+  cfg: CompatConfig, messages: Message[],
+  opts: { maxTokens: number; temperature?: number; timeoutMs: number; fetchFn?: typeof fetch },
+): Promise<Reply> {
   const fetchFn = opts.fetchFn ?? fetch;
   const chain: CompatConfig[] = [cfg, ...(cfg.fallback ? [cfg.fallback] : [])];
   const errors: string[] = [];
+  const withImages = messages.some((m) => Array.isArray(m.content) && m.content.some((part) => part.type === "image_url"));
   for (const [i, p] of chain.entries()) {
     const key = gateKey(p);
     const last = i === chain.length - 1;
@@ -171,16 +216,29 @@ export async function complete(
       if (cfg.owner) { try { usageListener?.(cfg.owner); } catch { /* counting must never fail a call */ } }
       return out;
     } catch (err) {
-      recordResult(key, false, Date.now());
       const msg = String(err instanceof Error ? err.message : err);
+      if (!answeredEmpty(msg)) recordResult(key, false, Date.now());
+      // A refusal of images is remembered for the provider that refused —
+      // never the primary for its fallback's refusal.
+      if (withImages && isImageRefusal(msg)) rememberImageRefusal(p);
       errors.push(chain.length > 1 ? `${i === 0 ? "primary" : "fallback"}: ${msg}` : msg);
     }
   }
   throw new Error(errors.join(" | "));
 }
 
-export async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system: string, user: string | ContentPart[], maxTokens: number, timeoutMs = 180_000): Promise<unknown | null> {
-  const text = await complete(cfg, [{ role: "system", content: system }, { role: "user", content: user }], { maxTokens, timeoutMs, fetchFn });
+// JSON cut off at the budget is broken JSON, so it fails like an empty reply
+// instead of coming back as null, which callers read as "the model answered
+// with something unusable".
+//
+// Without a timeout, a request gets time in step with its budget (50 ms a
+// token, never under three minutes): a 12,000-token outline on a slow
+// thinking model needs more than three minutes to arrive.
+export const jsonTimeoutMs = (maxTokens: number) => Math.max(180_000, maxTokens * 50);
+
+export async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system: string, user: string | ContentPart[], maxTokens: number, timeoutMs = jsonTimeoutMs(maxTokens)): Promise<unknown | null> {
+  const { text, cut } = await completion(cfg, [{ role: "system", content: system }, { role: "user", content: user }], { maxTokens, timeoutMs, fetchFn });
+  if (cut) throw new Error(CUT_JSON);
   return extractJson(text);
 }
 
@@ -190,18 +248,73 @@ export const isImageRefusal = (err: unknown) =>
   IMAGE_WORDS.test(String(err instanceof Error ? err.message : err))
   && /llm 4\d\d/.test(String(err instanceof Error ? err.message : err));
 
+// Models that have refused an image, for the life of the process, so later
+// calls go out in text alone instead of paying for a refused request first.
+// Keyed by provider, key and model: another model on the same key may well
+// read images.
+const noImages = new Set<string>();
+const imageKey = (cfg: CompatConfig) => `${gateKey(cfg)}:${cfg.model}`;
+export const refusesImages = (cfg: CompatConfig) => noImages.has(imageKey(cfg));
+export function rememberImageRefusal(cfg: CompatConfig): void { noImages.add(imageKey(cfg)); }
+export function resetImageRefusals(): void { noImages.clear(); }
+
 // Prose completion, for generated long-form content. chatJson is the wrong
 // shape for a study guide: it hunts for the first { and last } and would
 // mangle markdown. Carries a timeout because the shared client has none and a
 // stalled generation would otherwise hang a script indefinitely.
+//
+// A reply cut off at the budget — or one that never started because the
+// reasoning spent the whole budget — is asked for once more with twice the
+// room, and twice the time to write it in. Still cut, it comes back trimmed
+// to its last whole paragraph and onCut is told, so the caller can say so
+// instead of storing half a sentence; still empty, it fails.
+const MAX_PROSE_TOKENS = 64_000;
+
 export async function chatText(
   cfg: CompatConfig,
   system: string,
-  user: string,
-  opts: { maxTokens?: number; temperature?: number; timeoutMs?: number; fetchFn?: typeof fetch } = {},
+  user: string | ContentPart[],
+  opts: { maxTokens?: number; temperature?: number; timeoutMs?: number; fetchFn?: typeof fetch; onCut?: () => void } = {},
 ): Promise<string> {
   const { maxTokens = 20_000, temperature = 0.3, timeoutMs = 600_000, fetchFn = fetch } = opts;
-  return complete(cfg, [{ role: "system", content: system }, { role: "user", content: user }], { maxTokens, temperature, timeoutMs, fetchFn });
+  const messages: Message[] = [{ role: "system", content: system }, { role: "user", content: user }];
+  const more = Math.min(maxTokens * 2, MAX_PROSE_TOKENS);
+  const bigger = () => completion(cfg, messages, { maxTokens: more, temperature, timeoutMs: Math.round(timeoutMs * (more / maxTokens)), fetchFn });
+  let first: Reply;
+  try {
+    first = await completion(cfg, messages, { maxTokens, temperature, timeoutMs, fetchFn });
+  } catch (err) {
+    // All of the budget went on reasoning: the same budget again would go
+    // the same way.
+    if (!isOutOfBudget(err) || more <= maxTokens) throw err;
+    first = await bigger();
+    if (!first.cut) return first.text;
+    opts.onCut?.();
+    return lastWholeParagraph(first.text);
+  }
+  if (!first.cut) return first.text;
+  let last = first;
+  if (more > maxTokens) {
+    // A second try that fails outright still leaves the first one's text.
+    last = await bigger().catch(() => first);
+    if (!last.cut) return last.text;
+  }
+  opts.onCut?.();
+  return lastWholeParagraph(last.text);
+}
+
+// The text up to its last blank line outside a code fence, so a cut reply
+// neither ends mid-sentence nor leaves a fence open. With no such line, the
+// text as it came.
+export function lastWholeParagraph(text: string): string {
+  const lines = text.split("\n");
+  const { roles } = fenceRoles(lines);
+  let end = -1, seen = false;
+  for (const [i, line] of lines.entries()) {
+    if (roles[i] === "text" && line.trim() === "" && seen) end = i;
+    if (line.trim()) seen = true;
+  }
+  return end === -1 ? text : lines.slice(0, end).join("\n").trimEnd();
 }
 
 const SCORER_SYSTEM = `You triage university email for an NUS undergraduate. Important: anything from professors or the university that affects their modules, grades, deadlines, exams, or enrolment. Garbage: newsletters, event promotion, mass CC blasts, vendor marketing. Reply with ONLY a JSON object, no prose, no code fences: {"important": boolean, "score": number 0..1 (1 = must see today), "reason": "one short line a student can read at a glance"}`;

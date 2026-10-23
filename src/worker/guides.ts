@@ -4,7 +4,7 @@ import type { Db } from "../db/client";
 import { files, guidePlans, guideTopics, items, modules, studyGuides, users } from "../db/schema";
 import type { CompatConfig } from "../enrich/openai-compat";
 import { planGuide, type PlanInput, type PlanRef } from "../enrich/guide-plan";
-import { generateTopicChapter } from "../enrich/generate-guide";
+import { generateTopicChapter, type TopicSource } from "../enrich/generate-guide";
 import { deckSignature, groupVersions, type DeckSig, type VersionGroup } from "../lib/deck-versions";
 import { htmlToText } from "../lib/html-text";
 import { dayLabel, shortDate } from "../lib/format-date";
@@ -41,6 +41,9 @@ export type GuideDeps = {
   cfgFor: (userId: number) => CompatConfig | null;
   readerFor: (userId: number, moduleId: number) => string | null;
   fileText: (userId: number, file: typeof files.$inferSelect, mod: typeof modules.$inferSelect) => Promise<string | null>;
+  // One page of a file as a PNG, so a model that reads images sees the
+  // figures a chapter embeds. Without it, chapters are written from text.
+  pageImage?: (userId: number, file: typeof files.$inferSelect, mod: typeof modules.$inferSelect, page: number) => Promise<Uint8Array | null>;
   // True when fileText can read scanned decks (OCR is installed). A scan read
   // without it is read again once it arrives.
   ocrReady?: () => boolean;
@@ -417,19 +420,21 @@ export async function writeTopic(deps: GuideDeps, topic: Topic, mod: Mod): Promi
   const setStage = (stage: string | null) => db.update(guideTopics).set({ stage }).where(eq(guideTopics.id, topic.id)).run();
   setStage("Reading the slides");
   try {
-    const load = async (ids: number[]) => {
+    // Lecture decks come with their slides as images, for the figures.
+    const load = async (ids: number[], images: boolean) => {
       const rows = ids.length ? db.select().from(files).where(inArray(files.id, ids)).all() : [];
-      const out: { name: string; text: string }[] = [];
+      const out: TopicSource[] = [];
       for (const id of ids) {
         const f = rows.find((r) => r.id === id);
         if (!f) continue;
         const text = await deps.fileText(mod.userId, f, mod);
-        if (text?.trim()) out.push({ name: stem(f.displayName), text });
+        const pageImage = images && deps.pageImage ? (page: number) => deps.pageImage!(mod.userId, f, mod, page) : null;
+        if (text?.trim()) out.push({ name: stem(f.displayName), text, pageImage });
       }
       return out;
     };
-    const lectures = await load(list(topic.lectureIdsJson));
-    const practice = await load(list(topic.practiceIdsJson));
+    const lectures = await load(list(topic.lectureIdsJson), true);
+    const practice = await load(list(topic.practiceIdsJson), false);
     // The module's other decks, so a short link name is never shared with one.
     const mine = new Set([...list(topic.lectureIdsJson), ...list(topic.practiceIdsJson)]);
     const otherDecks = guideFiles(db, mod.id).filter((f) => !mine.has(f.id)).map((f) => stem(f.displayName));

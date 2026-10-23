@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { chatJson, isImageRefusal, type CompatConfig, type ContentPart } from "./openai-compat";
+import { chatJson, isImageRefusal, isNoAnswer, isOutOfBudget, type CompatConfig, type ContentPart } from "./openai-compat";
 
 // The course roadmap. Lecturers set out the semester once — a "Schedule"
 // table in the first lecture, an "Assessment" slide in the admin deck, the
@@ -130,12 +130,16 @@ export async function extractRoadmap(
   let send: string | ContentPart[] = images.length ? withImages : text;
   let refused = false;
   let items: RoadmapItem[] | null = null;
+  let budget = 5000;
   for (let attempt = 0; attempt < 2 && items === null; attempt++) {
     try {
-      items = cleanRoadmap(await chatJson(cfg, fetchFn, ROADMAP_SYSTEM, send, 5000), refs, resolve);
+      items = cleanRoadmap(await chatJson(cfg, fetchFn, ROADMAP_SYSTEM, send, budget), refs, resolve);
     } catch (err) {
       // A model that can't read images still gets the text.
       if (typeof send !== "string" && isImageRefusal(err)) { refused = true; send = text; attempt--; continue; }
+      // An empty or cut-off reply gets the second try an unusable one does,
+      // with twice the budget when it ran out of it.
+      if (attempt === 0 && isNoAnswer(err)) { if (isOutOfBudget(err)) budget *= 2; continue; }
       throw err;
     }
   }

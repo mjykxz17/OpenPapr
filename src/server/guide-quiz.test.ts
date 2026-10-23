@@ -148,6 +148,38 @@ describe("answers", () => {
     expect(made.questions).toHaveLength(3);
   });
 
+  it("gives a reply the reasoning left empty its second round, with twice the budget", async () => {
+    const budgets: number[] = [];
+    const thinking = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      budgets.push(body.max_tokens ?? body.max_completion_tokens);
+      if (budgets.length === 1) return Response.json({ choices: [{ message: { content: "" }, finish_reason: "length" }] });
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ questions: six }) } }] });
+    }) as unknown as typeof fetch;
+    const made = await chapterQuiz(db, 1, 1, 0, cfg, 10, { fetchFn: thinking });
+    if ("error" in made) throw new Error(made.error);
+    expect(made.questions).toHaveLength(3);
+    expect(budgets).toEqual([4000, 8000]);
+  });
+
+  it("gives a cut-off reply its second round too, and says the model didn't answer when both fail", async () => {
+    let calls = 0;
+    const cut = (async () => {
+      calls++;
+      return Response.json({ choices: [{ message: { content: '{"questions": [{"q": "Wh' }, finish_reason: "length" }] });
+    }) as unknown as typeof fetch;
+    const out = await chapterQuiz(db, 1, 1, 0, cfg, 10, { fetchFn: cut });
+    expect(calls).toBe(2);
+    expect(out).toMatchObject({ status: 502, error: expect.stringMatching(/didn't answer/) });
+  });
+
+  it("still fails at once on a refused key", async () => {
+    let calls = 0;
+    const refused = (async () => { calls++; return new Response("{}", { status: 401 }); }) as unknown as typeof fetch;
+    expect(await chapterQuiz(db, 1, 1, 0, cfg, 10, { fetchFn: refused })).toMatchObject({ status: 502 });
+    expect(calls).toBe(1);
+  });
+
   it("reads deck page counts from their fingerprints", () => {
     db.insert(files).values({ moduleId: 1, canvasFileId: 1, displayName: "L3-stack.pdf", discoveredAt: 1, textSigJson: JSON.stringify({ pages: 20 }) }).run();
     expect(deckPagesFor(db, 1).get("l3-stack")).toBe(20);

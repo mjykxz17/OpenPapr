@@ -18,12 +18,15 @@ function deck(seed: string, pages: number, extra = ""): string {
   return Array.from({ length: pages }, (_, i) => `-- ${i + 1} of ${pages} --\n${Array.from({ length: 20 }, w).join(" ")}${i === pages - 1 ? ` ${extra}` : ""}`).join("\n");
 }
 
+// The text of a message, whether it came as a string or as parts with images.
+const userText = (c: string | { type: string; text?: string }[]) => (typeof c === "string" ? c : c.filter((p) => p.type === "text").map((p) => p.text).join("\n"));
+
 // A fake model: answers the planner, the outliner and the section writer.
 function fakeModel(calls: string[]) {
   return vi.fn(async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
     const system = String(body.messages[0].content);
-    const user = String(body.messages[1].content);
+    const user = userText(body.messages[1].content);
     let content: string;
     if (system.includes("organise a university module")) {
       calls.push("plan");
@@ -120,6 +123,29 @@ describe("automatic study guide", () => {
     expect(topics[0].builtAt).toBe(NOW);                                    // the other chapter untouched
   });
 
+  it("shows the model a lecture deck's figure slides, rendered from that deck, and never a practice sheet's", async () => {
+    const db = setup();
+    const sent: { heading: string; images: number }[] = [];
+    const rendered: string[] = [];
+    const base = fakeModel([]);
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      const c = body.messages[1].content;
+      const heading = userText(c).match(/first line\): ### (.+)/)?.[1];
+      if (heading) sent.push({ heading, images: typeof c === "string" ? 0 : c.filter((p: { type: string }) => p.type === "image_url").length });
+      return base(url, init);
+    }));
+    const d: GuideDeps = { ...deps(db), pageImage: async (_u, f, _m, page) => { rendered.push(`${f.displayName}#${page}`); return new Uint8Array([1, 2, 3]); } };
+    await runAutoGuides(d);
+    await runAutoGuides(d);
+    // Every slide of these test decks but the first (empty) reads as a
+    // figure; the first section covers 1-3.
+    expect(sent.find((s) => s.heading === "1.1 Overflows")!.images).toBe(2);
+    expect(sent.find((s) => s.heading.startsWith("1.4 Practice"))!.images).toBe(0);
+    expect(rendered).toContain("U3-memerr1.pdf#4");
+    expect(rendered.some((r) => r.startsWith("lab1"))).toBe(false);
+  });
+
   it("starts from a hand-made guide's chapters instead of rewriting them", async () => {
     const db = setup();
     db.insert(studyGuides).values({ moduleId: 1, generatedAt: NOW - 30 * D, sourceNote: "8 decks",
@@ -148,8 +174,10 @@ function switchModel(calls: string[], opts: { broken?: boolean; swapped?: boolea
   return vi.fn(async (url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
     const system = String(body.messages[0].content);
-    const user = String(body.messages[1].content);
-    if (opts.broken && !system.includes("organise") && !system.includes("planning") && user.includes("Fixes")) {
+    const user = userText(body.messages[1].content);
+    // Every section is shown the whole outline, so the section asked for is
+    // the heading it is told to start with.
+    if (opts.broken && !system.includes("organise") && !system.includes("planning") && /first line\): ### [\d.]+ Fixes/.test(user)) {
       calls.push("section-failed");
       return new Response("overloaded", { status: 500 });
     }
