@@ -127,6 +127,87 @@ describe("createEnrichQueue", () => {
     expect(logs[0]).toContain("bad key");
   });
 
+  it("rests a user whose turn got nothing done, longer each time, until someone asks", async () => {
+    // User 1's provider times out on every call, each longer than the whole
+    // budget. User 2's works.
+    const clock = { t: 0 };
+    const served: number[] = [];
+    const q = createEnrichQueue({
+      budgetMs: 90_000, holdMs: 10 * 60_000, restMs: 60_000, maxRestMs: 4 * 60_000, now: () => clock.t,
+      run: async ({ userId, work, budget }) => {
+        served.push(userId);
+        if (userId === 2) { budget.progress(); work.clear(); return; }
+        while (budget.left()) { clock.t += 200_000; budget.progress(false); }
+      },
+    });
+    q.add(1, ["enrich"]);
+    await q.drain();
+    expect(served).toEqual([1]);
+    expect(q.queued(1)).toBe(true);
+    expect(q.pending()).toBe(0);   // resting, not ready
+
+    clock.t += 30_000;
+    q.add(2, ["enrich"]);
+    await q.drain();
+    expect(served).toEqual([1, 2]);   // not served again within the minute
+
+    clock.t += 31_000;   // past the first rest
+    await q.drain();
+    expect(served).toEqual([1, 2, 1]);
+    clock.t += 61_000;   // the second rest is two minutes
+    await q.drain();
+    expect(served).toEqual([1, 2, 1]);
+    clock.t += 60_000;
+    await q.drain();
+    expect(served).toEqual([1, 2, 1, 1]);
+    clock.t += 4 * 60_000;   // capped at maxRestMs
+    await q.drain();
+    expect(served).toEqual([1, 2, 1, 1, 1]);
+
+    // Sync now: wakes them at once.
+    q.add(1, ["enrich"], { urgent: true });
+    await q.drain();
+    expect(served).toEqual([1, 2, 1, 1, 1, 1]);
+  });
+
+  it("does not rest a user whose turn ran out of time with work done", async () => {
+    const clock = { t: 0 };
+    const served: number[] = [];
+    const q = createEnrichQueue({
+      budgetMs: 100, holdMs: 1_000, now: () => clock.t,
+      run: async ({ userId, budget }) => { served.push(userId); while (budget.left()) { clock.t += 60; budget.progress(true); } },
+    });
+    q.add(1, ["enrich"]);
+    await q.drain();
+    await q.drain();
+    expect(served).toEqual([1, 1]);
+  });
+
+  it("sees a long rebuild of many short calls as moving, and one that hangs as stalled", async () => {
+    const clock = { t: 0 };
+    let hang: () => void = () => {};
+    const q = createEnrichQueue({
+      budgetMs: 90_000, holdMs: 5, now: () => clock.t,
+      run: async ({ userId, budget }) => {
+        // Forty minutes of rebuild, one 2-minute call after another.
+        for (let i = 0; i < 20; i++) {
+          await Promise.resolve();
+          clock.t += 2 * 60_000;
+          budget.progress(i % 2 === 0);
+        }
+        if (userId === 1) await new Promise<void>((r) => { hang = r; });
+      },
+    });
+    q.add(1, ["profiles"]);
+    await q.drain();
+    await sleep(0);
+    expect(clock.t).toBe(40 * 60_000);
+    expect(q.stalledMs()).toBe(0);
+    clock.t += 31 * 60_000;   // then nothing ends for half an hour
+    expect(q.stalledMs()).toBe(31 * 60_000);
+    hang();
+  });
+
   it("merges asks for a user already in line, keeping their place", async () => {
     const seen: string[][] = [];
     const q = createEnrichQueue({ budgetMs: 1_000, holdMs: 1_000, run: async ({ userId, work }) => { seen.push([String(userId), ...work]); work.clear(); } });

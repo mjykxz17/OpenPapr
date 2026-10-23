@@ -12,6 +12,12 @@
 // them for long. Someone who asked (Sync now, Rebuild) goes ahead of the
 // background sweep.
 //
+// A turn that ran out of time without one piece of work succeeding (a
+// provider that is down, or timing out every call) does not go straight back
+// in line: its user rests first, a little longer each time, so a dead
+// provider is not called again every few seconds. Work someone asks for
+// (Sync now, a rebuild) wakes them.
+//
 // A single call can still outlast the budget. Past `holdMs` the lane stops
 // waiting for that turn and moves on; the turn finishes in the background and
 // its user is not given another until it has. At most `maxDetached` turns run
@@ -21,13 +27,14 @@
 export type Budget = {
   // Still inside this turn's share of time.
   left(): boolean;
-  // A piece of work was finished: what the watchdog counts as progress.
-  progress(): void;
+  // A piece of work was finished — a model call answered, failed or timed
+  // out: what the watchdog counts as progress. `ok` false when it failed.
+  progress(ok?: boolean): void;
 };
 
 export type Turn = { userId: number; work: Set<string>; urgent: boolean; budget: Budget };
 
-type Entry = { work: Set<string>; urgent: boolean };
+type Entry = { work: Set<string>; urgent: boolean; notBefore: number };
 type Running = { lastProgressAt: number; detached: boolean };
 
 export function createEnrichQueue(opts: {
@@ -37,30 +44,59 @@ export function createEnrichQueue(opts: {
   budgetMs: number;
   holdMs: number;
   maxDetached?: number;
+  // The first rest after a turn that got nothing done; it doubles each time
+  // in a row, up to maxRestMs.
+  restMs?: number;
+  maxRestMs?: number;
   now?: () => number;
   log?: (m: string) => void;
 }) {
-  const { run, budgetMs, holdMs, maxDetached = 2, now = Date.now, log = () => {} } = opts;
+  const { run, budgetMs, holdMs, maxDetached = 2, restMs = 60_000, maxRestMs = 30 * 60_000, now = Date.now, log = () => {} } = opts;
   const queue = new Map<number, Entry>();   // in line order
   const running = new Map<number, Running>();
+  const fruitless = new Map<number, number>();   // turns in a row that got nothing done, per user
 
+  // Work asked for: joins the line, or the user's place in it. Urgent work
+  // (someone asked) also wakes a resting user and clears their record.
   function add(userId: number, work: Iterable<string>, o: { urgent?: boolean } = {}): void {
+    if (o.urgent) fruitless.delete(userId);
     const hit = queue.get(userId);
     if (hit) {
       for (const w of work) hit.work.add(w);
-      hit.urgent ||= Boolean(o.urgent);
+      if (o.urgent) { hit.urgent = true; hit.notBefore = 0; }
       return;
     }
-    const entry = { work: new Set(work), urgent: Boolean(o.urgent) };
+    const entry = { work: new Set(work), urgent: Boolean(o.urgent), notBefore: 0 };
     if (entry.work.size) queue.set(userId, entry);
   }
 
+  // What a turn left undone goes to the back of the line, after a rest when
+  // the turn got nothing done. Anything asked for meanwhile is merged in.
+  function requeue(userId: number, entry: Entry, succeeded: boolean): void {
+    let notBefore = 0;
+    if (succeeded) fruitless.delete(userId);
+    else {
+      const n = (fruitless.get(userId) ?? 0) + 1;
+      fruitless.set(userId, n);
+      notBefore = now() + Math.min(restMs * 2 ** (n - 1), maxRestMs);
+    }
+    const hit = queue.get(userId);
+    if (hit) {
+      for (const w of entry.work) hit.work.add(w);
+      hit.urgent ||= entry.urgent;
+      return;
+    }
+    queue.set(userId, { work: entry.work, urgent: entry.urgent, notBefore });
+  }
+
+  const ready = (id: number, e: Entry) => !running.has(id) && e.notBefore <= now();
+
   // Asked-for work first, then the rest, each in line order. A user whose
-  // last turn is still running waits for it.
+  // last turn is still running waits for it, and a resting one for the rest.
   function pickNext(skip: Set<number>): number | undefined {
     let fallback: number | undefined;
     for (const [id, e] of queue) {
-      if (running.has(id) || skip.has(id)) continue;
+      if (!ready(id, e) || skip.has(id)) continue;
       if (e.urgent) return id;
       fallback ??= id;
     }
@@ -80,9 +116,10 @@ export function createEnrichQueue(opts: {
     const startedAt = now();
     const state: Running = { lastProgressAt: startedAt, detached: false };
     running.set(userId, state);
+    let succeeded = false;
     const budget: Budget = {
       left: () => now() - startedAt < budgetMs,
-      progress: () => { state.lastProgressAt = now(); },
+      progress: (ok = true) => { state.lastProgressAt = now(); succeeded ||= ok; },
     };
     const done = (async () => {
       try {
@@ -94,7 +131,7 @@ export function createEnrichQueue(opts: {
         entry.work.clear();
       } finally {
         running.delete(userId);
-        if (entry.work.size) add(userId, entry.work, { urgent: entry.urgent });
+        if (entry.work.size) requeue(userId, entry, succeeded);
       }
     })();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -125,9 +162,13 @@ export function createEnrichQueue(opts: {
     add,
     drain,
     runNext,
-    // Queued and not running: someone the lane could serve now.
-    pending: () => [...queue.keys()].filter((id) => !running.has(id)).length,
-    queued: (userId: number) => queue.has(userId),
+    // Queued, not running and not resting: someone the lane could serve now.
+    pending: () => [...queue].filter(([id, e]) => ready(id, e)).length,
+    // In line — for anything, or for `work` in particular.
+    queued: (userId: number, work?: string) => {
+      const e = queue.get(userId);
+      return Boolean(e && (work === undefined || e.work.has(work)));
+    },
     running: (userId: number) => running.has(userId),
     // The longest any running turn has gone without finishing a piece of
     // work. Waiting in a provider's queue does not count as progress.

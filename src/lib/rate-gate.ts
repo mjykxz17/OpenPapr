@@ -6,12 +6,9 @@
 // in the last minute ages out — the provider never sees more than it allows,
 // and nothing fails with 429 merely because a study guide fires twenty
 // sections at once.
-
-type Listener = () => void;
-let onWait: Listener | null = null;
-
-// The worker's watchdog treats "waiting in the queue" as progress, not a hang.
-export function setWaitListener(fn: Listener | null): void { onWait = fn; }
+//
+// Waiting here is not progress: the worker's watchdog counts calls that end,
+// not time spent in line (see the enrichment lane).
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -36,7 +33,6 @@ export class RateGate {
       while (this.times.length && this.times[0]! <= t - this.windowMs) this.times.shift();
       if (this.times.length < this.rpm) { this.times.push(t); return; }
       const wait = this.times[0]! + this.windowMs - t + 5;
-      onWait?.();
       await sleep(Math.min(wait, 15_000));
     }
   }
