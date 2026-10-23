@@ -189,11 +189,11 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   refs.set("W", { kind: "weightage", label: "Assessment weightage" });
   const weightage = effectiveComponents(db.select().from(components).where(eq(components.moduleId, mod.id)).all());
 
-  let examDate: string | null = null;
+  let examDate: string | null = null, examAt: number | null = null;
   for (const code of moduleCodes(mod.code)) {
     const nm = getNusmods(db, code)?.module;
     const upcoming = (nm?.examDates ?? []).map((d) => Date.parse(d)).filter((t) => !Number.isNaN(t) && t >= now - D && t <= now + 200 * D).sort((a, b) => a - b);
-    if (upcoming.length) { examDate = sgtLabel(upcoming[0]); break; }
+    if (upcoming.length) { examAt = upcoming[0]!; examDate = sgtLabel(examAt); break; }
   }
   if (examDate) refs.set("X", { kind: "nusmods", label: "Final exam (NUSMods)" });
 
@@ -241,8 +241,10 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     canvas, past: pastRows, announcements, discussions, notes, fileHints: fileLines, weightage, examDate, studyAdvice, existing, feedback,
     roadmap: road.lines, calendar: calendarLines(now, mod.term), classSlots: slots,
   };
-  // Open Canvas work with its own date: the date a task citing it takes.
-  const canvasDue = new Map(open.filter((i) => i.dueAt !== null).map((i) => [`C${i.id}`, { dueAt: i.dueAt!, title: i.title }]));
+  // Open Canvas work and the final exam, with their own dates: the date a
+  // task that is that work takes.
+  const dated = new Map<string, { dueAt: number; title: string; from?: string }>(open.filter((i) => i.dueAt !== null).map((i) => [`C${i.id}`, { dueAt: i.dueAt!, title: i.title }]));
+  if (examAt !== null) dated.set("X", { dueAt: examAt, title: "Final exam", from: "NUSMods" });
   // What the plan is made from, for knowing when to plan again: not today's
   // date, nor how far the student has got through their steps — those move
   // every day and are handled in code (rollForward, fitSteps, tidyTasks) —
@@ -252,7 +254,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   const inputsHash = hash({ ...input, today: null, existing: existingRows.map((t) => ({
     key: t.key, status: t.status, due: t.dueLocked && !reopened.has(t.title) ? t.dueAt : null, title: t.titleLocked ? t.title : null,
   })) });
-  return { refs, facts: refFacts(input, canvasDue), input, inputsHash };
+  return { refs, facts: refFacts(input, dated), input, inputsHash };
 }
 
 // An announcement or staff reply posted after `since` that names this
@@ -272,7 +274,7 @@ export function announcedSince(title: string, since: number, rows: { type: strin
 // that, the quotes it cites name exactly one week — the date must fall in
 // that week: if it doesn't, it goes to the module's weekly class that week
 // (or the week's Friday). A date Canvas gave stays as it is.
-export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | null; dueConfidence: "exact" | "estimated"; sources: TaskSource[]; dueFromCanvas?: boolean }>(db: Db, moduleId: number, planned: T[], now: number): T[] {
+export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | null; dueConfidence: "exact" | "estimated"; sources: TaskSource[]; dueFromSource?: boolean }>(db: Db, moduleId: number, planned: T[], now: number): T[] {
   const rows = db.select().from(items).where(eq(items.moduleId, moduleId)).all();
   const term = db.select({ term: modules.term }).from(modules).where(eq(modules.id, moduleId)).get()?.term;
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -289,7 +291,7 @@ export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | nul
     return quoted.length === 1 ? quoted[0]! : null;
   };
   return planned.map((t) => {
-    if (t.dueFromCanvas) return t;
+    if (t.dueFromSource) return t;
     const week = weekOf(t);
     if (week === null) return t;
     const p = placeInWeek(week, now, slots, term);
@@ -568,9 +570,11 @@ export function ensureCanvasCovered(db: Db, userId: number, now: number): number
     if (pair && (covered.has(pair.id) || pair.submitted)) continue;
     // The planner's task for the same assessment (it read of it before
     // Canvas posted it) takes the item on, and Canvas's date with it, rather
-    // than a second task appearing beside it until the next plan.
+    // than a second task appearing beside it until the next plan. One the
+    // student closed keeps it closed — unless Canvas posted the work after
+    // they dismissed it, which makes it real after all (as in applyPlan).
     const twin = set || r.type === "planner_note" ? undefined : all.find((t) => t.moduleId === r.moduleId && !t.key.startsWith("manual-") && !t.key.includes("-series-quiz-")
-      && (t.status === "open" || t.touchedAt !== null) && sameAssessment(t.title, r.title));
+      && (t.status === "open" || (t.touchedAt !== null && (t.status === "done" || t.touchedAt >= r.firstSeenAt))) && sameAssessment(t.title, r.title));
     if (twin) {
       const sources = [{ kind: "canvas" as const, label: r.title, itemId: r.id }, ...parseList<TaskSource>(twin.sourcesJson)];
       const moveDate = twin.status === "open" && !twin.dueLocked && twin.dueAt !== r.dueAt;

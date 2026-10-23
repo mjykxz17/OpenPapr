@@ -96,6 +96,17 @@ describe("the safety net and the planner's own task", () => {
     expect(JSON.parse(all[0]!.sourcesJson)[0]).toMatchObject({ kind: "canvas", itemId: q.id });
     expect(stepsOf(db, "st2334-quiz-3")[0]!.doBy).toBe("2026-09-28");
   });
+
+  it("brings back work the student dismissed only when Canvas posts it afterwards", () => {
+    const { db } = setup();
+    applyPlan(db, 1, 1, [task({ key: "st2334-quiz-3", title: "Quiz 3" }), task({ key: "st2334-lab-2", title: "Lab 2", kind: "submission" })], NOW);
+    db.insert(items).values({ userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: "a2", title: "Lab 2", dueAt: NOW + 3 * D, firstSeenAt: NOW }).run();
+    db.update(tasks).set({ status: "dismissed", touchedAt: NOW + H }).run();
+    db.insert(items).values({ userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: "a3", title: "Quiz 3", dueAt: NOW + 3 * D, firstSeenAt: NOW + 2 * H }).run();
+    ensureCanvasCovered(db, 1, NOW + 2 * H);
+    const open = db.select().from(tasks).all().filter((t) => t.status === "open").map((t) => t.title);
+    expect(open).toEqual(["Quiz 3"]);   // Lab 2 was on Canvas when they dismissed it
+  });
 });
 
 describe("tidyTasks", () => {

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { chatJson, type CompatConfig } from "./openai-compat";
 import { TASK_KINDS } from "../db/schema";
-import { assessmentNumber, assessmentNumbers, ownWork, quizNumber } from "../lib/own-work";
+import { assessmentNumber, assessmentNumbers, ownWork, quizNumber, sameTask } from "../lib/own-work";
 import type { WeakSpot } from "../server/weak-topics";
 export { quizNumber };
 
@@ -125,8 +125,8 @@ export function plannerPrompt(input: ModuleTaskInput): string {
 export type CleanTask = {
   key: string; title: string; kind: TaskKind; dueAt: number | null; dueConfidence: "exact" | "estimated";
   anticipated: boolean; weightPct: number | null; why: string | null; sources: TaskSource[]; steps: TaskStep[];
-  // The date is the Canvas item's own, whatever the model said.
-  dueFromCanvas?: boolean;
+  // The date is the cited thing's own (Canvas, NUSMods), whatever the model said.
+  dueFromSource?: boolean;
   // Where code overrode the model ("date from Canvas: the planner said …"), for the logs.
   checks?: string[];
 };
@@ -154,11 +154,11 @@ const ROUTINE_RE = /^(attend|bring|charge|go to|join|be present)\b/i;
 const slugKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
 
 // What we know about each ref the planner may cite: the text it was shown
-// (to check its quotes against) and, for open Canvas work, the item's own
-// title and due date.
-export type RefFact = { text: string; dueAt?: number; title?: string };
+// (to check its quotes against) and, for open Canvas work and the NUSMods
+// exam, the thing's own name and date.
+export type RefFact = { text: string; dueAt?: number; title?: string; from?: string };
 
-export function refFacts(input: ModuleTaskInput, canvasDue: Map<string, { dueAt: number; title: string }> = new Map()): Map<string, RefFact> {
+export function refFacts(input: ModuleTaskInput, dated: Map<string, { dueAt: number; title: string; from?: string }> = new Map()): Map<string, RefFact> {
   const facts = new Map<string, RefFact>();
   const add = (ref: string, text: string) => { const f = facts.get(ref); facts.set(ref, { ...f, text: f ? `${f.text}\n${text}` : text }); };
   for (const rows of [input.canvas, input.past, input.announcements, input.discussions, input.notes, input.fileHints, input.roadmap ?? []]) {
@@ -166,17 +166,19 @@ export function refFacts(input: ModuleTaskInput, canvasDue: Map<string, { dueAt:
   }
   add("W", input.weightage.map((c) => `${c.name} ${c.weightPct}%`).join(", "));
   if (input.examDate) add("X", `Final exam: ${input.examDate}`);
-  for (const [ref, d] of canvasDue) facts.set(ref, { text: facts.get(ref)?.text ?? d.title, dueAt: d.dueAt, title: d.title });
+  for (const [ref, d] of dated) facts.set(ref, { text: facts.get(ref)?.text ?? d.title, dueAt: d.dueAt, title: d.title, from: d.from });
   return facts;
 }
 
-// Words for comparing a quote with its source: lower case, no punctuation,
-// "Quiz3" read as "quiz 3".
+// Words for comparing a quote with its source: lower case, no accents or
+// punctuation, "Quiz3" read as "quiz 3" and "02" as "2".
 const words = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "")
-  .replace(/([a-z])(\d)/g, "$1 $2").replace(/(\d)([a-z])/g, "$1 $2").split(/[^a-z0-9]+/).filter(Boolean);
+  .replace(/([a-z])(\d)/g, "$1 $2").replace(/(\d)([a-z])/g, "$1 $2").split(/[^a-z0-9]+/).filter(Boolean)
+  .map((w) => (/^\d+$/.test(w) ? String(Number(w)) : w));
+const QUOTE_STOP = new Set(["a", "an", "the", "is", "are", "be", "will", "on", "in", "at", "of", "by", "to", "and", "for"]);
 
 // The model's quote really is in the source: word for word (each piece of it
-// between "…"), or nearly so for a longer quote, with every number exact.
+// between "…"), or nearly so — most of its words there, and every number.
 export function quoteFound(quote: string, text: string): boolean {
   const q = words(quote);
   if (!q.length) return true;
@@ -185,10 +187,18 @@ export function quoteFound(quote: string, text: string): boolean {
   const pieces = quote.split(/\.{3}|…/).map(words).filter((p) => p.length);
   if (pieces.every((p) => hay.includes(` ${p.join(" ")} `))) return true;
   const have = new Set(t);
-  return q.length >= 4 && q.filter((w) => /\d/.test(w)).every((w) => have.has(w)) && q.filter((w) => have.has(w)).length >= 0.8 * q.length;
+  const content = q.filter((w) => !QUOTE_STOP.has(w));
+  return content.length >= 3 && content.filter((w) => /\d/.test(w)).every((w) => have.has(w))
+    && content.filter((w) => have.has(w)).length >= 0.7 * content.length;
 }
 
-// Kinds of task whose date is the Canvas item's date. Prep is done before it.
+// The cited item is this task's own work: no other number, and the same
+// assessment or mostly the same words ("Reflection essay" for "Reflection
+// Essay 1"; not "Quiz 9" for "Quiz 2", nor "Reading log" for "Quiz 2").
+const namesItem = (taskTitle: string, itemTitle: string) =>
+  ownWork(taskTitle, itemTitle, null, null) && (sameTask(taskTitle, itemTitle) || similarStep(taskTitle, itemTitle));
+
+// Kinds of task whose date is the item's own date. Prep is done before it.
 const DATED_BY_ITEM = new Set<TaskKind>(["exam", "quiz", "submission", "project", "presentation", "reading", "admin"]);
 
 // Turns the model's answer into tasks we can trust: every task must cite at
@@ -220,10 +230,12 @@ export function cleanPlan(raw: unknown, refs: Map<string, TaskSource>, now: numb
       const ref = s.ref.replace(/[[\]\s]/g, "");
       const base = refs.get(ref);
       if (!base || sources.some((x) => x.label === base.label)) continue;
-      const text = facts?.get(ref)?.text;
+      const fact = facts?.get(ref);
       let source: TaskSource = base;
-      if (s.quote && text !== undefined && !quoteFound(s.quote, text)) {
-        unsupported.add(base.label);
+      if (s.quote && fact && !quoteFound(s.quote, fact.text)) {
+        // The quote goes. The ref still counts when it is the task's own
+        // Canvas item: that the work exists is the item itself.
+        if (!(fact.title && namesItem(t.title, fact.title))) unsupported.add(base.label);
         checks.push(`quote not in [${ref}]: "${clip(s.quote, 60)}"`);
       } else if (s.quote) source = { ...base, quote: clip(s.quote, 160) };
       sources.push(source);
@@ -254,22 +266,23 @@ export function cleanPlan(raw: unknown, refs: Map<string, TaskSource>, now: numb
       dueConfidence = "estimated";
       checks.push(`no source names "${t.title}"`);
     }
-    // Canvas is the authority on its own work's date. A task citing an
-    // earlier quiz as its pattern keeps its own date.
-    let dueFromCanvas = false;
+    // Canvas is the authority on its own work's date, NUSMods on the final
+    // exam's. A task citing an earlier quiz as its pattern keeps its own date.
+    let dueFromSource = false;
     if (!anticipated && DATED_BY_ITEM.has(t.kind)) {
       const own = grounded.map((c) => facts?.get(c.ref))
-        .filter((f): f is RefFact & { dueAt: number } => f?.dueAt !== undefined && ownWork(t.title, f.title ?? "", null, null))
+        .filter((f): f is RefFact & { dueAt: number } => f?.dueAt !== undefined && namesItem(t.title, f.title ?? ""))
         .sort((a, b) => a.dueAt - b.dueAt)[0];
       if (own) {
-        if (dueAt === null || Math.abs(dueAt - own.dueAt) >= 60_000) checks.push(`date from Canvas: the planner said ${dueAt === null ? "no date" : sgtStamp(dueAt)}, Canvas says ${sgtStamp(own.dueAt)}`);
+        const from = own.from ?? "Canvas";
+        if (dueAt === null || Math.abs(dueAt - own.dueAt) >= 60_000) checks.push(`date from ${from}: the planner said ${dueAt === null ? "no date" : sgtStamp(dueAt)}, ${from} says ${sgtStamp(own.dueAt)}`);
         dueAt = own.dueAt;
         dueConfidence = "exact";
-        dueFromCanvas = true;
+        dueFromSource = true;
       }
     }
     // A date resting on a quote we could not find is a guess.
-    if (!dueFromCanvas && unsupported.size && dueConfidence === "exact") dueConfidence = "estimated";
+    if (!dueFromSource && unsupported.size && dueConfidence === "exact") dueConfidence = "estimated";
     if (dueAt !== null && dueAt < now - 12 * 3_600_000) continue;   // already past
     if (dueAt !== null && dueAt > now + 200 * 86_400_000) continue; // not this semester
     const lastDay = dueAt === null ? addDays(today, 42) : sgtDate(dueAt);
@@ -289,7 +302,7 @@ export function cleanPlan(raw: unknown, refs: Map<string, TaskSource>, now: numb
       key, title: clip(t.title, 80), kind: t.kind, dueAt,
       dueConfidence: dueAt === null ? "estimated" : dueConfidence,
       anticipated, weightPct: t.weightPct, why: t.why ? clip(t.why, 120) : null, sources, steps,
-      ...(dueFromCanvas ? { dueFromCanvas } : {}), ...(checks.length ? { checks } : {}),
+      ...(dueFromSource ? { dueFromSource } : {}), ...(checks.length ? { checks } : {}),
     });
   }
   return out;

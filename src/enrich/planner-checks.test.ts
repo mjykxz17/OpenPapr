@@ -31,7 +31,7 @@ const plan = (t: Record<string, unknown>) => cleanPlan({ tasks: [{ key: "st2334-
 describe("checking the planner against its sources", () => {
   it("takes the date of the Canvas item a task cites, and says the planner disagreed", () => {
     const [t] = plan({ sources: [{ ref: "C1", quote: "Quiz 2" }] });
-    expect(t).toMatchObject({ dueAt: sgt("2026-10-02T23:59:00"), dueConfidence: "exact", dueFromCanvas: true });
+    expect(t).toMatchObject({ dueAt: sgt("2026-10-02T23:59:00"), dueConfidence: "exact", dueFromSource: true });
     expect(t!.checks).toEqual(["date from Canvas: the planner said 2026-10-01 10:00 (Thu), Canvas says 2026-10-02 23:59 (Fri)"]);
     // Agreeing is not worth a note; no date at all takes Canvas's.
     expect(plan({ due: "2026-10-02T23:59:00+08:00", sources: [{ ref: "C1" }] })[0]!.checks).toBeUndefined();
@@ -41,7 +41,7 @@ describe("checking the planner against its sources", () => {
   it("doesn't take the date of an earlier quiz cited as the pattern, nor give a prep task its quiz's date", () => {
     const [q3] = plan({ title: "Quiz 3", anticipated: true, dueConfidence: "estimated", sources: [{ ref: "C1" }] });
     expect(q3!.dueAt).toBe(sgt("2026-10-01T10:00:00"));
-    expect(q3!.dueFromCanvas).toBeUndefined();
+    expect(q3!.dueFromSource).toBeUndefined();
     const [prep] = plan({ title: "Prepare for Quiz 2", kind: "prep", due: "2026-09-30T20:00:00+08:00", sources: [{ ref: "C1" }] });
     expect(prep!.dueAt).toBe(sgt("2026-09-30T20:00:00"));
   });
@@ -58,6 +58,24 @@ describe("checking the planner against its sources", () => {
 
   it("drops a task whose only evidence is a quote that isn't there", () => {
     expect(plan({ title: "Quiz 9", sources: [{ ref: "A9", quote: "Quiz 9 is on Friday" }] })).toEqual([]);
+    // A real Quiz 2 cited with a fake "Quiz 9" quote is no evidence for Quiz 9 either.
+    expect(plan({ title: "Quiz 9", sources: [{ ref: "C1", quote: "Quiz 9 opens Monday" }] })).toEqual([]);
+  });
+
+  it("keeps a task's own Canvas item as evidence when only the quote is off", () => {
+    const [t] = plan({ sources: [{ ref: "C1", quote: "the second quiz, due next Friday" }] });
+    expect(t).toMatchObject({ title: "Quiz 2", dueAt: sgt("2026-10-02T23:59:00"), dueConfidence: "exact", sources: [{ label: "Quiz 2" }] });
+    expect(t!.sources[0]!.quote).toBeUndefined();
+  });
+
+  it("takes the final exam's date from NUSMods", () => {
+    const examInput = { ...input, examDate: "2026-11-28 09:00 (Sat)" };
+    const withExam = refFacts(examInput, new Map([["X", { dueAt: sgt("2026-11-28T09:00:00"), title: "Final exam", from: "NUSMods" }]]));
+    const xRefs = new Map([...refs, ["X", { kind: "nusmods" as const, label: "Final exam (NUSMods)" }]]);
+    const [t] = cleanPlan({ tasks: [{ key: "st2334-final", title: "Final Examination", kind: "exam", due: "2026-11-27T09:00:00+08:00", dueConfidence: "estimated",
+      sources: [{ ref: "X", quote: "Final exam on 28 November" }] }] }, xRefs, NOW, "ST2334", withExam)!;
+    expect(t).toMatchObject({ dueAt: sgt("2026-11-28T09:00:00"), dueConfidence: "exact" });
+    expect(t!.checks).toContain("date from NUSMods: the planner said 2026-11-27 09:00 (Fri), NUSMods says 2026-11-28 09:00 (Sat)");
   });
 
   it("makes an assessment no source names only anticipated", () => {
