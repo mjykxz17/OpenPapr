@@ -370,11 +370,14 @@ const CONVERT_WAIT_MS = 20 * 60_000;
 const taskDeps: TaskDeps = {
   db, now: Date.now,
   cfgFor: (userId) => kitFor(userId).compatCfg,
-  fileText: async (userId, file, mod) => {
+  fileText: async (userId, file, mod, progress) => {
     const served = await ensurePdf(db, userId, { file, mod }, { convertWaitMs: CONVERT_WAIT_MS });
     if ("error" in served) return null;
+    // The converter is done with it; OCR, which can take far longer, reports
+    // each page it reads.
+    progress?.();
     // A scanned deck is read by OCR when it is installed (lib/ocr.ts).
-    return pdfTextWithOcr(new Uint8Array(readFileSync(served.path)), { cachePath: `${served.path}.ocr.txt` });
+    return pdfTextWithOcr(new Uint8Array(readFileSync(served.path)), { cachePath: `${served.path}.ocr.txt`, onProgress: progress });
   },
   pageImage: async (userId, file, mod, page) => {
     const served = await ensurePdf(db, userId, { file, mod }, { convertWaitMs: CONVERT_WAIT_MS });
@@ -406,12 +409,14 @@ const ENRICH_HOLD_MS = 4 * 60_000;
 const AFTER_SYNC = ["enrich", "profiles", "tasks"];
 
 // A profile or task rebuild is one piece of the turn but many requests and
-// file reads; each counts as progress as it ends (see countedFetch).
+// file reads; each counts as progress as it ends (see countedFetch). A file
+// read also counts the converter finishing and each page OCR reads off a
+// scanned deck.
 function countedTaskDeps(budget: Budget): TaskDeps {
   const after = async <T,>(p: Promise<T>): Promise<T> => { try { return await p; } finally { budget.progress(); } };
   return {
     ...taskDeps, fetchFn: countedFetch(budget),
-    fileText: (u, f, m) => after(taskDeps.fileText(u, f, m)),
+    fileText: (u, f, m) => after(taskDeps.fileText(u, f, m, () => budget.progress())),
     pageImage: (u, f, m, page) => after(taskDeps.pageImage!(u, f, m, page)),
   };
 }
@@ -689,8 +694,11 @@ function beat(): void {
 const STUCK_MS = 20 * 60_000;
 // A turn in the lane: longer than the slowest single piece of it. A model
 // call is up to 3 min plus a fallback; a deck is up to CONVERT_WAIT_MS in
-// line for the converter, then 3 min converting. Everything longer — a whole
-// profile or task rebuild — is many pieces, each counted as it ends.
+// line for the converter, then 3 min converting. Everything longer is many
+// pieces, each counted as it ends: a whole profile or task rebuild, and the
+// OCR of a scanned deck, which reports every page (a minute each at most,
+// for up to 150 pages) and keeps them as it goes (lib/ocr.ts), so a restart
+// carries on rather than starting over.
 const ENRICH_STUCK_MS = 30 * 60_000;
 setInterval(() => {
   const idle = Date.now() - lastBeat;
