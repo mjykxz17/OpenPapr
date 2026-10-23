@@ -61,7 +61,7 @@ export function tasksView(db: Db, userId: number, now: number): TasksView {
   const byDue = (a: TaskView, b: TaskView) => (a.dueAt ?? Number.MAX_SAFE_INTEGER) - (b.dueAt ?? Number.MAX_SAFE_INTEGER) || a.id - b.id;
 
   // Only concrete work: what the course posted or the student added (see concrete.ts).
-  const rows = all.filter((t) => isConcrete(t.key, parse<TaskSource>(t.sourcesJson), (id) => urls.get(id)?.type));
+  const rows = all.filter((t) => isConcrete(t.key, parse<TaskSource>(t.sourcesJson), (id) => urls.get(id)?.type, t.title));
   const open = rows.filter((t) => t.status === "open").map(view).sort(byDue);
   const today = sgtDate(now);
   const todaySteps: TodayStep[] = open.flatMap((t) => t.steps.filter((s) => !s.done && s.doBy <= today)

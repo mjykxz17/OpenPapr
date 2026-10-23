@@ -24,7 +24,7 @@ function setup() {
 const base = { userId: 1, source: "canvas" as const, firstSeenAt: now - D };
 
 describe("calendar feed", () => {
-  it("has open Canvas work, expected quizzes and added tasks — not done work", () => {
+  it("has open Canvas work and added tasks — not done work, nor quizzes only expected", () => {
     const { db, mod } = setup();
     const a = db.insert(items).values([
       { ...base, moduleId: mod.id, type: "assignment", sourceId: "assignment:1", title: "Lab 3", dueAt: now + 2 * D, url: "https://canvas/x" },
@@ -37,7 +37,8 @@ describe("calendar feed", () => {
     const titles = ev.map((e) => e.title);
     expect(titles).toContain("CS4238: Lab 3 due");
     expect(titles).not.toContain("CS4238: Lab 2 due");
-    expect(titles).toContain("CS4238: Quiz 4 (expected) (date estimated)");
+    // Only expected, citing the last quiz as its pattern: not in the feed until the course posts it.
+    expect(titles).not.toContain("CS4238: Quiz 4 (expected) (date estimated)");
     expect(titles).toContain("Print notes");
   });
 });
@@ -177,7 +178,8 @@ describe("teaching the planner", () => {
     const src = [{ kind: "announcement" as const, label: "Lab 5 extended", itemId: ann.id }];
     applyPlan(db, 1, mod.id, [
       { key: "cs4238-lab-5", title: "Lab 5", kind: "submission", dueAt: now + 6 * D, dueConfidence: "exact", anticipated: false, weightPct: null, why: null, sources: src, steps: [] },
-      { key: "cs4238-incident-4", title: "Incident 4", kind: "project", dueAt: now + 20 * D, dueConfidence: "estimated", anticipated: false, weightPct: null, why: null, sources: src, steps: [] },
+      { key: "cs4238-incident-4", title: "Incident 4", kind: "project", dueAt: now + 20 * D, dueConfidence: "estimated", anticipated: false, weightPct: null, why: null,
+        sources: [{ kind: "announcement" as const, label: "Lab 5 extended", quote: "Incident 4 is out next week", itemId: ann.id }], steps: [] },
     ], now);
     const list = changesFor(db, 1, now);
     expect(list.map((c) => c.kind).sort()).toEqual(["date_moved", "task_added"]);

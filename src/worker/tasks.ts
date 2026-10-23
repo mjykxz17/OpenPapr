@@ -335,7 +335,7 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
       if (row) inserted.push({ id: row.id, title: t.title });
       // Work found after the module's first plan goes in the bell; the first
       // plan itself would only flood it.
-      if (plannedBefore && row && isConcrete(t.key, t.sources, (id) => typeOf.get(id)) && !alreadyTold("task_added", t.title, t.dueAt)) {
+      if (plannedBefore && row && isConcrete(t.key, t.sources, (id) => typeOf.get(id), t.title) && !alreadyTold("task_added", t.title, t.dueAt)) {
         const src = newestNews(t.sources) ?? t.sources[0];
         tx.insert(taskChanges).values({ userId, moduleId, taskId: row.id, kind: "task_added", title: t.title, newDueAt: t.dueAt, newConfidence: t.dueConfidence,
           sourceItemId: src?.itemId ?? null, sourceLabel: src?.label ?? null, quote: src?.quote ?? null, createdAt: now }).run();
@@ -359,7 +359,7 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: A
           else tx.insert(taskChanges).values({ userId, moduleId, taskId: u.id, kind: "date_proposed", ...values, createdAt: now }).run();
         }
       } else if (!locked.has(u.id) && moved && news && was.status === "open" && !parseList<TaskSource>(was.sourcesJson).some((x) => x.itemId === news.itemId)
-        && isConcrete(t.key, t.sources, (id) => typeOf.get(id)) && !alreadyTold("date_moved", t.title, t.dueAt)) {
+        && isConcrete(t.key, t.sources, (id) => typeOf.get(id), t.title) && !alreadyTold("date_moved", t.title, t.dueAt)) {
         // Moved for them because of something new the course posted: shown in
         // the bell with an undo. An earlier pending notice for this task is
         // replaced rather than stacked.
