@@ -78,12 +78,28 @@ function retryAfterMs(res: Response): number | null {
 
 const IMAGE_WORDS = /\b(image|vision|multimodal|multi-modal|image_url|content type|content part)\b/i;
 
+// Where a provider would say it can't take images: the whole JSON error
+// (its message, param or code), or the start of a plain-text body. Never an
+// HTML page, whose markup mentions images for unrelated reasons (og:image,
+// background-image…).
+function refusalText(body: string): string {
+  try {
+    const j = JSON.parse(body) as { error?: unknown } | null;
+    return JSON.stringify(j?.error ?? j);
+  } catch { /* not JSON */ }
+  return /^\s*</.test(body) ? "" : body.slice(0, 200);
+}
+
 // The status and the provider's own error message, never its raw body. A
-// plain-text refusal of images is still recognised, so a caller can retry
-// with text alone.
+// 4xx that refuses images gets a fixed phrase saying so, so a caller can
+// retry with text alone even when the message itself doesn't say it.
 async function errorFor(res: Response): Promise<string> {
   const body = await res.text().catch(() => "");
-  const detail = providerDetail(body) || (IMAGE_WORDS.test(body) ? "image input is not supported" : "");
+  const message = providerDetail(body);
+  const refusesImages = res.status >= 400 && res.status < 500
+    && !IMAGE_WORDS.test(message) && IMAGE_WORDS.test(refusalText(body));
+  const hint = "image input is not supported";
+  const detail = refusesImages ? (message ? `${message} (${hint})` : hint) : message;
   return detail ? `llm ${res.status}: ${detail}` : `llm ${res.status}`;
 }
 

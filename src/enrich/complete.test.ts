@@ -132,4 +132,35 @@ describe("complete's error text", () => {
     expect((err as Error).message).toBe("llm 400: image input is not supported");
     expect(isImageRefusal(err)).toBe(true);
   });
+  it("does not read an HTML error page as a refusal of images", async () => {
+    const page = `<!doctype html><html><head><meta property="og:image" content="/logo.png"></head><body>${"x".repeat(500)} Not found</body></html>`;
+    const err = await fail(new Response(page, { status: 404 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 404");
+    expect(isImageRefusal(err)).toBe(false);
+  });
+  it("only looks at the start of a plain-text body, as before", async () => {
+    const err = await fail(new Response(`${"x".repeat(300)} image`, { status: 400 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 400");
+  });
+  it("does not label a 5xx as a refusal of images", async () => {
+    const err = await fail(new Response("vision backend overloaded", { status: 502 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 502");
+  });
+  it("recognises a JSON refusal of images named outside the message", async () => {
+    const body = JSON.stringify({ error: { message: "Invalid value for content", param: "messages[1].content[0].image_url", code: "invalid_value" } });
+    const err = await fail(new Response(body, { status: 400 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 400: Invalid value for content (image input is not supported)");
+    expect(isImageRefusal(err)).toBe(true);
+  });
+  it("leaves a JSON message that already names images as it is", async () => {
+    const body = JSON.stringify({ error: { message: "This model does not support image input" } });
+    const err = await fail(new Response(body, { status: 400 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 400: This model does not support image input");
+    expect(isImageRefusal(err)).toBe(true);
+  });
+  it("never shows the JSON fields it read for the image check", async () => {
+    const body = JSON.stringify({ error: { message: "bad request", param: "image_url secret-param" } });
+    const err = await fail(new Response(body, { status: 400 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 400: bad request (image input is not supported)");
+  });
 });
