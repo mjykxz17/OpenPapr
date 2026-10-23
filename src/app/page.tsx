@@ -72,7 +72,7 @@ export default async function Home() {
     week: {
       W: <WeekWidget plan={week.plan} today={todaySteps} size="W" />,
       L: <WeekWidget plan={week.plan} today={todaySteps} size="L" />,
-      F: <WeekPlan {...week} todaySteps={todaySteps} moduleIdByCode={moduleIdByCode} hasModel={canGenerateGuides(db, userId)} />,
+      F: <WeekPlan {...week} todaySteps={todaySteps} moduleIdByCode={moduleIdByCode} hasModel={canGenerateGuides(db, userId)} locked={Boolean(user?.isDemo)} />,
     },
     today: { S: <TodayWidget view={tv} size="S" />, W: <TodayWidget view={tv} size="W" />, L: <TodayWidget view={tv} size="L" tomorrow={sgtDate(now + 86_400_000)} /> },
     next: { S: <NextWidget items={nextUp} overdue={overdue} now={now} size="S" />, W: <NextWidget items={nextUp} overdue={overdue} now={now} size="W" /> },

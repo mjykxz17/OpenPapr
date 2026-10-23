@@ -286,6 +286,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   // than show "0 read" or a tick that silently comes undone.
   useEffect(() => {
     let live = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a new guide's progress is unknown until its fetch lands
     setProgress("loading");
     fetch(`/api/modules/${moduleId}/guide/progress`)
       .then((r) => (r.ok ? r.json() : null))
@@ -308,7 +309,9 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
     setRead(before);
     setSaveError(r ? "Couldn't save that. Try again." : "Couldn't save that — you seem to be offline.");
   }
-  useEffect(() => setSaveError(null), [active]);
+  // A failed save is about the chapter it was made on.
+  const [savedFor, setSavedFor] = useState(active);
+  if (savedFor !== active) { setSavedFor(active); setSaveError(null); }
   const readCount = chapters.filter((_, i) => read[i]).length;
 
   // Persist position as the reader moves (only after the initial restore).

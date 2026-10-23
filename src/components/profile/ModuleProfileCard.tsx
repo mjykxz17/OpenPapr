@@ -38,7 +38,8 @@ export function ModuleProfileCard(p: Props) {
     <section aria-labelledby="mod-profile" className="rounded-[10px] border border-line bg-panel">
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line px-5 py-3.5">
         <h2 id="mod-profile" className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-2">Module profile</h2>
-        {p.hasModel
+        {/* The demo's profiles are fixed; the server refuses a rebuild. */}
+        {p.locked ? null : p.hasModel
           ? <RebuildButton scope="module" moduleId={p.moduleId} status={p.status} noun="module profile" />
           : <a href="/account" className="text-[12px] text-accent hover:underline">Add an AI key to build profiles</a>}
       </div>

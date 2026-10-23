@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getDb } from "@/server/db";
-import { requireUserId } from "@/server/session";
+import { isDemoUser, requireUserId } from "@/server/session";
 import { getOverview } from "@/server/overview";
 import { taskPlanStatus, tasksView } from "@/server/tasks";
 import { canGenerateGuides } from "@/server/llm-access";
@@ -40,7 +40,8 @@ export default async function TasksPage() {
           <h1 className="text-2xl font-semibold tracking-[-0.01em] text-ink">Tasks</h1>
           <p className="text-[13px] text-ink-3">What your courses have posted and what you&rsquo;ve added, in one list.</p>
         </div>
-        {hasModel
+        {/* The demo's plan is fixed; the server refuses a rebuild. */}
+        {isDemoUser(userId, db) ? null : hasModel
           ? <RebuildButton scope="tasks" status={taskPlanStatus(db, userId)} noun="tasks" />
           : <Link href="/account" className="text-[13px] text-accent hover:underline">Add an AI key to plan tasks</Link>}
       </header>

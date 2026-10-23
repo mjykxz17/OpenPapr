@@ -28,8 +28,8 @@ export function fmtMinutes(total: number): string {
 // The week in a few seconds, as a read rather than a to-do list: one line on
 // what the week is about, the modules to lean on, and a pointer to today's
 // steps, which live on the Tasks page.
-export function WeekPlan({ plan, status, moduleIdByCode, hasModel, todaySteps }: {
-  plan: WeeklyPlan | null; status: Status; moduleIdByCode: Record<string, number>; hasModel: boolean;
+export function WeekPlan({ plan, status, moduleIdByCode, hasModel, todaySteps, locked = false }: {
+  plan: WeeklyPlan | null; status: Status; moduleIdByCode: Record<string, number>; hasModel: boolean; locked?: boolean;
   // null when the Today widget is on the home screen and says it already.
   todaySteps: { count: number; minutes: number } | null;
 }) {
@@ -43,7 +43,7 @@ export function WeekPlan({ plan, status, moduleIdByCode, hasModel, todaySteps }:
     <section aria-labelledby="week-plan" className="rounded-[10px] border border-line bg-panel">
       <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line px-5 py-3.5">
         <h2 id="week-plan" className="text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-2">This week</h2>
-        {hasModel
+        {locked ? null : hasModel
           ? <RebuildButton scope="plan" status={status} noun="summary" />
           : plan ? null : <Link href="/account" className="text-[12px] text-accent hover:underline">Add an AI key for a weekly summary</Link>}
       </div>
