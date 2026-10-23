@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import { PapiFace, type Mood } from "./PapiFace";
-import { answerMessage, isUngrounded, UNGROUNDED_NOTE, type Msg, type Source } from "./chat";
+import { answerMessage, inlineParts, isUngrounded, replyBlocks, turnsToSend, UNGROUNDED_NOTE, type Msg, type Source } from "./chat";
 import { bubbleBox, dockBottom, DOCK_ID, isPhone, panelBox, petRect, TAB_ID, WIDE_QUERY, type Rect } from "./placement";
 import { noteArrived, noteSeen, noteToSay, noteWaiting, type Note } from "./note";
 
@@ -352,7 +352,9 @@ export function Papi() {
     setBusy(true);
     setMood("think");
     try {
-      const res = await fetch("/api/pet/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: q, sessionId, moduleId: scope }) });
+      // A chat the server doesn't keep (the demo's) brings its own history along.
+      const earlier = sessionId === null ? turnsToSend(messages) : undefined;
+      const res = await fetch("/api/pet/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: q, sessionId, moduleId: scope, earlier }) });
       const body = (await res.json().catch(() => null)) as { reply?: string; sessionId?: number; added?: boolean; sources?: Source[]; grounded?: boolean } | null;
       if (body?.added) router.refresh();
       setMessages((m) => [...m, answerMessage(body, Date.now())]);
@@ -456,7 +458,7 @@ export function Papi() {
                 <>
                   <button type="button" onClick={newChat} className={iconBtn} title="Start a new conversation">New</button>
                   <button type="button" onClick={showHistory} className={iconBtn} title="Past conversations">History</button>
-                  <button type="button" onClick={() => setView("settings")} className={iconBtn} aria-label="Papi settings" title="Size and behaviour">
+                  <button type="button" onClick={() => setView("settings")} className={iconBtn} aria-label="Papi settings" title="Papi settings">
                     <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden><circle cx="3" cy="8" r="1.4" /><circle cx="8" cy="8" r="1.4" /><circle cx="13" cy="8" r="1.4" /></svg>
                   </button>
                 </>
@@ -520,7 +522,7 @@ export function Papi() {
                 )}
                 {messages.map((m, i) => (
                   <div key={i} className={m.role === "user" ? "max-w-[85%] self-end rounded-[12px] rounded-br-[4px] bg-ink px-3 py-2 text-[14px] leading-[1.45] text-panel" : "max-w-[92%] self-start whitespace-pre-line text-[14px] leading-[1.55] text-ink"}>
-                    {m.role === "assistant" && m.sources?.length ? <Cited text={m.content} sources={m.sources} onOpen={openSource} /> : m.content}
+                    {m.role === "assistant" ? <Reply text={m.content} sources={m.sources ?? []} onOpen={openSource} /> : m.content}
                     {isUngrounded(m) && <p className="mt-1.5 text-[12px] leading-snug text-ink-3">{UNGROUNDED_NOTE}</p>}
                     {m.role === "assistant" && m.sources && m.sources.length > 0 && (
                       <ol className="mt-2 flex flex-col gap-1 border-t border-line pt-2 text-[12.5px] leading-snug">
@@ -596,23 +598,35 @@ export function Papi() {
   );
 }
 
-// An answer with its [n] citations turned into small buttons that open the source.
-function Cited({ text, sources, onOpen }: { text: string; sources: Source[]; onOpen: (s: Source) => void }) {
+// An answer drawn from its markdown (chat.ts), with its [n] citations turned
+// into small buttons that open the source.
+function Reply({ text, sources, onOpen }: { text: string; sources: Source[]; onOpen: (s: Source) => void }) {
   const byN = new Map(sources.map((s) => [s.n, s]));
-  const parts = text.split(/(\[\d+\])/g);
+  const line = (t: string) => inlineParts(t).map((p, i) => {
+    if (p.kind === "bold") return <strong key={i} className="font-semibold">{p.text}</strong>;
+    if (p.kind === "em") return <em key={i}>{p.text}</em>;
+    if (p.kind === "code") return <code key={i} className="rounded bg-sunken px-1 font-mono text-[12.5px]">{p.text}</code>;
+    const src = p.kind === "cite" ? byN.get(p.n) : undefined;
+    if (!src) return <span key={i}>{p.text}</span>;
+    return (
+      <button key={i} type="button" onClick={() => onOpen(src)} title={`${src.code ? `${src.code} · ` : ""}${src.title}`}
+        className="mx-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded bg-accent-soft px-1 align-[1px] text-[11px] font-semibold tabular-nums text-accent hover:bg-accent hover:text-on-accent">
+        {src.n}
+      </button>
+    );
+  });
   return (
-    <>
-      {parts.map((p, i) => {
-        const m = /^\[(\d+)\]$/.exec(p);
-        const src = m ? byN.get(Number(m[1])) : undefined;
-        if (!src) return <span key={i}>{p}</span>;
+    <div className="flex flex-col gap-1.5">
+      {replyBlocks(text).map((b, i) => {
+        if (b.kind === "h") return <p key={i} className="font-semibold">{line(b.text)}</p>;
+        if (b.kind === "p") return <p key={i}>{line(b.text)}</p>;
+        const List = b.kind === "ul" ? "ul" : "ol";
         return (
-          <button key={i} type="button" onClick={() => onOpen(src)} title={`${src.code ? `${src.code} · ` : ""}${src.title}`}
-            className="mx-0.5 inline-flex h-[18px] min-w-[18px] items-center justify-center rounded bg-accent-soft px-1 align-[1px] text-[11px] font-semibold tabular-nums text-accent hover:bg-accent hover:text-on-accent">
-            {src.n}
-          </button>
+          <List key={i} className={`flex flex-col gap-1 pl-5 ${b.kind === "ul" ? "list-disc" : "list-decimal"} marker:text-ink-3`}>
+            {b.items.map((it, j) => <li key={j} className="pl-0.5">{line(it)}</li>)}
+          </List>
         );
       })}
-    </>
+    </div>
   );
 }
