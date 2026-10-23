@@ -31,15 +31,6 @@ export function slidePages(deckText: string): { page: number; text: string }[] {
   return out;
 }
 
-// The deck text as the model should read it: each page under a "[Slide N]"
-// header. A trailing marker reads like the start of the next page, which put
-// citations one slide off.
-export function labelPages(deckText: string): string {
-  const pages = slidePages(deckText);
-  if (!pages.length) return deckText;
-  return pages.map((p) => `[Slide ${p.page}]\n${p.text}`).join("\n\n");
-}
-
 // The model reads text, so it cannot see which slides carry a diagram worth
 // embedding — left to guess, it embedded none at all. A slide that occupies a
 // page but yields little text is almost always carrying a figure, so the pages
@@ -49,11 +40,12 @@ export function figureSlides(deckText: string, maxChars = 180): number[] {
 }
 
 // The slides a section draws on, from the outline's "4-11" (or "4, 6, 9–12",
-// "slides 4 to 11"), inside the deck. Empty when nothing usable was given.
+// "slides 4 to 11", "S4-S9"), inside the deck. Empty when nothing usable was
+// given. A number stuck to a name ("L1 slides 40-42") is the deck, not a slide.
 export function parseSlideRange(slides: string, pageCount: number): number[] {
   const out = new Set<number>();
   const max = pageCount > 0 ? pageCount : Infinity;
-  for (const m of slides.matchAll(/(\d+)(?:\s*(?:-|–|—|to)\s*(\d+))?/g)) {
+  for (const m of slides.matchAll(/(?<![a-z\d])[sp]?(\d+)(?:\s*(?:-|–|—|to)\s*[sp]?(\d+))?/gi)) {
     const a = Number(m[1]), b = m[2] ? Number(m[2]) : a;
     const [lo, hi] = a <= b ? [a, b] : [b, a];
     if (hi - lo > 400) continue;
@@ -275,25 +267,58 @@ export function validateChapter(markdown: string, deckName: string, pageCount: n
 
 // "L1" from "L1-asymptotics", "U3" from "U3-memerr1", "Lect 1" from
 // "IFS4103-Lect-1-v1": the short name a lecture goes by. The module code and
-// version marks are skipped; with nothing better, the name itself.
+// version marks are skipped; with nothing better, the name itself. A week or
+// unit number alone does not tell a week's decks apart, so the next name is
+// kept with it ("Week1 L2"), as is a part ("Lecture 1 Part B").
+const GROUPING_RE = /^(week|wk|w|unit|module|mod|topic|chapter|ch|session|term)\s?\d/i;
+
 export function deckShort(deck: string): string {
   const stem = decodeDeck(deck).replace(/\.(pdf|pptx?|docx?)$/i, "");
   const tokens = stem.split(/[-_\s.]+/).filter(Boolean);
-  for (let i = 0; i < tokens.length; i++) {
-    const t = tokens[i]!;
+  const found: string[] = [];
+  for (let i = 0; i < tokens.length && found.length < 2; i++) {
+    const t = tokens[i]!, next = tokens[i + 1] ?? "";
     if (/^[a-z]{2,4}\d{4}[a-z]{0,2}$/i.test(t) || /^v\d+$/i.test(t)) continue;
-    if (/^[a-z]{1,6}\d{1,3}[a-z]?$/i.test(t)) return t;
-    if (/^[a-z]{2,10}$/i.test(t) && /^\d{1,3}[a-z]?$/i.test(tokens[i + 1] ?? "")) return `${t} ${tokens[i + 1]}`;
+    if (found.length && /^(part|pt)$/i.test(t) && /^([a-z]|\d{1,2})$/i.test(next)) { found.push(`${t} ${next}`); break; }
+    if (found.length && !GROUPING_RE.test(found[0]!)) continue;
+    if (/^[a-z]{1,6}\d{1,3}[a-z]?$/i.test(t)) found.push(t);
+    else if (/^[a-z]{2,10}$/i.test(t) && /^\d{1,3}[a-z]?$/i.test(next)) { found.push(`${t} ${next}`); i++; }
   }
+  if (found.length) return found.join(" ");
   return stem.length <= 18 ? stem : `${stem.slice(0, 17)}…`;
 }
 
 const CITE_RE = /(!?)\[([^\]\n]*)\]\((slide(?:-img)?):([^)#\n]+)#(\d+)\)/g;
 const deckKey = (d: string) => decodeDeck(d).toLowerCase().replace(/\.(pdf|pptx?|docx?)$/, "").replace(/[\s_-]+/g, "");
+const GONE = "\u0000";   // where a citation was taken out, until the line is tidied
+
+// What taking a link out leaves behind, tidied next to where it was and
+// nowhere else on the line: "(see )", a space before a full stop, a comma
+// left dangling in a list of links.
+function tidyGone(line: string): string {
+  return line
+    .replace(new RegExp(`[ \\t]*\\(\\s*(?:(?:see|cf\\.?)\\s*)?(?:${GONE}[\\s,;]*)+\\)`, "gi"), GONE)
+    .replace(new RegExp(`([ \\t]*)([,;]?)[ \\t]*${GONE}+([ \\t]*)([,;]?)[ \\t]*`, "g"), (m, lead: string, before: string, _trail: string, after: string, at: number, s: string) => {
+      const prev = s[at - 1], next = s[at + m.length];
+      if (next === undefined || /[.,;:!?)\]]/.test(next)) return "";
+      if (prev === undefined || prev === "(") return "";
+      // In the middle of a list the comma stays; first in one, it goes too.
+      if (before && after) return `${before} `;
+      if (after) return lead ? " " : "";
+      return /\s/.test(m) ? " " : "";
+    });
+}
+
+// Inline code is left as written: a citation-looking thing in backticks is
+// an example, not a link.
+const outsideCode = (line: string, fn: (part: string) => string) =>
+  line.split(/(`+[^`]*?`+)/).map((part, k) => (k % 2 ? part : fn(part))).join("");
 
 // decks: each deck as it is written in a citation (citeDeck form), with its
-// page count (0 when unknown, which skips the range check).
-export function cleanCitations(markdown: string, decks: Map<string, number>): { markdown: string; repaired: number; removed: number } {
+// page count (0 when unknown, which skips the range check). alsoNamed: other
+// decks in the module, only so that two decks with one short name are told
+// apart.
+export function cleanCitations(markdown: string, decks: Map<string, number>, alsoNamed: string[] = []): { markdown: string; repaired: number; removed: number } {
   const known = [...decks.keys()];
   const resolve = (raw: string): string | null => {
     if (decks.has(raw)) return raw;
@@ -304,29 +329,30 @@ export function cleanCitations(markdown: string, decks: Map<string, number>): { 
     return near.length === 1 ? near[0]! : null;
   };
   // Two decks that would both be "L1" are named in full.
-  const shorts = new Map(known.map((d) => [d, deckShort(d)]));
-  const clash = (d: string) => known.some((o) => o !== d && shorts.get(o)!.toLowerCase() === shorts.get(d)!.toLowerCase());
+  const all = [...known, ...alsoNamed.filter((d) => !decks.has(d))];
+  const shorts = new Map(all.map((d) => [d, deckShort(d)]));
+  const clash = (d: string) => all.some((o) => o !== d && shorts.get(o)!.toLowerCase() === shorts.get(d)!.toLowerCase());
   const label = (d: string, page: number) => `${clash(d) ? decodeDeck(d).replace(/\[/g, "(").replace(/\]/g, ")") : shorts.get(d)} p${page}`;
 
   let repaired = 0, removed = 0, inFence = false, gap = false;
-  const lines = markdown.split("\n").flatMap((line, i, all) => {
+  const lines = markdown.split("\n").flatMap((line, i, rows) => {
     // A line that was only a bad figure leaves one blank line, not two.
-    if (gap) { gap = false; if (line.trim() === "" && (all[i - 2] ?? "").trim() === "") return []; }
+    if (gap) { gap = false; if (line.trim() === "" && (rows[i - 2] ?? "").trim() === "") return []; }
     if (/^\s*```/.test(line)) { inFence = !inFence; return [line]; }
     if (inFence || !line.includes("slide")) return [line];
     let dropped = false;
-    const out = line.replace(CITE_RE, (_m, bang: string, text: string, scheme: string, rawDeck: string, n: string) => {
+    const out = outsideCode(line, (part) => part.replace(CITE_RE, (_m, bang: string, text: string, scheme: string, rawDeck: string, n: string) => {
       const deck = resolve(rawDeck.trim());
       const page = Number(n);
       const pages = deck ? decks.get(deck)! : 0;
-      if (!deck || page < 1 || (pages > 0 && page > pages)) { removed++; dropped = true; return ""; }
+      if (!deck || page < 1 || (pages > 0 && page > pages)) { removed++; dropped = true; return GONE; }
       if (deck !== rawDeck) repaired++;
       return bang ? `![${text}](${scheme}:${deck}#${page})` : `[${label(deck, page)}](${scheme}:${deck}#${page})`;
-    });
+    }));
     if (!dropped) return [out];
-    // What taking a link out leaves behind: "(see )", a space before a full stop.
-    const tidy = out.replace(/\(\s*(?:see|cf\.?)?\s*[,;]?\s*\)/gi, "").replace(/[ \t]+([.,;:])/g, "$1").replace(/[,;]\s*(?=[.;:)])/g, "").replace(/(\S)[ \t]{2,}/g, "$1 ").trimEnd();
-    if (tidy.trim()) return [tidy];
+    const tidy = tidyGone(out);
+    // Nothing left but a bullet or a quote mark: the line goes.
+    if (tidy.trim() && !/^\s*(?:[-*+]|\d+[.)]|>)\s*$/.test(tidy)) return [tidy];
     gap = true;
     return [];
   });
