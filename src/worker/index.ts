@@ -602,9 +602,11 @@ async function tickOnce(): Promise<void> {
     // Generation takes minutes; it runs beside the tick rather than inside
     // it, so "Sync now" and everyone's syncs keep flowing meanwhile.
     // A guide someone asked for by hand first, then the automatic guides:
-    // new slides read, topics planned, a couple of chapters written.
-    if (!guideJob) guideJob = keepAwake(runGuideJob(), awake)
-      .then(() => (Date.now() - lastAutoGuideAt >= AUTO_GUIDE_EVERY ? (lastAutoGuideAt = Date.now(), runAutoGuides(guideDeps)) : undefined))
+    // new slides read, topics planned, a few chapters written. Both keep the
+    // machine awake: with only the first covered, Fly stopped it halfway
+    // through a rebuild of 26 chapters, as nobody was visiting.
+    if (!guideJob) guideJob = keepAwake(runGuideJob()
+      .then(() => (Date.now() - lastAutoGuideAt >= AUTO_GUIDE_EVERY ? (lastAutoGuideAt = Date.now(), runAutoGuides(guideDeps)) : undefined)), awake)
       .catch((err) => console.error("guide job crashed", err)).finally(() => { guideJob = null; });
     // The public demo account: made if missing, re-seeded after midnight.
     if (demoEnabled() && now - lastDemoCheckAt >= 60_000) {

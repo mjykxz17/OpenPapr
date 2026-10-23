@@ -33,7 +33,8 @@ const REPLAN_EVERY = 6 * H;          // when only quizzes or announcements chang
 const UNREADABLE_TRIES = 3;          // a deck that would not download or convert, once a day
 const OCR_TRIES = 3;                 // a scan OCR read nothing from, once a day
 const CONCURRENT_CHAPTERS = 4;       // chapters written at once, across everyone
-const CHAPTERS_PER_PASS = 12;        // then the pass ends, so new slides and plans are looked at again
+const CHAPTERS_PER_PASS = 8;         // then the pass ends, so new slides and plans are looked at again,
+                                     // and a pass stays well inside keep-awake's 30-minute cap
 const AUTO_PREFIX = "auto";          // study_guides.sourceNote of an automatic guide
 
 export type GuideDeps = {
