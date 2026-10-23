@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { themeBootScript } from "@/lib/theme";
 import { ServiceWorker } from "@/components/ServiceWorker";
+import { demoBannerBootScript } from "@/components/demo-banner-state";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,8 +22,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    // The boot script sets data-theme/data-accent before paint, so the
-    // attributes differ from the server render by design.
+    // The boot scripts set data-theme/data-accent (and data-demo-banner)
+    // before paint, so the attributes differ from the server render by design.
     <html
       lang="en"
       data-theme="light"
@@ -32,6 +33,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeBootScript }} />
+        {/* Hides a demo banner already put away, before it can paint. */}
+        <script dangerouslySetInnerHTML={{ __html: demoBannerBootScript }} />
       </head>
       <body className="min-h-full">{children}<ServiceWorker /></body>
     </html>
