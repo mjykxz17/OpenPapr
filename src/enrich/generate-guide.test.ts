@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { generateTopicChapter, type TopicSource } from "./generate-guide";
-import { resetImageRefusals, resetProviderHealth } from "./openai-compat";
+import { planGuide } from "./guide-plan";
+import { refusesImages, resetImageRefusals, resetProviderHealth } from "./openai-compat";
+import { createGuideGenerator } from "./study-guide";
 
 let n = 0;
 const freshCfg = () => ({ baseUrl: "https://llm.test/v1", apiKey: `k${n++}`, model: "m" });
@@ -9,8 +11,8 @@ const cfg = freshCfg();
 const deck = (pages: number, chars = 0) => Array.from({ length: pages }, (_, i) => `slide${i + 1} words about thing ${i + 1}${"x".repeat(chars)}\n-- ${i + 1} of ${pages} --`).join("\n");
 
 // One request as the model sees it.
-type Seen = { system: string; text: string; images: number[]; parts: { type: string }[] };
-function read(init?: RequestInit): Seen {
+type Seen = { system: string; text: string; images: number[]; parts: { type: string }[]; maxTokens: number; host: string };
+function read(init?: RequestInit, url = "https://llm.test/v1"): Seen {
   const body = JSON.parse(String(init?.body));
   const user = body.messages[1].content as string | { type: string; text?: string; image_url?: { url: string } }[];
   const parts = typeof user === "string" ? [{ type: "text", text: user }] : user;
@@ -20,6 +22,8 @@ function read(init?: RequestInit): Seen {
     // Each fake image is one byte: the slide it shows.
     images: parts.filter((p) => p.type === "image_url").map((p) => Buffer.from(p.image_url!.url.split(",")[1]!, "base64")[0]!),
     parts,
+    maxTokens: body.max_tokens ?? body.max_completion_tokens,
+    host: new URL(url).hostname,
   };
 }
 const asked = (s: Seen) => s.text.match(/first line\): ### (.+)/)?.[1] ?? "";
@@ -32,8 +36,8 @@ const TWO: Section[] = [{ heading: "Growth", covers: "a", slides: "2-3" }, { hea
 // citing one good slide with the wrong text and one past the end. answer
 // can stand in for any section call; every one is kept in seen.
 function model(seen: Seen[], opts: { sections?: Section[]; answer?: (s: Seen) => Response | null } = {}) {
-  return vi.fn(async (_url: string, init?: RequestInit) => {
-    const s = read(init);
+  return vi.fn(async (url: string, init?: RequestInit) => {
+    const s = read(init, url);
     if (s.system.includes("planning one chapter")) return say(JSON.stringify({ title: "x", sections: opts.sections ?? TWO }));
     seen.push(s);
     const custom = opts.answer?.(s);
@@ -122,6 +126,114 @@ describe("generateTopicChapter", () => {
     expect(outlines).toBe(2);
     expect(out.missing).toEqual({ sections: 0, decks: 0 });
   });
+
+  it("counts a cut section that kept nothing but its heading as missing, so it is written again", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    vi.stubGlobal("fetch", model([], {
+      answer: (s) => (asked(s).includes("Bounds") ? say(`### ${asked(s)}\n\nThe first sent`, "length") : null),
+    }));
+    const out = await settle(write([L1()]));
+    expect(out.missing).toEqual({ sections: 1, decks: 0 });
+    expect(out.problems.join(" ")).toMatch(/section 2: the section was cut off before any of it was written/);
+    expect(out.body).not.toContain("### 1.2 Bounds");
+  });
+});
+
+describe("an outline", () => {
+  const gen = () => createGuideGenerator(freshCfg());
+  const outlineCall = (text = deck(30)) => gen().outline("L1-asymptotics", text, 30);
+
+  it("that ran out of budget twice is null, never a throw, and the second try has twice the budget", async () => {
+    const budgets: number[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => { budgets.push(read(init).maxTokens); return say("", "length"); }));
+    expect(await outlineCall()).toBeNull();
+    expect(budgets).toEqual([12_000, 24_000]);
+  });
+
+  it("that was cut off or empty twice is null too", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => say('{"title": "x", "sections": [{"head', "length")));
+    expect(await outlineCall()).toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => say("", "stop")));
+    expect(await outlineCall()).toBeNull();
+  });
+
+  it("is asked again after a timeout", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      if (calls++ === 0) throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      return say(JSON.stringify({ title: "x", sections: TWO }));
+    }));
+    expect((await outlineCall())?.sections).toHaveLength(2);
+    expect(calls).toBe(2);
+  });
+
+  it("gets time in step with its budget", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      vi.stubGlobal("fetch", vi.fn(async () => say(JSON.stringify({ title: "x", sections: TWO }))));
+      await outlineCall();
+      expect(timeout.mock.calls.map((c) => c[0])).toEqual([600_000]);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("still throws on a refused key, for the caller to report", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 401 })));
+    await expect(outlineCall()).rejects.toThrow(/llm 401/);
+  });
+});
+
+describe("a guide plan", () => {
+  const input = { module: "CS1 Intro", lectures: [{ ref: "L1", line: "L1-intro, 30 slides" }], practice: [], assessments: [], notes: [], existing: [] };
+  it("that ran out of budget is asked again with twice as much", async () => {
+    const budgets: number[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      budgets.push(read(init).maxTokens);
+      return budgets.length === 1 ? say("", "length") : say(JSON.stringify({ title: "Intro", topics: [{ key: "intro", title: "Intro", lectures: ["L1"] }] }));
+    }));
+    const plan = await planGuide(freshCfg(), input, () => "Intro");
+    expect(plan.topics).toHaveLength(1);
+    expect(budgets).toEqual([12_000, 24_000]);
+  });
+  it("that timed out is asked again", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      if (calls++ === 0) throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+      return say(JSON.stringify({ title: "Intro", topics: [{ key: "intro", title: "Intro", lectures: ["L1"] }] }));
+    }));
+    expect((await planGuide(freshCfg(), input, () => "Intro")).topics).toHaveLength(1);
+    expect(calls).toBe(2);
+  });
+});
+
+describe("a request too big for the endpoint", () => {
+  const pageImage = async (page: number) => new Uint8Array([page]);
+
+  it("with images, refused for any reason but the key or the rate, is asked again in text alone", async () => {
+    const seen: Seen[] = [];
+    const c = freshCfg();
+    vi.stubGlobal("fetch", model(seen, { answer: (s) => (s.images.length ? new Response("<html><body>413 Request Entity Too Large</body></html>", { status: 413 }) : null) }));
+    const out = await write([L1({ pageImage })], [], c);
+    expect(out.missing).toEqual({ sections: 0, decks: 0 });
+    expect(seen.filter((s) => asked(s).includes("Growth")).map((s) => s.images.length)).toEqual([2, 0]);
+  });
+
+  it("past the model's context, falls back to the section's own slides and the smaller budget", async () => {
+    const seen: Seen[] = [];
+    vi.stubGlobal("fetch", model(seen, {
+      answer: (s) => (s.maxTokens === 16_000 && !asked(s).includes("Key points")
+        ? Response.json({ error: { message: "This model's maximum context length is 32768 tokens. However, you requested 50000 tokens." } }, { status: 400 })
+        : null),
+    }));
+    const out = await write([L1()]);
+    expect(out.missing).toEqual({ sections: 0, decks: 0 });
+    const growth = seen.filter((s) => asked(s).includes("Growth"));
+    expect(growth.map((s) => s.maxTokens)).toEqual([16_000, 8_000]);   // no repeats of the one too big
+    expect(growth[1]!.text).toContain("[Slide 2]");
+    expect(growth[1]!.text).not.toContain("[Slide 40]");
+    expect(growth[1]!.text).toMatch(/cite only those/);
+  });
 });
 
 describe("one deck's sections share their start", () => {
@@ -138,11 +250,40 @@ describe("one deck's sections share their start", () => {
     // The whole deck, then the whole outline.
     expect(prefix(seen[0]!)).toContain("[Slide 1]\nslide1 ");
     expect(prefix(seen[0]!)).toContain("[Slide 60]\nslide60 ");
-    expect(prefix(seen[0]!)).toMatch(/=== CHAPTER OUTLINE ===\n1\.1 Growth — a \(slides 2-3\)\n1\.2 Bounds — b \(slides 40-41\)\n1\.3 Limits — c \(slides 50-52\)/);
-    // The task is last, and says to refer to other sections by number.
+    // Without section numbers, which the guide changes when it renumbers.
+    expect(prefix(seen[0]!)).toMatch(/=== CHAPTER OUTLINE ===\n- Growth — a \(slides 2-3\)\n- Bounds — b \(slides 40-41\)\n- Limits — c \(slides 50-52\)/);
+    // The task is last.
     expect(seen[1]!.text).toMatch(/=== YOUR SECTION ===\nWrite section 1\.2 in full depth\.\nHeading \(use it verbatim as your first line\): ### 1\.2 Bounds\nWhat it must teach: b\nIt draws on slides 40-41: cite mainly those\./);
-    expect(seen[1]!.text).toMatch(/refer to that section by number instead of teaching it again/);
     expect(seen[1]!.system).toMatch(/"#### " subheadings without numbers/);
+  });
+
+  it("has other sections referred to by heading, never by a number the guide would renumber", async () => {
+    const seen: Seen[] = [];
+    vi.stubGlobal("fetch", model(seen));
+    await write([L1()]);
+    const s = seen[1]!;
+    for (const text of [s.text, s.system]) {
+      expect(text).toMatch(/by its heading in italics/);
+      expect(text).toMatch(/never by a number|Never refer to a section by a number/);
+      expect(text).not.toMatch(/see 1\.\d/);
+    }
+    // No section number appears in the shared prefix at all.
+    expect(s.text.slice(0, s.text.indexOf("=== YOUR SECTION ==="))).not.toMatch(/\b1\.\d\b/);
+  });
+
+  it("makes each section own what its line names, so two never defer to each other", async () => {
+    const seen: Seen[] = [];
+    const outlines: Seen[] = [];
+    const base = model(seen);
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      const s = read(init);
+      if (s.system.includes("planning one chapter")) outlines.push(s);
+      return base(url, init);
+    }));
+    await write([L1()]);
+    expect(seen[0]!.text).toMatch(/Teach fully everything "What it must teach" names, even where another section of the outline touches it\. Only for an idea that is not in that line and is another section's/);
+    expect(seen[0]!.system).toMatch(/Teach fully everything your own section must teach/);
+    expect(outlines[0]!.system).toMatch(/Give every idea to ONE section/);
   });
 
   it("names every figure slide of the deck in the system prompt", async () => {
@@ -229,6 +370,52 @@ describe("figures, for a model that reads images", () => {
     seen.length = 0;
     await write([L1({ pageImage })], [], c);
     expect(seen.some((s) => s.images.length)).toBe(false);
+  });
+
+  it("never blames the primary for its fallback's refusal", async () => {
+    const seen: Seen[] = [];
+    const backup = { ...freshCfg(), baseUrl: "https://backup.test/v1" };
+    const c = { ...freshCfg(), fallback: backup };
+    vi.stubGlobal("fetch", model(seen, {
+      answer: (s) => {
+        if (!s.images.length) return null;
+        // The primary times out; the text-only fallback refuses the images.
+        return s.host === "llm.test" ? new Response("gateway timeout", { status: 504 })
+          : Response.json({ error: { message: "image input is not supported" } }, { status: 400 });
+      },
+    }));
+    const out = await write([L1({ pageImage })], [], c);
+    expect(out.missing).toEqual({ sections: 0, decks: 0 });
+    expect(refusesImages(c)).toBe(false);
+    expect(refusesImages(backup)).toBe(true);
+    // Every section with figures still offered them to the primary.
+    expect(seen.filter((s) => s.host === "llm.test" && s.images.length).map(asked).sort()).toEqual(["1.1 Growth", "1.2 Bounds"]);
+  });
+
+  it("leaves out a slide image too big to send", async () => {
+    const seen: Seen[] = [];
+    vi.stubGlobal("fetch", model(seen));
+    const big = (p: number) => { const a = new Uint8Array(1_000_001); a[0] = p; return a; };
+    await write([L1({ pageImage: async (p) => (p === 2 ? big(p) : new Uint8Array([p])) })]);
+    expect(seen.find((s) => asked(s).includes("Growth"))!.images).toEqual([3]);
+  });
+
+  it("has at most two requests carrying images in flight at once", async () => {
+    const sections = Array.from({ length: 6 }, (_, k) => ({ heading: `S${k}`, covers: `c${k}`, slides: `${k * 5 + 1}-${k * 5 + 3}` }));
+    const base = model([], { sections });
+    let active = 0, most = 0, sent = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (!read(init).images.length) return base(url, init);
+      sent++;
+      most = Math.max(most, ++active);
+      await new Promise((r) => setTimeout(r, 10));
+      active--;
+      return base(url, init);
+    }));
+    const out = await write([L1({ pageImage })]);
+    expect(out.missing).toEqual({ sections: 0, decks: 0 });
+    expect(sent).toBe(6);
+    expect(most).toBe(2);
   });
 });
 

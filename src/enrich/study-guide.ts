@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { chatJson, chatText, isImageRefusal, isNoAnswer, refusesImages, rememberImageRefusal, type CompatConfig, type ContentPart } from "./openai-compat";
+import { chatJson, chatText, isImageRefusal, isNoAnswer, isOutOfBudget, isTimeout, refusesImages, type CompatConfig, type ContentPart } from "./openai-compat";
 import { repairMermaidBlocks } from "../lib/mermaid-fix";
 import { decodeDeck } from "../lib/slide-citation";
 import { closingFence, fenceOpener, fenceRoles } from "../lib/md-fences";
@@ -104,6 +104,7 @@ Return ONLY a JSON object, no prose and no code fences:
 Rules:
 - Follow the deck's own order. Do not invent topics the deck does not cover.
 - Between 3 and 8 sections. Each should be a genuine unit of the lecture, not one slide.
+- Give every idea to ONE section: no two "covers" lines may name the same idea, so each section knows what it alone teaches.
 - Skip title slides, outline slides and administrivia unless the administrivia is assessment information a student must act on.`;
 
 const readerNote = (reader: string | null) => reader ? `
@@ -124,7 +125,7 @@ Non-negotiable style:
 - Recreate structural concepts as mermaid diagrams in \`\`\`mermaid fences. Put a BLANK LINE before the opening fence and after the closing fence. Keep node labels short and free of parentheses and quotes.
 - Cite the slide a claim comes from as [slide N](slide:${deckName}#N). The deck text is split into "[Slide N]" blocks; cite the N of the block the claim comes from, and never a number above ${pageCount}.
 - Start with the "### " heading you are given, verbatim, and write nothing above it. Divide the section with "#### " subheadings without numbers ("#### Why the sum wraps around", never "#### 1.2.1 Why the sum wraps around"). Do not write a chapter title.
-- Teach only your section's part of the chapter. The outline says what every other section teaches: for an idea another section covers, refer to that section by its number ("see 1.3") instead of teaching it again.
+- Teach fully everything your own section must teach, even where another section touches it. Only for an idea that is NOT in your own section's line and IS in another section's line of the outline, point the reader to that section by its heading in italics ("see *Why the sum wraps around*") instead of teaching it again. Never refer to a section by a number: the guide renumbers its chapters.
 - These slides are mostly picture — a diagram, screenshot or figure: ${figures.length ? figures.join(", ") : "(none detected)"}. A request may end with images of some of them, each named by its slide number: describe a figure only from what its image shows, and EMBED it on its own line, where it helps, as ![short caption](slide-img:${deckName}#N). Embed at least one where any of those slides falls in your range — a reader who cannot see the figure cannot follow the point it makes. A figure slide sent without an image may still be embedded where the text around it makes clear what it shows; say no more about it than that text does.
 - Never invent content that is not in the slides. If the deck is thin on a point, say less rather than filling.${readerNote(reader)}`;
 
@@ -219,6 +220,35 @@ export type DeckWritten = {
 
 const DECK_CHARS = 120_000;         // a deck up to this size is sent whole to every section
 const SECTION_IMAGES = 4;           // slide images per section, at most
+const IMAGE_BYTES = 1_000_000;      // a rendered slide bigger than this is left out
+const SECTION_IMAGE_BYTES = 2_000_000;  // and all of one section's together
+const IMAGE_REQUESTS = 2;           // requests carrying images at once, per generator
+const SECTION_TOKENS = 16_000;
+const WINDOW_TOKENS = 8_000;        // for the smaller request after one too big
+
+// A request too big for the endpoint: a body-size limit (413) or a prompt
+// past the model's context window. Asking again the same way cannot help.
+export const isTooBig = (err: unknown) =>
+  /llm 413\b|context length|context window|maximum context|max_model_len|prompt is too long|too many tokens|request entity too large/i
+    .test(String(err instanceof Error ? err.message : err));
+// A 4xx that is not about the key or the rate: the request itself was
+// refused, which for one carrying images is reason to try text alone.
+const isRefusedRequest = (err: unknown) => /llm 4(?!01|03|29)\d\d/.test(String(err instanceof Error ? err.message : err));
+
+// At most n at once; the rest wait their turn.
+function limiter(n: number) {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    while (active >= n) await new Promise<void>((r) => waiting.push(r));
+    active++;
+    try { return await fn(); } finally { active--; waiting.shift()?.(); }
+  };
+}
+
+// A section's body that is nothing but headings — a reply cut off right
+// after its first line, trimmed back to it — is not a section written.
+const hasProse = (md: string) => md.split("\n").filter((l) => !/^\s*#/.test(l)).join("").trim().length >= 20;
 
 const errText = (err: unknown) => String(err instanceof Error ? err.message : err);
 
@@ -228,14 +258,16 @@ const errText = (err: unknown) => String(err instanceof Error ? err.message : er
 // from its prompt cache. 120,000 characters is about 30,000 tokens — well
 // inside the 128K-token models students also use. A bigger deck falls back
 // to each section's own slides and their neighbours.
-export function deckPrefix(plan: DeckPlan, slides: string): { text: string; whole: boolean } {
+export function deckPrefix(plan: DeckPlan, slides: string, windowed = false): { text: string; whole: boolean } {
   const pages = slidePages(plan.deckText);
-  const whole = !pages.length || size(pages) <= DECK_CHARS;
+  const whole = !windowed && (!pages.length || size(pages) <= DECK_CHARS);
   const shown = whole ? null : sectionText(plan.deckText, slides, plan.pageCount);
   const deck = whole
     ? `=== DECK TEXT (${plan.deckName}, ${plan.pageCount} slides) ===\n${pages.length ? clipPages(pages, Infinity) : plan.deckText.slice(0, DECK_CHARS)}`
     : `=== DECK TEXT (${plan.deckName}, ${plan.pageCount} slides, ${shown!.pages.length} of them shown) ===\n${shown!.text}`;
-  const outline = plan.sections.map((s) => `${s.number} ${s.heading} — ${s.covers} (slides ${s.slides})`).join("\n");
+  // Without numbers: a section refers to another by its heading, which
+  // survives the guide renumbering its chapters; "see 1.3" would not.
+  const outline = plan.sections.map((s) => `- ${s.heading} — ${s.covers} (slides ${s.slides})`).join("\n");
   return { text: `${deck}\n\n=== CHAPTER OUTLINE ===\n${outline}`, whole };
 }
 
@@ -248,53 +280,80 @@ export function sectionFigures(plan: DeckPlan, s: DeckSection): number[] {
 const dataUrl = (png: Uint8Array) => `data:image/png;base64,${Buffer.from(png).toString("base64")}`;
 
 export function createGuideGenerator(cfg: CompatConfig, reader: string | null = null) {
+  // Base64 slides are held for as long as their request runs, minutes on a
+  // thinking model, so only a couple of sections hold them at a time; the
+  // rest wait before rendering anything.
+  const imageSlot = limiter(IMAGE_REQUESTS);
+
   // One section: the shared prefix, then this section's task, then — for a
   // model that reads images — its figure slides, after all the text so the
-  // text before them still matches the cache. A refusal of images is
-  // remembered and the section is asked again in text alone.
+  // text before them still matches the cache. Each failure that a smaller
+  // request could get past steps down once: images refused (or the request
+  // carrying them refused) → text alone; text too big for the endpoint →
+  // the section's own slides with the old, smaller budget.
   async function section(plan: DeckPlan, k: number, render: (page: number) => Promise<Uint8Array | null>): Promise<{ body: string; cut: boolean }> {
     const s = plan.sections[k]!;
     const system = sectionSystem(plan.deckName, plan.pageCount, figureSlides(plan.deckText), reader);
     const prefix = deckPrefix(plan, s.slides);
-    const task = (images: number[]) => `=== YOUR SECTION ===
+    const task = (images: number[], whole: boolean) => `=== YOUR SECTION ===
 Write section ${s.number} in full depth.
 Heading (use it verbatim as your first line): ### ${s.number} ${s.heading}
 What it must teach: ${s.covers}
-It draws on slides ${s.slides}: cite mainly those.${prefix.whole ? "" : " Only some of the deck's slides are shown above; cite only those."}
-Teach only this section's part. For an idea another section of the outline covers, refer to that section by number instead of teaching it again. Use "#### " subheadings without numbers.${images.length ? `
+It draws on slides ${s.slides}: cite mainly those.${whole ? "" : " Only some of the deck's slides are shown above; cite only those."}
+Teach fully everything "What it must teach" names, even where another section of the outline touches it. Only for an idea that is not in that line and is another section's, point to that section by its heading in italics ("see *<its heading>*") instead of teaching it again; never by a number. Use "#### " subheadings without numbers.${images.length ? `
 After this text come images of ${images.length === 1 ? "a figure slide" : `${images.length} figure slides`} in your range: ${images.map((n, i) => `Image ${i + 1} is slide ${n}`).join(", ")}. Describe each figure only from what its image shows, and embed it where it belongs as ![short caption](slide-img:${plan.deckName}#N), with N its slide number.` : ""}`;
 
-    // Rendered one at a time; the base64 lives only as long as this call.
-    const shots: { page: number; url: string }[] = [];
-    if (plan.pageImage && !refusesImages(cfg)) {
+    let cut = false;
+    const ask = (user: string | ContentPart[], maxTokens: number, giveUp: (err: unknown) => boolean) => withRetry(
+      () => chatText(cfg, system, user, { maxTokens, temperature: 0.3, onCut: () => { cut = true; } }),
+      3, (err) => isImageRefusal(err) || isTooBig(err) || giveUp(err),
+    );
+    const textOnly = (): Promise<string> => ask(`${prefix.text}\n\n${task([], prefix.whole)}`, SECTION_TOKENS, () => false);
+    const windowed = (): Promise<string> => {
+      const small = deckPrefix(plan, s.slides, true);
+      return ask(`${small.text}\n\n${task([], false)}`, WINDOW_TOKENS, () => false);
+    };
+    // Null when no figure slide of this section could be sent.
+    const withImages = (): Promise<string | null> => imageSlot(async () => {
+      const shots: { page: number; url: string }[] = [];
+      let bytes = 0;
       for (const page of sectionFigures(plan, s)) {
         const png = await render(page);
-        if (png?.length) shots.push({ page, url: dataUrl(png) });
+        if (!png?.length || png.length > IMAGE_BYTES || bytes + png.length > SECTION_IMAGE_BYTES) continue;
+        bytes += png.length;
+        shots.push({ page, url: dataUrl(png) });
       }
-    }
-    let cut = false;
-    const ask = (user: string | ContentPart[]) => withRetry(
-      () => chatText(cfg, system, user, { maxTokens: 16_000, temperature: 0.3, onCut: () => { cut = true; } }),
-      3, isImageRefusal,
-    );
-    const textOnly = `${prefix.text}\n\n${task([])}`;
-    let body: string;
-    if (shots.length) {
+      if (!shots.length) return null;
+      return ask([
+        { type: "text", text: `${prefix.text}\n\n${task(shots.map((x) => x.page), prefix.whole)}` },
+        ...shots.map((x): ContentPart => ({ type: "image_url", image_url: { url: x.url } })),
+      ], SECTION_TOKENS, isRefusedRequest);
+    });
+    const textThenSmaller = async (): Promise<string> => {
       try {
-        body = await ask([
-          { type: "text", text: `${prefix.text}\n\n${task(shots.map((x) => x.page))}` },
-          ...shots.map((x): ContentPart => ({ type: "image_url", image_url: { url: x.url } })),
-        ]);
+        return await textOnly();
       } catch (err) {
-        if (!isImageRefusal(err)) throw err;
-        rememberImageRefusal(cfg);
-        body = await ask(textOnly);
+        if (!prefix.whole || !isTooBig(err)) throw err;
+        return windowed();
       }
+    };
+
+    let body: string;
+    if (plan.pageImage && !refusesImages(cfg) && sectionFigures(plan, s).length) {
+      let got: string | null;
+      try {
+        got = await withImages();
+      } catch (err) {
+        if (!isImageRefusal(err) && !isRefusedRequest(err)) throw err;
+        got = null;
+      }
+      body = got ?? await textThenSmaller();
     } else {
-      body = await ask(textOnly);
+      body = await textThenSmaller();
     }
     const md = repairMermaidBlocks(normalizeFences(body.trim())).trim();
     if (!md) throw new Error("the model wrote nothing for this section");
+    if (!hasProse(md)) throw new Error(cut ? "the section was cut off before any of it was written" : "the model wrote only a heading for this section");
     return { body: md, cut };
   }
 
@@ -313,19 +372,27 @@ Then 6 to 10 bullets, each a point a student must remember for an exam, in a sen
       { maxTokens: 8000, temperature: 0.3 },
     ), 2);
     const md = repairMermaidBlocks(normalizeFences(body.trim())).trim();
-    if (!md) throw new Error("the model wrote nothing for the key points");
+    if (!md || !hasProse(md)) throw new Error("the model wrote nothing for the key points");
     return md;
   }
 
   return {
+    // Null when no usable outline came back: unusable, empty, cut off or
+    // out of time, twice. Any other failure (a refused key, a dead host)
+    // still throws, for the caller to report.
     async outline(deckName: string, deckText: string, pageCount: number): Promise<GuideOutline | null> {
-      // An outline that came back unusable, empty or cut off gets one more try.
+      // One more try; with twice the budget when the first ran out of it.
+      let budget = 12_000;
       for (let attempt = 0; attempt < 2; attempt++) {
         const raw = await chatJson(
           cfg, fetch, OUTLINE_SYSTEM,
           `Deck: ${deckName} (${pageCount} slides)\n\n=== DECK TEXT ===\n${outlineText(deckText)}`,
-          12_000,
-        ).catch((err) => { if (attempt === 0 && isNoAnswer(err)) return null; throw err; });
+          budget,
+        ).catch((err) => {
+          if (!isNoAnswer(err) && !isTimeout(err)) throw err;
+          if (isOutOfBudget(err)) budget *= 2;
+          return null;
+        });
         const parsed = Outline.safeParse(raw);
         if (parsed.success) return parsed.data;
       }

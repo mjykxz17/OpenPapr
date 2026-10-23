@@ -66,7 +66,10 @@ async function main(): Promise<void> {
       continue;
     }
 
-    const outline = await gen.outline(name, text, pageCount);
+    const outline = await gen.outline(name, text, pageCount).catch((err) => {
+      console.log(`  ${name}: ${String(err instanceof Error ? err.message : err).slice(0, 120)}`);
+      return null;
+    });
     if (!outline) {
       console.log(`  ${name}: outline failed, skipping`);
       continue;

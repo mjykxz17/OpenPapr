@@ -127,9 +127,13 @@ export async function generateModuleGuide(opts: {
 
     progress.stage = `Planning ${name}`;
     report();
-    const outline = await gen.outline(name, text, pageCount);
+    // One deck's outline failing skips that deck, never the whole run and
+    // the chapters already written in it.
+    let why = "";
+    const outline = await gen.outline(name, text, pageCount)
+      .catch((err) => { why = ` (${String(err instanceof Error ? err.message : err).slice(0, 80)})`; return null; });
     if (!outline) {
-      problems.push(`${name}: outline failed`);
+      problems.push(`${name}: outline failed${why}`);
       progress.decksDone++;
       report();
       continue;
