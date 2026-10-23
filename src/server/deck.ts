@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { limiter, onceMap, touch, writeAtomic } from "./io";
-import { optimizePdf } from "./pdf-optimize";
+import { markerPath, optimizePdf } from "./pdf-optimize";
+import { ensurePdf } from "./files";
 import { renderPdfPage } from "@/lib/pdf-render";
 import { dirname, join } from "node:path";
 import { eq } from "drizzle-orm";
@@ -22,22 +23,26 @@ export const deckStem = (name: string) => name.replace(/\.[^.]+$/, "");
 // wiped on every deploy. Keying off cwd meant the cache never hit and every
 // deck was re-downloaded from Canvas on every request.
 //
-// The path must stay a file directly inside the course's folder: a name with
-// a slash in it would otherwise reach another course's cache.
+// A Canvas file name is one path segment here: a slash or backslash in it
+// would otherwise reach another course's folder, so they become "_".
 export function deckCachePath(
   courseId: number,
   name: string,
   dbPath: string = process.env.DATABASE_PATH ?? "data/openpapr.db",
 ): string {
   const dir = join(dirname(dbPath), "deck-cache", String(courseId));
-  const path = join(dir, `${deckStem(name)}.pdf`);
+  const path = join(dir, `${deckStem(name).replace(/[/\\\0]/g, "_")}.pdf`);
+  // Cannot happen after the line above; kept so a later change cannot
+  // quietly undo it.
   if (dirname(path) !== dir) throw new Error("deck name is not a plain file name");
   return path;
 }
 
 // A deck name arrives in a query string. It names a file, never a path.
+// Dots are fine ("Recap...pdf"): the name is only ever matched against the
+// module's own files, and the path is built from the stored one.
 export const safeDeckName = (name: string) =>
-  name.length > 0 && name.length <= 300 && !/[/\\\0]/.test(name) && !name.includes("..");
+  name.length > 0 && name.length <= 300 && !/[/\\\0]/.test(name);
 
 type Module = typeof modules.$inferSelect;
 type FileRow = typeof files.$inferSelect;
@@ -62,22 +67,34 @@ export function resolveDeck(db: Db, userId: number, moduleId: number, name: stri
   rows.sort((a, b) => rank(a) - rank(b) || b.discoveredAt - a.discoveredAt || b.id - a.id);
   const file = rows[0];
   if (!file) return { error: "deck not found", status: 404 };
-  try {
-    return { mod, file, path: deckCachePath(mod.canvasCourseId, file.displayName) };
-  } catch {
-    // A Canvas file whose own name has a slash in it.
-    return { error: "deck not found", status: 404 };
-  }
+  return { mod, file, path: deckCachePath(mod.canvasCourseId, file.displayName) };
 }
+
+// The cache is filed by name, but two students' files can share a name and
+// not their slides (a section's own "Tutorial 1", or a deck re-uploaded
+// since). A "<pdf>.src" sidecar, the same one files.ts keeps, says which
+// Canvas upload a cached copy came from, and a copy is only used for that
+// upload. One with no sidecar was cached before uploads were tracked, by
+// whoever asked first, so it is fetched again with the caller's own token.
+const sourceOf = (path: string) => {
+  try { return readFileSync(`${path}.src`, "utf8").trim(); } catch { return null; }
+};
+export const cachedCopyIsOf = (path: string, file: Pick<FileRow, "canvasFileId">) =>
+  existsSync(path) && sourceOf(path) === String(file.canvasFileId);
 
 // Decks are large — IFS4103's are 22MB — and a single guide page can request
 // thirty slide images from one deck. Writing the download to the volume turns
 // that into one fetch instead of thirty.
 // The cached copy is compressed before it is used (see pdf-optimize), so the
 // bytes handed back are the compressed ones when that worked.
-async function cacheDeck(path: string, bytes: Uint8Array): Promise<Uint8Array> {
+async function cacheDeck(path: string, file: FileRow, bytes: Uint8Array): Promise<Uint8Array> {
   try {
+    // The sidecar goes first and comes back last, so the new bytes are never
+    // taken for the old upload's.
+    rmSync(`${path}.src`, { force: true });
+    rmSync(markerPath(path), { force: true });
     writeAtomic(path, bytes);
+    writeFileSync(`${path}.src`, String(file.canvasFileId));
     const r = await optimizePdf(path);
     if (r.replaced) return new Uint8Array(readFileSync(path));
   } catch {
@@ -86,7 +103,8 @@ async function cacheDeck(path: string, bytes: Uint8Array): Promise<Uint8Array> {
   return bytes;
 }
 
-export type DeckResult = { bytes: Uint8Array; deck: DeckRef } | Failure;
+// `onDisk` says the copy at deck.path is these bytes, so it can be streamed.
+export type DeckResult = { bytes: Uint8Array; deck: DeckRef; onDisk: boolean } | Failure;
 
 // Loads a module's slide deck as PDF bytes for the deck/slide routes.
 // Resolution order: (1) a locally cached/converted PDF, then (2) the matching
@@ -100,18 +118,29 @@ export async function loadDeckPdf(db: Db, userId: number, moduleId: number, name
 }
 
 async function loadResolved(db: Db, userId: number, deck: DeckRef): Promise<DeckResult> {
-  if (existsSync(deck.path)) { touch(deck.path); return { bytes: new Uint8Array(readFileSync(deck.path)), deck }; }
+  if (cachedCopyIsOf(deck.path, deck.file)) {
+    const bytes = new Uint8Array(readFileSync(deck.path));
+    // Asked again after reading: a classmate's download may have replaced
+    // the file in between (cacheDeck drops the sidecar before it writes).
+    if (sourceOf(deck.path) === String(deck.file.canvasFileId)) {
+      touch(deck.path);
+      return { bytes, deck, onDisk: true };
+    }
+  }
+  // A PowerPoint's PDF is its converted copy, which files.ts makes and keeps
+  // current (converting again only when it has to).
+  if (fileKind(deck.file.displayName) !== "pdf") {
+    const pdf = await ensurePdf(db, userId, { mod: deck.mod, file: deck.file });
+    if ("error" in pdf) return pdf;
+    return { bytes: new Uint8Array(readFileSync(pdf.path)), deck, onDisk: pdf.path === deck.path };
+  }
   // A guide page asks for dozens of slides of the same deck at once; they
   // share one download instead of each fetching the whole deck.
-  const res = await deckOnce(deck.path, () => fetchDeck(db, userId, deck));
-  return "error" in res ? res : { bytes: res.bytes, deck };
+  const res = await deckOnce(`${deck.path}#${deck.file.canvasFileId}`, () => fetchDeck(db, userId, deck));
+  return "error" in res ? res : { bytes: res.bytes, deck, onDisk: cachedCopyIsOf(deck.path, deck.file) };
 }
 
 async function fetchDeck(db: Db, userId: number, { mod, file, path: cached }: DeckRef): Promise<{ bytes: Uint8Array } | Failure> {
-  // Only a PDF is downloaded straight into the deck cache. A PowerPoint gets
-  // there by being converted when the file is opened or a guide is written.
-  if (fileKind(file.displayName) !== "pdf") return { error: "deck not found", status: 404 };
-
   const env = loadEnv();
   const user = db.select().from(users).where(eq(users.id, userId)).get();
   if (!user?.canvasTokenEnc) return { error: "no canvas token", status: 502 };
@@ -124,7 +153,7 @@ async function fetchDeck(db: Db, userId: number, { mod, file, path: cached }: De
     // Download urls are signed and expire, so the row holds the id and the
     // url is fetched fresh here.
     const fresh = await canvas.getFile(file.canvasFileId);
-    return { bytes: await cacheDeck(cached, await canvas.downloadFile(fresh.url)) };
+    return { bytes: await cacheDeck(cached, file, await canvas.downloadFile(fresh.url)) };
   } catch {
     // Fall through to the listing — the file may have been removed.
   }
@@ -134,7 +163,7 @@ async function fetchDeck(db: Db, userId: number, { mod, file, path: cached }: De
     const listed = await canvas.listCourseFiles(mod.canvasCourseId);
     const found = listed.find((f) => isPdfFile(f) && deckStem(f.display_name).toLowerCase() === want);
     if (!found) return { error: "deck not found", status: 404 };
-    return { bytes: await cacheDeck(cached, await canvas.downloadFile(found.url)) };
+    return { bytes: await cacheDeck(cached, file, await canvas.downloadFile(found.url)) };
   } catch {
     return { error: "canvas unavailable", status: 502 };
   }
@@ -144,10 +173,12 @@ async function fetchDeck(db: Db, userId: number, { mod, file, path: cached }: De
 // means parsing the whole PDF (IFS4103's decks are 22MB), and the slide
 // panel asks for the current page plus a strip of thumbnails on every page
 // turn, so without this each turn re-parsed the deck half a dozen times.
-// The "f" marks images drawn with pdf.js's own standard fonts: ones cached
-// before that came out in a serif fallback and are left for eviction.
-export const slidePngPath = (courseId: number, name: string, page: number, scale: number, dbPath?: string) =>
-  deckCachePath(courseId, name, dbPath).replace(/\.pdf$/, `-pages/${page}@${scale}f.png`);
+// Each image is named by the Canvas upload it was drawn from, so a
+// classmate's same-named deck, or the copy a re-upload replaced, is never
+// served for this one. Images from before that (no id in the name) were also
+// drawn in a serif fallback font, and are left for eviction.
+export const slidePngPath = (deck: Pick<DeckRef, "path" | "file">, page: number, scale: number) =>
+  deck.path.replace(/\.pdf$/, `-pages/${page}@${scale}-${deck.file.canvasFileId}.png`);
 
 export type SlideResult = { png: Uint8Array } | Failure;
 
@@ -160,7 +191,7 @@ const renderOnce = onceMap<SlideResult>();
 export async function renderCachedSlide(db: Db, userId: number, moduleId: number, name: string, page: number, scale: number): Promise<SlideResult> {
   const ref = resolveDeck(db, userId, moduleId, name);
   if ("error" in ref) return ref;
-  const path = slidePngPath(ref.mod.canvasCourseId, ref.file.displayName, page, scale);
+  const path = slidePngPath(ref, page, scale);
   if (existsSync(path)) return { png: new Uint8Array(readFileSync(path)) };
 
   return renderOnce(path, async () => {

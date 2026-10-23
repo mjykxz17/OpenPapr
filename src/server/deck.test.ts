@@ -1,10 +1,24 @@
-import { describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { describe, expect, it, vi } from "vitest";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDb } from "@/db/client";
 import { files, modules, users } from "@/db/schema";
 import { deckCachePath, deckStem, loadDeckPdf, renderCachedSlide, resolveDeck, safeDeckName, slidePngPath } from "./deck";
+
+// Canvas, as seen by a student with a token: every upload's bytes say which
+// upload they are.
+vi.mock("@/lib/env", () => ({ loadEnv: () => ({ CANVAS_BASE_URL: "https://canvas.test", SECRET_KEY: "k" }) }));
+vi.mock("@/lib/crypto", () => ({ decrypt: () => "token" }));
+vi.mock("@/connectors/canvas/client", () => ({
+  isPdfFile: () => true,
+  createCanvasClient: () => ({
+    getFile: async (id: number) => ({ url: `upload-${id}` }),
+    downloadFile: async (url: string) => new Uint8Array(Buffer.from(`canvas ${url}`)),
+    listCourseFiles: async () => [],
+  }),
+}));
+vi.mock("./pdf-optimize", () => ({ markerPath: (p: string) => `${p}.opt`, optimizePdf: async () => ({ replaced: false }) }));
 
 describe("deckStem", () => {
   it("strips the extension", () => {
@@ -54,16 +68,29 @@ describe("deck names from a request", () => {
   // A deck name comes in a query string and is joined into a path on the
   // volume, where every course's cache lives side by side.
   it("refuses anything that could be a path", () => {
-    for (const bad of ["../222/Lecture 1", "..", "a/b", "a\\b", "x\0y", "/etc/passwd", "", "Lecture..1"]) {
+    for (const bad of ["../222/Lecture 1", "a/b", "a\\b", "x\0y", "/etc/passwd", ""]) {
       expect(safeDeckName(bad)).toBe(false);
     }
     expect(safeDeckName("Lecture 1 (Intro).pdf")).toBe(true);
   });
 
+  // The name is only matched against the module's own files, so dots in a
+  // real deck's title are not a reason to refuse it.
+  it("takes a title with dots in it", () => {
+    for (const ok of ["Week 5 - Recap...pdf", "Lecture 1..2", "cs4239.week1.pptx"]) expect(safeDeckName(ok)).toBe(true);
+  });
+
   it("never builds a cache path outside the course's folder", () => {
-    expect(() => deckCachePath(111, "../222/Lecture 1.pdf", "/data/x.db")).toThrow();
-    expect(() => deckCachePath(111, "sub/deck.pdf", "/data/x.db")).toThrow();
-    expect(() => slidePngPath(111, "../222/Lecture 1.pdf", 1, 2, "/data/x.db")).toThrow();
+    // A Canvas file whose own name has a slash in it stays one file in the
+    // folder, so the file viewer and the worker can still cache it.
+    expect(deckCachePath(111, "../222/Lecture 1.pdf", "/data/x.db")).toBe("/data/deck-cache/111/.._222_Lecture 1.pdf");
+    expect(deckCachePath(111, "sub\\deck.pdf", "/data/x.db")).toBe("/data/deck-cache/111/sub_deck.pdf");
+    expect(deckCachePath(111, "...pdf", "/data/x.db")).toBe("/data/deck-cache/111/...pdf");
+  });
+
+  it("names a slide image by the upload it was drawn from", () => {
+    const deck = { path: "/data/deck-cache/111/L1.pdf", file: { canvasFileId: 42 } } as Parameters<typeof slidePngPath>[0];
+    expect(slidePngPath(deck, 3, 2)).toBe("/data/deck-cache/111/L1-pages/3@2-42.png");
   });
 });
 
@@ -87,13 +114,14 @@ describe("resolveDeck / loadDeckPdf / renderCachedSlide", () => {
       { moduleId: 2, canvasFileId: 3, displayName: "Section B.pdf", discoveredAt: 0 },
       { moduleId: 3, canvasFileId: 4, displayName: "Lecture 1.pdf", discoveredAt: 0 },
     ]).run();
-    const put = (course: number, file: string, body: string) => {
+    const put = (course: number, file: string, body: string, src: number) => {
       mkdirSync(join(dir, "deck-cache", String(course)), { recursive: true });
       writeFileSync(join(dir, "deck-cache", String(course), file), body);
+      writeFileSync(join(dir, "deck-cache", String(course), `${file}.src`), String(src));
     };
-    put(111, "Lecture 1.pdf", "mine");
-    put(111, "Section B.pdf", "theirs");
-    put(222, "Lecture 1.pdf", "other course");
+    put(111, "Lecture 1.pdf", "mine", 1);
+    put(111, "Section B.pdf", "theirs", 3);
+    put(222, "Lecture 1.pdf", "other course", 4);
     const restore = () => {
       if (prev === undefined) delete process.env.DATABASE_PATH;
       else process.env.DATABASE_PATH = prev;
@@ -148,6 +176,65 @@ describe("resolveDeck / loadDeckPdf / renderCachedSlide", () => {
     try {
       db.insert(files).values({ moduleId: 1, canvasFileId: 9, displayName: "Lecture 1.pptx", discoveredAt: 5 }).run();
       expect(resolveDeck(db, 1, 1, "Lecture 1")).toMatchObject({ file: { canvasFileId: 1 } });
+    } finally { restore(); }
+  });
+
+  // Student 2's "Lecture 1.pdf" in course 111 is another upload (id 2) than
+  // the copy student 1 cached (id 1): a section's own deck, say.
+  it("does not serve a classmate's same-named copy of a different upload", async () => {
+    const { db, dir, restore } = setup();
+    try {
+      db.update(users).set({ canvasTokenEnc: "enc" }).run();
+      const res = await loadDeckPdf(db, 2, 2, "Lecture 1");
+      if ("error" in res) throw new Error(res.error);
+      expect(Buffer.from(res.bytes).toString()).toBe("canvas upload-2");
+      expect(res.onDisk).toBe(true);
+      expect(readFileSync(join(dir, "deck-cache", "111", "Lecture 1.pdf.src"), "utf8")).toBe("2");
+      // And back again for student 1: their own upload, not student 2's.
+      const mine = await loadDeckPdf(db, 1, 1, "Lecture 1");
+      if ("error" in mine) throw new Error(mine.error);
+      expect(Buffer.from(mine.bytes).toString()).toBe("canvas upload-1");
+    } finally { restore(); }
+  });
+
+  it("without a token, a different upload's copy is refused rather than served", async () => {
+    const { db, restore } = setup();
+    try {
+      expect(await loadDeckPdf(db, 2, 2, "Lecture 1")).toEqual({ error: "no canvas token", status: 502 });
+    } finally { restore(); }
+  });
+
+  it("fetches again a copy cached before uploads were tracked", async () => {
+    const { db, dir, restore } = setup();
+    try {
+      rmSync(join(dir, "deck-cache", "111", "Lecture 1.pdf.src"));
+      db.update(users).set({ canvasTokenEnc: "enc" }).run();
+      const res = await loadDeckPdf(db, 1, 1, "Lecture 1");
+      if ("error" in res) throw new Error(res.error);
+      expect(Buffer.from(res.bytes).toString()).toBe("canvas upload-1");
+    } finally { restore(); }
+  });
+
+  it("serves a slide image only to the upload it was drawn from", async () => {
+    const { db, restore } = setup();
+    try {
+      const mine = resolveDeck(db, 1, 1, "Lecture 1");
+      if ("error" in mine) throw new Error(mine.error);
+      const png = slidePngPath(mine, 1, 2);
+      mkdirSync(join(png, ".."), { recursive: true });
+      writeFileSync(png, "slide of upload 1");
+      expect(await renderCachedSlide(db, 1, 1, "Lecture 1", 1, 2)).toEqual({ png: new Uint8Array(Buffer.from("slide of upload 1")) });
+      // Student 2's deck of the same name is drawn from their own upload (here
+      // they have no token, so there is nothing to draw), never shown student 1's.
+      expect(await renderCachedSlide(db, 2, 2, "Lecture 1", 1, 2)).toEqual({ error: "no canvas token", status: 502 });
+    } finally { restore(); }
+  });
+
+  it("finds a deck whose title has dots in it", () => {
+    const { db, restore } = setup();
+    try {
+      db.insert(files).values({ moduleId: 1, canvasFileId: 8, displayName: "Week 5 - Recap...pdf", discoveredAt: 0 }).run();
+      expect(resolveDeck(db, 1, 1, "Week 5 - Recap..")).toMatchObject({ file: { canvasFileId: 8 } });
     } finally { restore(); }
   });
 });

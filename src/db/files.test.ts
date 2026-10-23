@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createDb } from "./client";
 import { files, modules, users } from "./schema";
-import { findModuleFileByStem, upsertModuleFiles } from "./repo";
+import { upsertModuleFiles } from "./repo";
 
 const setup = () => {
   const db = createDb(":memory:");
@@ -52,34 +52,6 @@ describe("upsertModuleFiles", () => {
     upsertModuleFiles(db, 1, [f(1, "deck.pdf", true)], 100);
     upsertModuleFiles(db, 1, [f(1, "deck.pdf", false)], 200);
     expect(db.select().from(files).all()[0]!.hidden).toBe(false);
-  });
-});
-
-describe("findModuleFileByStem", () => {
-  it("matches on the filename stem, ignoring extension and case", () => {
-    const db = setup();
-    upsertModuleFiles(db, 1, [f(7, "IFS4103-Lect-1-v1-3.pdf")], 100);
-    expect(findModuleFileByStem(db, 1, "ifs4103-lect-1-v1-3")?.canvasFileId).toBe(7);
-    expect(findModuleFileByStem(db, 1, "IFS4103-Lect-1-v1-3.pdf")?.canvasFileId).toBe(7);
-  });
-
-  it("returns undefined when nothing matches", () => {
-    const db = setup();
-    upsertModuleFiles(db, 1, [f(7, "Lect-1.pdf")], 100);
-    expect(findModuleFileByStem(db, 1, "Lect-9")).toBeUndefined();
-  });
-
-  it("prefers a visible file over a hidden one with the same stem", () => {
-    const db = setup();
-    upsertModuleFiles(db, 1, [f(1, "deck.pdf", true), f(2, "deck.pdf", false)], 100);
-    expect(findModuleFileByStem(db, 1, "deck")?.canvasFileId).toBe(2);
-  });
-
-  it("does not reach across modules", () => {
-    const db = setup();
-    db.insert(modules).values({ userId: 1, canvasCourseId: 999, code: "OTHER", name: "Other" }).run();
-    upsertModuleFiles(db, 2, [f(7, "Lect-1.pdf")], 100);
-    expect(findModuleFileByStem(db, 1, "Lect-1")).toBeUndefined();
   });
 });
 

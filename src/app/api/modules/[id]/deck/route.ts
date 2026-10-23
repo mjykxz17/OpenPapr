@@ -23,9 +23,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // The file's stored name, never the one in the query string.
   const filename = `${deckStem(res.deck.file.displayName).replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_")}.pdf`;
   // Stream the cached copy (with ranges) rather than holding another copy of
-  // a 20MB deck in memory for the response.
+  // a 20MB deck in memory for the response. Only when the file there is this
+  // upload's: a classmate's same-named deck may sit at the same path.
   const cached = res.deck.path;
-  if (existsSync(cached)) {
+  if (res.onDisk && existsSync(cached)) {
     const s = statSync(cached);
     return streamFile({ path: cached, size: s.size, mtimeMs: s.mtimeMs }, request, {
       "Content-Type": "application/pdf",

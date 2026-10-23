@@ -95,19 +95,6 @@ export function listModuleFiles(db: Db, moduleId: number) {
     .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { numeric: true, sensitivity: "base" }));
 }
 
-const stemOf = (name: string) => name.replace(/\.[^.]+$/, "").toLowerCase();
-
-// Looks a deck up by filename stem, preferring a listed file over a hidden one
-// when both carry the same name.
-export function findModuleFileByStem(db: Db, moduleId: number, name: string) {
-  const want = stemOf(name);
-  const rows = db.select().from(files).where(eq(files.moduleId, moduleId)).all()
-    .filter((r) => stemOf(r.displayName) === want);
-  // A deck re-uploaded under the same name: the newest upload is the deck.
-  rows.sort((a, b) => b.discoveredAt - a.discoveredAt || b.id - a.id);
-  return rows.find((r) => !r.hidden) ?? rows[0];
-}
-
 // --- sign-in identity ---------------------------------------------------
 // Set once so the Canvas token never has to be pasted again. Returns false if
 // the name is taken by somebody else.
