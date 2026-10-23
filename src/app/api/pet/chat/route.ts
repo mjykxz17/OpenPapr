@@ -15,13 +15,14 @@ import { createManualTask } from "@/server/tasks";
 import { endOfSgtDay } from "@/lib/sgt";
 import { dayLabel } from "@/lib/format-date";
 import { retrieve } from "@/server/retrieve";
-import { answerFromMaterial, isFollowUp, previousQuestion, type SourceRef } from "@/server/ask";
+import { answerFromMaterial, isFollowUp, previousQuestion, sentTurns, type SourceRef, type Turn } from "@/server/ask";
 
 export const dynamic = "force-dynamic";
 
 // Ask Papi something, inside a conversation. The conversation is stored, so
 // its earlier turns give the model context and the student can come back to
-// it. No sessionId starts a new one. With an AI provider the question is
+// it. No sessionId starts a new one. The shared demo's conversations are not
+// stored, so it sends `earlier` (its last turns) instead. With an AI provider the question is
 // answered from a sheet of the student's own facts and the passages of their
 // material that clear the relevance floor; without one, simple date
 // questions still get an answer from the rules.
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "expected a JSON body" }, { status: 415 });
   }
   if (!rateLimit(`pet:${userId}`, 40, 10 * 60_000)) return NextResponse.json({ reply: "I need a little breather — too many questions at once. Try again in a few minutes?" });
-  let body: { message?: unknown; sessionId?: unknown; moduleId?: unknown };
+  let body: { message?: unknown; sessionId?: unknown; moduleId?: unknown; earlier?: unknown };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: "invalid body" }, { status: 400 }); }
   const question = typeof body.message === "string" ? body.message.trim().slice(0, 1000) : "";
   if (!question) return NextResponse.json({ error: "nothing to answer" }, { status: 400 });
@@ -58,7 +59,10 @@ export async function POST(request: Request) {
   const cfg = cfgForUser(db, userId, now);
   const mods = db.select().from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all();
   const codes = mods.map((m) => m.code);
-  const earlierTurns = sessionId !== null ? (getChat(db, userId, sessionId)?.messages ?? []) : [];
+  // The demo's chats are never stored (see below), so its browser sends the
+  // turns so far itself; without them "why?" would have nothing to lean on.
+  const earlierTurns: Turn[] = sessionId !== null ? (getChat(db, userId, sessionId)?.messages ?? [])
+    : user?.isDemo ? sentTurns(body.earlier) : [];
 
   // "Remind me to …" becomes a task straight away, no model needed.
   if (isAddRequest(question)) {

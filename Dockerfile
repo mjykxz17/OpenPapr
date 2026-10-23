@@ -8,7 +8,12 @@ COPY package*.json ./
 # esbuild binaries without their optional flag. Same reason CI uses npm install.
 RUN npm install --no-audit --no-fund
 COPY . .
-RUN npm run build
+# Then only what runs is kept: the worker bundle (dist/) and the standalone
+# server load runtime packages from node_modules, never the test, type or
+# build tools (playwright, vitest, typescript, esbuild, tsx), which were most
+# of its 1GB. Next's compiler binaries (@next/swc-*, 170MB) are only for
+# building: the standalone server's own trace leaves them out.
+RUN npm run build && npm prune --omit=dev --no-audit --no-fund && rm -rf node_modules/@next/swc-*
 
 FROM node:22-alpine
 WORKDIR /app
@@ -24,11 +29,20 @@ ENV SOFFICE_BIN=/usr/bin/soffice
 # own (src/lib/ocr.ts). Alpine names: the engine and its English data.
 RUN apk add --no-cache tesseract-ocr tesseract-ocr-data-eng
 # Litestream backs the database up to object storage (litestream.yml,
-# start.sh). A static binary, pinned and checked against its published sum.
+# start.sh). A static binary, pinned and checked against its published sum
+# (the release's checksums.txt), for the machine the image is built for:
+# Fly builds amd64; a plain `docker build` on an Apple Silicon Mac is arm64.
+ARG TARGETARCH
 ARG LITESTREAM_VERSION=0.5.17
-ARG LITESTREAM_SHA256=cfb371176d164437ae869f8351cfde49bd1804ae71c61923f75c9cba9c9c006d
-RUN wget -qO /tmp/litestream.tar.gz "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-x86_64.tar.gz" \
- && echo "${LITESTREAM_SHA256}  /tmp/litestream.tar.gz" | sha256sum -c - \
+ARG LITESTREAM_SHA256_AMD64=cfb371176d164437ae869f8351cfde49bd1804ae71c61923f75c9cba9c9c006d
+ARG LITESTREAM_SHA256_ARM64=f8ca4a050095c1efbda2c4365172e61bf9d955ea0d9ac42f448b52e51819baa5
+RUN case "${TARGETARCH:-amd64}" in \
+      amd64) arch=x86_64; sum="$LITESTREAM_SHA256_AMD64" ;; \
+      arm64) arch=arm64; sum="$LITESTREAM_SHA256_ARM64" ;; \
+      *) echo "no Litestream build pinned for ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && wget -qO /tmp/litestream.tar.gz "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-${arch}.tar.gz" \
+ && echo "${sum}  /tmp/litestream.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/litestream.tar.gz -C /usr/local/bin litestream \
  && rm /tmp/litestream.tar.gz
 # Ghostscript compresses lecture decks (22.7MB -> 3.4MB on a real one) and

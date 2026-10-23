@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from "pdfjs-dist";
+import { viewerTakesKey } from "./keys";
 
 // PDFs render in the browser with PDF.js rather than as server-drawn images:
 // the server only streams byte ranges from its cache, so the first page of a
@@ -165,8 +166,7 @@ export function PdfViewer({ src, storageKey, preparing }: { src: string; storage
   const zoom = (factor: number) => setFit(Math.min(4, Math.max(0.25, Math.round(scale * factor * 100) / 100)));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (!viewerTakesKey(e)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "ArrowRight" || e.key === "PageDown" || (e.key === " " && fit === "page")) { e.preventDefault(); goTo(current + 1); }
       else if (e.key === "ArrowLeft" || e.key === "PageUp") { e.preventDefault(); goTo(current - 1); }

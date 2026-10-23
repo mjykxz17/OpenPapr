@@ -56,6 +56,19 @@ export function WeekWidget({ plan, today, size }: { plan: WeeklyPlan | null; tod
 }
 
 // --- Today's steps -------------------------------------------------------------
+// A step here opens its task on the Tasks page, where it is ticked off (with
+// Undo). A bullet rather than a box: a box asks to be ticked right here.
+function StepLink({ taskId, code, text, late = false, muted = false }: { taskId: number; code: string | null; text: string; late?: boolean; muted?: boolean }) {
+  return (
+    <Link href={`/tasks?task=t${taskId}`} className={`group flex min-w-0 items-baseline gap-2 no-underline ${muted ? "text-ink-2" : "text-ink"}`}>
+      <span aria-hidden className={`h-1.5 w-1.5 shrink-0 -translate-y-px rounded-full ${late ? "bg-danger" : muted ? "bg-line-2" : "bg-ink-3"}`} />
+      {code && <span className={`shrink-0 font-mono text-[12px] font-medium ${muted ? "" : "text-ink-2"}`}>{code}</span>}
+      <span className="truncate group-hover:text-accent group-hover:underline">{text}</span>
+      {late && <span className="sr-only">(late)</span>}
+    </Link>
+  );
+}
+
 export function TodayWidget({ view, size, tomorrow }: { view: TasksView; size: "S" | "W" | "L"; tomorrow?: string }) {
   const steps = view.today;
   // Room left on the large card shows what tomorrow holds, so the day after is never a surprise.
@@ -78,10 +91,8 @@ export function TodayWidget({ view, size, tomorrow }: { view: TasksView; size: "
       ) : (
         <ul className="flex flex-col gap-2 text-[13px]">
           {steps.slice(0, max).map((s) => (
-            <li key={`${s.taskId}-${s.id}`} className="flex min-w-0 items-baseline gap-2">
-              <span className={`h-3 w-3 shrink-0 translate-y-0.5 rounded-[3px] border ${s.late ? "border-danger" : "border-line-2"}`} />
-              {s.code && <span className="shrink-0 font-mono text-[12px] font-medium text-ink-2">{s.code}</span>}
-              <span className="truncate text-ink">{s.text}</span>
+            <li key={`${s.taskId}-${s.id}`}>
+              <StepLink taskId={s.taskId} late={s.late} code={s.code} text={s.text} />
             </li>
           ))}
           {steps.length > max && <li className="text-ink-3">+{steps.length - max} more</li>}
@@ -92,10 +103,8 @@ export function TodayWidget({ view, size, tomorrow }: { view: TasksView; size: "
           <p className="text-[11.5px] font-semibold uppercase tracking-[0.06em] text-ink-3">Tomorrow</p>
           <ul className="mt-2 flex flex-col gap-2 text-[13px]">
             {later.map((s) => (
-              <li key={`${s.taskId}-${s.id}`} className="flex min-w-0 items-baseline gap-2 text-ink-2">
-                <span className="h-3 w-3 shrink-0 translate-y-0.5 rounded-[3px] border border-dashed border-line-2" />
-                {s.code && <span className="shrink-0 font-mono text-[12px] font-medium">{s.code}</span>}
-                <span className="truncate">{s.text}</span>
+              <li key={`${s.taskId}-${s.id}`}>
+                <StepLink taskId={s.taskId} code={s.code} text={s.text} muted />
               </li>
             ))}
           </ul>

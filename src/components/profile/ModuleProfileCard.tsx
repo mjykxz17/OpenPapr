@@ -13,6 +13,9 @@ type Props = {
   status: Status;
   focus: WeeklyPlan["priorities"][number] | null;
   hasModel: boolean;
+  // The shared demo account: it can't add lecturers or staff pages (the
+  // server refuses), so it isn't offered them.
+  locked?: boolean;
 };
 
 const label = "text-[12px] font-semibold uppercase tracking-[0.06em] text-ink-3";
@@ -77,13 +80,13 @@ export function ModuleProfileCard(p: Props) {
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-ink-3">
                         {l.staffUrl && <a href={l.staffUrl} target="_blank" rel="noreferrer" className="hover:text-accent">Staff page ↗</a>}
                         {l.staffUrl && !l.hasPage && <span>(read on next rebuild)</span>}
-                        <LecturerPage moduleId={p.moduleId} name={l.name} staffUrl={l.staffUrl} />
+                        {!p.locked && <LecturerPage moduleId={p.moduleId} name={l.name} staffUrl={l.staffUrl} />}
                       </div>
                     </li>
                   );
                 })}
               </ul>
-              <div className="mt-2"><LecturerPage moduleId={p.moduleId} name={null} staffUrl={null} /></div>
+              {!p.locked && <div className="mt-2"><LecturerPage moduleId={p.moduleId} name={null} staffUrl={null} /></div>}
             </div>
 
             <div>

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/db/client";
 import { guideQuizzes, modules, quizAttempts } from "@/db/schema";
@@ -196,6 +196,22 @@ export async function chapterQuiz(
     .onConflictDoUpdate({ target: [guideQuizzes.moduleId, guideQuizzes.chapterHash], set: { questionsJson: json, createdAt: now } }).run();
   const set = quizSetKey(json);
   return { questions, cached: false, set, answers: answersFor(db, userId, moduleId, set) };
+}
+
+// Takes back answers: "Start over" (all of this set's) or "Try the ones I
+// missed again" (those questions), so a reload shows the quiz as the student
+// left it rather than bring the old answers back. Answers to an older set of
+// the chapter are left alone; nothing shows them.
+export function clearAnswers(
+  db: Db, userId: number, moduleId: number, a: { chapter: number; set: string; questions?: number[] },
+): { cleared: number } | { error: string; status: number } {
+  const found = findChapter(db, userId, moduleId, a.chapter);
+  if ("error" in found) return found;
+  const saved = savedSet(db, moduleId, found.hash);
+  if (!saved || saved.set !== a.set) return { error: "These questions have changed — reload the page.", status: 409 };
+  const mine = and(eq(quizAttempts.userId, userId), eq(quizAttempts.moduleId, moduleId), eq(quizAttempts.chapterHash, a.set));
+  const where = a.questions ? and(mine, inArray(quizAttempts.question, a.questions)) : mine;
+  return { cleared: db.delete(quizAttempts).where(where).run().changes };
 }
 
 export type AnswerResult = { correct: boolean; answer: number } | { error: string; status: number };

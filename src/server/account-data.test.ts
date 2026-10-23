@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDb } from "@/db/client";
-import { guideProgress, modules, quizAttempts, users } from "@/db/schema";
+import { canvasPageCache, guideProgress, modules, quizAttempts, users } from "@/db/schema";
 import { deleteAccount, exportAccount, wipeUserData } from "./account-data";
 
 const now = Date.parse("2026-10-01T10:00:00+08:00");
@@ -32,6 +32,17 @@ describe("account data and the quiz and reading tables", () => {
     expect(db.select().from(quizAttempts).all().map((r) => r.userId)).toEqual([2]);
     expect(db.select().from(guideProgress).all().map((r) => r.userId)).toEqual([2]);
     expect(db.select().from(users).all().map((u) => u.id)).toEqual([2]);
+  });
+
+  // The cache has no owner column: a course's pages go when its last student does.
+  it("removes cached Canvas pages of a course once nobody left takes it", () => {
+    const db = setup();
+    db.insert(modules).values({ userId: 1, canvasCourseId: 8, code: "CS2", name: "y" }).run();
+    db.insert(canvasPageCache).values([7, 8].map((courseId) => ({ courseId, pageUrl: "week-1", body: "<p>notes</p>", fetchedAt: now }))).run();
+    deleteAccount(db, 1);
+    expect(db.select().from(canvasPageCache).all().map((r) => r.courseId)).toEqual([7]);   // student 2 still takes 7
+    deleteAccount(db, 2);
+    expect(db.select().from(canvasPageCache).all()).toEqual([]);
   });
 
   // The demo reset wipes the account but keeps its user row.

@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, statSync, utimesSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -81,9 +82,65 @@ describe("pdfTextWithOcr", () => {
     await pdfTextWithOcr(scan, { runner, extract, cachePath, now: T + 60_000 });
     expect(recognise).toHaveBeenCalledTimes(4);                            // not straight away again
     failing = false;
-    expect(await pdfTextWithOcr(scan, { runner, extract, cachePath, now: T + 7 * 3_600_000 })).toContain("Page 2 says");
-    expect(recognise).toHaveBeenCalledTimes(8);
+    const again = await pdfTextWithOcr(scan, { runner, extract, cachePath, now: T + 7 * 3_600_000 });
+    expect(again).toContain("Page 2 says");
+    expect(again).toContain("Page 4 says");
+    expect(recognise).toHaveBeenCalledTimes(5);                            // only the page it lost
     expect(readFileSync(cachePath, "utf8")).toContain("Page 2 says");      // now it is
+    expect(existsSync(`${cachePath}.pages`)).toBe(false);                  // and the page log is done with
+  });
+
+  // A worker restarted halfway through a long scan (a deploy, the watchdog)
+  // carries on from the pages it had, and passes over the one it was on.
+  it("carries on a read that was cut short, without the page it died on", async () => {
+    const scan = new Uint8Array([7, 7, 3]);
+    const key = createHash("sha256").update(scan).digest("hex").slice(0, 16);
+    const { runner, recognise } = fakeRunner(5);
+    const cachePath = join(mkdtempSync(join(tmpdir(), "ocr-")), "deck.pdf.ocr.txt");
+    const said = (n: number) => `Page ${n} says binary search halves the interval each step`;
+    writeFileSync(`${cachePath}.pages`, [key, `{"b":[1,2,3,4,5]}`, `{"p":1}`, JSON.stringify({ p: 1, t: said(1) }), `{"p":2}`, JSON.stringify({ p: 2, t: said(2) }), `{"p":3}`, ""].join("\n"));
+    const extract = async () => scanText(5);
+    const T = 2_000_000_000;
+    const text = await pdfTextWithOcr(scan, { runner, extract, cachePath, now: T });
+    expect(recognise.mock.calls.map(([png]) => png[0])).toEqual([4, 5]);
+    for (const n of [1, 2, 4, 5]) expect(text).toContain(said(n));
+    expect(existsSync(cachePath)).toBe(false);                             // page 3 is still owed
+    // Later, only page 3 is read, and the whole deck is cached.
+    const whole = await pdfTextWithOcr(scan, { runner, extract, cachePath, now: T + 7 * 3_600_000 });
+    expect(recognise.mock.calls.map(([png]) => png[0])).toEqual([4, 5, 3]);
+    expect(whole).toContain(said(3));
+    expect(readFileSync(cachePath, "utf8")).toContain(said(3));
+  });
+
+  it("passes over a batch that died while it was being rendered", async () => {
+    const scan = new Uint8Array([7, 7, 4]);
+    const key = createHash("sha256").update(scan).digest("hex").slice(0, 16);
+    const { runner, recognise } = fakeRunner(10);
+    const cachePath = join(mkdtempSync(join(tmpdir(), "ocr-")), "deck.pdf.ocr.txt");
+    writeFileSync(`${cachePath}.pages`, `${key}\n{"b":[1,2,3,4,5,6,7,8]}\n`);
+    await pdfTextWithOcr(scan, { runner, extract: async () => scanText(10), cachePath });
+    expect(recognise.mock.calls.map(([png]) => png[0])).toEqual([9, 10]);
+  });
+
+  it("starts afresh when the page log is for another version of the deck", async () => {
+    const scan = new Uint8Array([7, 7, 5]);
+    const { runner, recognise } = fakeRunner(2);
+    const cachePath = join(mkdtempSync(join(tmpdir(), "ocr-")), "deck.pdf.ocr.txt");
+    writeFileSync(`${cachePath}.pages`, `0123456789abcdef\n{"p":1,"t":"old words"}\n{"p":2}\n`);
+    const text = await pdfTextWithOcr(scan, { runner, extract: async () => scanText(2), cachePath });
+    expect(recognise).toHaveBeenCalledTimes(2);
+    expect(text).not.toContain("old words");
+  });
+
+  // The enrichment lane's watchdog counts these: a long scan is not a stuck one.
+  it("tells everyone waiting on a read about each page it finishes", async () => {
+    const scan = new Uint8Array([7, 7, 6]);
+    const { runner } = fakeRunner(3);
+    const extract = async () => scanText(3);
+    const a = vi.fn(), b = vi.fn();
+    await Promise.all([pdfTextWithOcr(scan, { runner, extract, onProgress: a }), pdfTextWithOcr(scan, { runner, extract, onProgress: b })]);
+    expect(a).toHaveBeenCalledTimes(3);
+    expect(b).toHaveBeenCalledTimes(3);
   });
 
   it("reads one deck once when two readers ask at the same time, and marks the cache used", async () => {

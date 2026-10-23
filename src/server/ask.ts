@@ -82,6 +82,19 @@ export function isFollowUp(question: string): boolean {
 }
 export const previousQuestion = (turns: Turn[]): string | null => [...turns].reverse().find((m) => m.role === "user")?.content ?? null;
 
+// The conversation so far as the browser sent it, for a chat that is not
+// stored (the shared demo's): the last few turns, each cut to a sane length.
+// It only ever shapes the sender's own answer, so it is taken as given.
+export const SENT_TURNS = 8;
+export function sentTurns(raw: unknown): Turn[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(-SENT_TURNS).flatMap((t): Turn[] => {
+    const m = t as { role?: unknown; content?: unknown } | null;
+    if ((m?.role !== "user" && m?.role !== "assistant") || typeof m.content !== "string" || !m.content.trim()) return [];
+    return [{ role: m.role, content: m.content.slice(0, 2000) }];
+  });
+}
+
 // Questions about what the course teaches, as opposed to dates, logistics and
 // chat. Only these get "not in your material" when nothing matches; the rest
 // still go to the model with the student's facts. A question is logistics

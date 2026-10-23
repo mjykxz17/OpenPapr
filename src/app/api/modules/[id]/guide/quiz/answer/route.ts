@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/server/db";
 import { currentUserId } from "@/server/session";
 import { rateLimit } from "@/server/rate-limit";
-import { recordAnswer } from "@/server/guide-quiz";
+import { clearAnswers, recordAnswer } from "@/server/guide-quiz";
 
 export const dynamic = "force-dynamic";
 
@@ -25,5 +25,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!rateLimit(`quiz-answer:${userId}`, 300, 10 * 60_000)) return NextResponse.json({ error: "Slow down a little — try again in a minute." }, { status: 429 });
   const { id } = await params;
   const out = recordAnswer(getDb(), userId, Number(id), { chapter, set, question, chosen }, Date.now());
+  return "error" in out ? NextResponse.json({ error: out.error }, { status: out.status }) : NextResponse.json(out);
+}
+
+// Takes answers back: {chapter, set} for all of them ("Start over"), or with
+// `questions: [n, …]` for those ("Try the ones I missed again"). Replies
+// {cleared}. Like answering, open to the demo until its nightly reset.
+export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const userId = await currentUserId();
+  if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
+    return NextResponse.json({ error: "expected a JSON body" }, { status: 415 });
+  }
+  let body: { chapter?: unknown; set?: unknown; questions?: unknown };
+  try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: "invalid body" }, { status: 400 }); }
+  const chapter = int(body.chapter);
+  const set = typeof body.set === "string" && /^[0-9a-f]{32}$/.test(body.set) ? body.set : null;
+  const questions = body.questions === undefined ? undefined
+    : Array.isArray(body.questions) && body.questions.length <= 50 && body.questions.every((q) => int(q) !== null) ? body.questions as number[] : null;
+  if (chapter === null || set === null || questions === null) return NextResponse.json({ error: "invalid request" }, { status: 400 });
+  if (!rateLimit(`quiz-answer:${userId}`, 300, 10 * 60_000)) return NextResponse.json({ error: "Slow down a little — try again in a minute." }, { status: 429 });
+  const { id } = await params;
+  const out = clearAnswers(getDb(), userId, Number(id), { chapter, set, questions });
   return "error" in out ? NextResponse.json({ error: out.error }, { status: out.status }) : NextResponse.json(out);
 }

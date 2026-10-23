@@ -24,7 +24,8 @@ export const unpick = (p: Record<number, number>, i: number, j: number): Record<
 // "Test yourself" at the end of a chapter: a handful of multiple-choice
 // questions written from this chapter, each with why and the slide it is on.
 // Answers are saved as they are given, so coming back shows them and the
-// score; the ones missed last time come first. `start` changes when the
+// score, and taken back the same way by "Start over" and "Try the ones I
+// missed again"; the ones missed last time come first. `start` changes when the
 // toolbar's Quiz button is pressed.
 export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: number; chapter: number; label: string; start: number }) {
   const [qs, setQs] = useState<Q[] | null>(null);
@@ -102,8 +103,25 @@ export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: num
   const right = qs ? qs.filter((q, i) => picked[i] === q.answer).length : 0;
   const wrong = qs ? qs.map((_, i) => i).filter((i) => picked[i] !== undefined && picked[i] !== qs[i]!.answer) : [];
 
+  // Clears the answers here and on the server (all of them, or the given
+  // questions), so coming back doesn't bring them back. If the server can't
+  // be reached they come back here too, and the student is told.
+  function takeBack(questions?: number[]) {
+    setError(null);
+    const before = picked;
+    setPicked((p) => (questions ? Object.fromEntries(Object.entries(p).filter(([i]) => !questions.includes(Number(i)))) : {}));
+    void fetch(`/api/modules/${moduleId}/guide/quiz/answer`, {
+      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter, set, questions }),
+    }).then(async (r) => {
+      if (r.ok) return;
+      const d = (await r.json().catch(() => null)) as { error?: string } | null;
+      setPicked(before);
+      setError(d?.error ?? "Couldn't start over just now. Try again.");
+    }).catch(() => { setPicked(before); setError("Couldn't start over — you seem to be offline."); });
+  }
+
   function retryMissed() {
-    setPicked((p) => Object.fromEntries(Object.entries(p).filter(([i]) => !wrong.includes(Number(i)))));
+    takeBack(wrong);
     box.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -169,7 +187,7 @@ export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: num
                 Try the ones I missed again
               </button>
             )}
-            <button type="button" onClick={() => setPicked({})} className="h-9 rounded-md border border-line-2 px-3 text-[13px] text-ink hover:border-ink-3">Start over</button>
+            <button type="button" onClick={() => takeBack()} className="h-9 rounded-md border border-line-2 px-3 text-[13px] text-ink hover:border-ink-3">Start over</button>
             <button type="button" onClick={() => load(true)} disabled={busy} className="h-9 rounded-md border border-line-2 px-3 text-[13px] text-ink hover:border-ink-3 disabled:opacity-60">
               {busy ? "Writing…" : "New questions"}
             </button>

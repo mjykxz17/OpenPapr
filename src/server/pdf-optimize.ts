@@ -20,11 +20,17 @@ import { limiter } from "./io";
 export const markerPath = (pdf: string) => `${pdf}.opt`;
 export const isOptimized = (pdf: string) => existsSync(markerPath(pdf));
 
+// The paths below are runtime ones (system binaries, the volume's decks):
+// turbopackIgnore stops the build tracing the whole project into the
+// standalone output on their account.
 function findBin(envName: string, names: string[]): string | null {
   const fromEnv = process.env[envName];
-  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+  if (fromEnv && existsSync(/* turbopackIgnore: true */ fromEnv)) return fromEnv;
   for (const dir of ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"]) {
-    for (const n of names) if (existsSync(join(dir, n))) return join(dir, n);
+    for (const n of names) {
+      const bin = join(/* turbopackIgnore: true */ dir, n);
+      if (existsSync(/* turbopackIgnore: true */ bin)) return bin;
+    }
   }
   return null;
 }
@@ -84,7 +90,7 @@ async function optimizeNow(pdf: string, { minSaving = 0.1, timeoutMs = 180_000 }
       const [a, b] = [await pageCount(qpdf, pdf), await pageCount(qpdf, current)];
       if (a !== null && b !== null && a !== b) { mark("page count changed"); return { before, after: before, replaced: false, reason: "page count changed" }; }
     }
-    const after = statSync(current).size;
+    const after = statSync(/* turbopackIgnore: true */ current).size;
     if (after <= 0 || after > before * (1 - minSaving)) {
       mark("not worth it");
       return { before, after: before, replaced: false, reason: "saving too small" };

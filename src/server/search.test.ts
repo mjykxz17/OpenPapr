@@ -14,6 +14,9 @@ describe("search helpers", () => {
   });
   it("cleans markdown and terms", () => {
     expect(plainMarkdown("See ![fig](slide-img:L1#2) and [docs](https://x.y) **now**")).toBe("See and docs now");
+    // A table reads as its cells, not as "--- --- ---".
+    const table = "Compared:\n\n| | Go-Back-N | Selective Repeat |\n| --- | :---: | --- |\n| ACKs | cumulative | one per packet |\n\n---\nAfter.";
+    expect(plainMarkdown(table)).toBe("Compared: Go-Back-N · Selective Repeat ACKs · cumulative · one per packet After.");
     expect(terms("What's the CS4238 quiz?")).toEqual(["what", "the", "cs4238", "quiz"]);
   });
   it("cuts a snippet around the match", () => {

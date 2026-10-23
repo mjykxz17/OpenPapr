@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, renameSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { PDFParse } from "pdf-parse";
 import { extractPdfText } from "./pdf-text";
 
@@ -41,39 +41,106 @@ export async function ocrPdf(pdf: Uint8Array, runner: OcrRunner, maxPages = MAX_
   return (await ocrPages(pdf, runner, maxPages)).text;
 }
 
+// What a read is told and tells as it goes: pages already read by an earlier
+// run, pages to pass over, and each step as it happens.
+type Hooks = {
+  done?: Map<number, string>;
+  skip?: Set<number>;
+  rendering?: (pages: number[]) => void;
+  reading?: (page: number) => void;
+  read?: (page: number, text: string | null) => void;   // null: lost
+};
+
 // lost: pages that would not render or that tesseract failed on (a timeout
 // under load, missing language data), as against pages that are blank.
-async function ocrPages(pdf: Uint8Array, runner: OcrRunner, maxPages = MAX_PAGES): Promise<{ text: string; lost: number }> {
+async function ocrPages(pdf: Uint8Array, runner: OcrRunner, maxPages = MAX_PAGES, hooks: Hooks = {}): Promise<{ text: string; lost: number }> {
   const total = await runner.pageCount(pdf);
   if (!total) return { text: "", lost: 1 };
   const pages = Array.from({ length: Math.min(total, maxPages) }, (_, i) => i + 1);
+  const { done = new Map<number, string>(), skip = new Set<number>() } = hooks;
   const out: string[] = [];
   let lost = 0;
   for (let i = 0; i < pages.length; i += RENDER_BATCH) {
     const batch = pages.slice(i, i + RENDER_BATCH);
-    const pngs = await runner.render(pdf, batch);
-    for (const [k, page] of batch.entries()) {
-      const png = pngs[k];
-      let text = "";
-      if (!png) lost++;
-      else { try { text = (await runner.recognise(png)).trim(); } catch { lost++; } }
+    const todo = batch.filter((p) => !done.has(p) && !skip.has(p));
+    if (todo.length) hooks.rendering?.(todo);
+    const pngs = todo.length ? await runner.render(pdf, todo) : [];
+    for (const page of batch) {
+      let text = done.get(page);
+      if (text === undefined) {
+        const png = skip.has(page) ? null : pngs[todo.indexOf(page)];
+        text = "";
+        let ok = false;
+        if (png) {
+          hooks.reading?.(page);
+          try { text = (await runner.recognise(png)).trim(); ok = true; } catch { /* lost */ }
+        }
+        if (!ok) lost++;
+        if (!skip.has(page)) hooks.read?.(page, ok ? text : null);
+      }
       out.push(`${text}\n\n-- ${page} of ${total} --\n`);
     }
   }
   return { text: out.join("\n"), lost };
 }
 
+// --- a long read, kept page by page --------------------------------------------
+// A scan of 150 pages takes many minutes, and the worker can be restarted
+// in the middle (a deploy, memory, the watchdog). Each page is written to
+// "<cache>.pages" as soon as it is read, so the next run picks up where the
+// last one stopped instead of at page 1. Pages that were being rendered or
+// read when the process died are the likely cause of it, so the next run
+// passes over them (they count as lost, and are tried again later) rather
+// than walk into the same crash straight away.
+type Line = { b?: number[]; p?: number; t?: string; lost?: true };
+function pageLog(path: string, key: string) {
+  const done = new Map<number, string>();
+  const skip = new Set<number>();
+  let lines: Line[] = [];
+  try {
+    const [head, ...rest] = readFileSync(path, "utf8").split("\n");
+    if (head === key) lines = rest.filter(Boolean).map((l) => { try { return JSON.parse(l) as Line; } catch { return {}; } });
+  } catch { /* nothing kept yet */ }
+  const started = new Set<number>(), finished = new Set<number>();
+  for (const l of lines) {
+    if (l.p === undefined) continue;
+    if (typeof l.t === "string") { done.set(l.p, l.t); finished.add(l.p); }
+    else if (l.lost) finished.add(l.p);
+    else started.add(l.p);
+  }
+  for (const p of started) if (!finished.has(p)) skip.add(p);
+  // A batch that never got as far as reading any page died while rendering.
+  for (const l of lines) if (l.b && !l.b.some((p) => started.has(p) || finished.has(p))) l.b.forEach((p) => skip.add(p));
+  const write = (text: string, append = true) => { try { (append ? appendFileSync : writeFileSync)(path, text); } catch { /* best effort */ } };
+  if (!lines.length) write(`${key}\n`, false);
+  const add = (l: Line) => write(`${JSON.stringify(l)}\n`);
+  return {
+    done, skip,
+    rendering: (pages: number[]) => add({ b: pages }),
+    reading: (page: number) => add({ p: page }),
+    read: (page: number, text: string | null) => { if (text !== null) done.set(page, text); add(text === null ? { p: page, lost: true } : { p: page, t: text }); },
+    // A complete read is cached whole: the log has done its job.
+    finish: () => { try { rmSync(path, { force: true }); } catch { /* best effort */ } },
+    // A read that lost pages keeps the ones it got; the rest are tried again.
+    keepRead: () => write(`${key}\n${[...done].map(([p, t]) => `${JSON.stringify({ p, t })}\n`).join("")}`, false),
+  };
+}
+
 // One OCR per deck at a time: the guide and the Ask index can ask for the
 // same new scan at once. And a read that lost pages is not run again for a
-// while, so every reader of that deck does not pay minutes for it.
-const running = new Map<string, Promise<{ text: string; lost: number }>>();
+// while, so every reader of that deck does not pay minutes for it. Everyone
+// waiting on a read hears of each page it finishes (onProgress).
+type Job = { result: Promise<{ text: string; lost: number }>; listeners: Set<() => void>; cachePath?: string };
+const running = new Map<string, Job>();
 const lostAt = new Map<string, number>();
 
 // A PDF's text: its own text layer, or — when that is next to nothing and
 // OCR is installed — what OCR reads off the pages, whichever says more.
 // cachePath keeps the OCR text (keyed by the PDF's content) between calls.
 // Only a complete read is kept; one that lost pages is tried again later.
-export async function pdfTextWithOcr(pdf: Uint8Array, opts: { cachePath?: string; runner?: OcrRunner; extract?: (pdf: Uint8Array) => Promise<string>; now?: number } = {}): Promise<string> {
+// onProgress is called as each page is done, so a watchdog can tell a long
+// read from a stuck one.
+export async function pdfTextWithOcr(pdf: Uint8Array, opts: { cachePath?: string; runner?: OcrRunner; extract?: (pdf: Uint8Array) => Promise<string>; now?: number; onProgress?: () => void } = {}): Promise<string> {
   // A copy: the parser may take ownership of the buffer it is given.
   const text = await (opts.extract ?? extractPdfText)(new Uint8Array(pdf));
   const runner = opts.runner ?? tesseract;
@@ -96,19 +163,37 @@ export async function pdfTextWithOcr(pdf: Uint8Array, opts: { cachePath?: string
     if (now - (lostAt.get(key) ?? -Infinity) < RETRY_AFTER) return text;
     let job = running.get(key);
     if (!job) {
-      job = ocrPages(pdf, runner).catch(() => ({ text: "", lost: 1 })).finally(() => running.delete(key));
+      const listeners = new Set<() => void>();
+      const tick = () => { for (const f of listeners) { try { f(); } catch { /* a listener's problem */ } } };
+      const cachePath = opts.cachePath;
+      const log = cachePath ? pageLog(`${cachePath}.pages`, key) : null;
+      const result = ocrPages(pdf, runner, MAX_PAGES, {
+        done: log?.done, skip: log?.skip, rendering: log?.rendering, reading: log?.reading,
+        read: (page, t) => { log?.read(page, t); tick(); },
+      }).then((r) => {
+        // The whole text is in the cache before the page log goes.
+        if (!r.lost && cachePath) keep(cachePath, key, r.text);
+        if (log) { if (r.lost) log.keepRead(); else log.finish(); }
+        return r;
+      }).catch(() => ({ text: "", lost: 1 })).finally(() => running.delete(key));
+      job = { result, listeners, cachePath };
       running.set(key, job);
     }
-    const r = await job;
+    const onProgress = opts.onProgress;
+    if (onProgress) job.listeners.add(onProgress);
+    let r: { text: string; lost: number };
+    try { r = await job.result; } finally { if (onProgress) job.listeners.delete(onProgress); }
     read = r.text;
     if (r.lost) lostAt.set(key, now);
-    else if (opts.cachePath) {
-      // Written aside and moved into place, so no reader sees half of it.
-      const tmp = `${opts.cachePath}.${process.pid}.part`;
-      try { writeFileSync(tmp, `${key}\n${read}`); renameSync(tmp, opts.cachePath); } catch { /* cache is best effort */ }
-    }
+    else if (opts.cachePath && opts.cachePath !== job.cachePath) keep(opts.cachePath, key, read);   // a second copy of the same deck
   }
   return countWords(read) > countWords(text) ? read : text;
+}
+
+// Written aside and moved into place, so no reader sees half of it.
+function keep(cachePath: string, key: string, text: string): void {
+  const tmp = `${cachePath}.${process.pid}.part`;
+  try { writeFileSync(tmp, `${key}\n${text}`); renameSync(tmp, cachePath); } catch { /* cache is best effort */ }
 }
 
 // --- the real runner: pdf-parse renders, tesseract reads ----------------------

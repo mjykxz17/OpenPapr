@@ -55,6 +55,19 @@ describe("sessionUserId", () => {
     expect(sessionUserId(db, s, key)).toBeNull();
   });
 
+  // Switching the demo off stops the visitors already in it, not just new ones.
+  it("refuses a demo session while the demo is switched off, and only the demo's", () => {
+    const { db, id } = setup();
+    const demo = db.insert(users).values({ name: "Alex", isDemo: true }).returning({ id: users.id }).get().id;
+    const [mine, theirs] = [signSession(id, key), signSession(demo, key, 24 * 3_600_000)];
+    expect(sessionUserId(db, theirs, key)).toBe(demo);
+    vi.stubEnv("DEMO_ENABLED", "0");
+    expect(sessionUserId(db, theirs, key)).toBeNull();
+    expect(sessionUserId(db, mine, key)).toBe(id);
+    vi.stubEnv("DEMO_ENABLED", "1");
+    expect(sessionUserId(db, theirs, key)).toBe(demo);
+  });
+
   it("refuses no cookie and a bad one", () => {
     const { db, id } = setup();
     expect(sessionUserId(db, undefined, key)).toBeNull();

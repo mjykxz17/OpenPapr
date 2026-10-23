@@ -20,10 +20,14 @@ type Doc = Omit<SearchHit, "score" | "snippet"> & { text: string; boost: number 
 const norm = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
 export const terms = (q: string) => [...new Set(norm(q).split(/[^a-z0-9]+/).filter((t) => t.length >= 2 || /\d/.test(t)))].slice(0, 8);
 
-// Markdown to the words a reader sees: no slide links, figures, diagrams or emphasis marks.
+// Markdown to the words a reader sees: no slide links, figures, diagrams or
+// emphasis marks. A table's ruling line goes, and its cells read "a · b".
 export function plainMarkdown(md: string): string {
   return md
     .replace(/```[\s\S]*?```/g, " ")
+    .replace(/^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$/gm, " ")
+    .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, " ")
+    .replace(/^\s*\|(.*)\|?\s*$/gm, (_, row: string) => row.split("|").map((c) => c.trim()).filter(Boolean).join(" · "))
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/\[([^\]]*)\]\((?:slide|slide-img):[^)]*\)/g, " ")
     .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")

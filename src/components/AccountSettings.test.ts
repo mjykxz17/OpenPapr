@@ -46,8 +46,11 @@ describe("Account page for the shared demo", () => {
     }
     expect(html).toContain("settings are read-only");
     expect(html).toMatch(/<fieldset disabled=""/);
-    // Downloading what it holds is still allowed.
-    expect(html).toContain("Download my data");
+    // The export refuses the demo (it would hand out other visitors' typing),
+    // so the page says why instead of linking to a bare 403.
+    expect(html).not.toContain("/api/account/export");
+    expect(html).not.toContain("delete your account");
+    expect(html).toContain("nothing to download");
   });
 
   it("says so when the server has no AI for the demo", () => {
@@ -58,7 +61,7 @@ describe("Account page for the shared demo", () => {
 describe("Account page for a student", () => {
   it("keeps the forms, and offers to sign out everywhere", () => {
     const html = render({ signIn: { username: "alex", hasPassword: true } });
-    for (const s of ["Replace token", "Test and save", "Change password", "Sign out everywhere", "Delete my account", "Make my calendar link"]) {
+    for (const s of ["Replace token", "Test and save", "Change password", "Sign out everywhere", "Delete my account", "Make my calendar link", "Download my data"]) {
       expect(html).toContain(s);
     }
     expect(html).not.toContain("read-only");

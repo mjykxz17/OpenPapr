@@ -234,6 +234,8 @@ body {
 .papi-dots::after { content: ""; animation: papi-dots 1.2s steps(1) infinite; }
 .papi { transition: transform .15s ease; }
 .papi:active { transform: scale(.94); }
+/* The phone tab bar's stand-in for Papi (Rail.tsx), until Papi draws itself in. */
+.papi-tab:has(> .papi) > .papi-tab-stub { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .papi-bob, .papi-hop, .papi-talk, .papi-z, .papi-pop, .papi-spin, .papi-bounce { animation: none; }
 }

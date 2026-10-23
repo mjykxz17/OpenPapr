@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createDb } from "../db/client";
 import { files, modules, quizAttempts, studyGuides, users } from "../db/schema";
-import { chapterQuiz, cleanQuiz, deckPagesFor, quizSource, recordAnswer, savedQuiz } from "./guide-quiz";
+import { chapterQuiz, cleanQuiz, clearAnswers, deckPagesFor, quizSource, recordAnswer, savedQuiz } from "./guide-quiz";
 import { weakSpots } from "./weak-topics";
 import { wipeUserData } from "./account-data";
 
@@ -107,6 +107,23 @@ describe("answers", () => {
     const next = await chapterQuiz(db, 1, 1, 0, cfg, 300, { fresh: true, fetchFn: reply(other) });
     if ("error" in next) throw new Error(next.error);
     expect(next.questions.some((x) => x.missedBefore)).toBe(false);
+  });
+
+  // "Start over" and "Try the ones I missed again" must survive a reload.
+  it("takes back the answers the student starts over on, and only those", async () => {
+    const made = await chapterQuiz(db, 1, 1, 0, cfg, 10, { fetchFn: reply(six) });
+    if ("error" in made) throw new Error(made.error);
+    recordAnswer(db, 1, 1, { chapter: 0, set: made.set, question: 0, chosen: 2 }, 100);   // wrong
+    recordAnswer(db, 1, 1, { chapter: 0, set: made.set, question: 1, chosen: 1 }, 110);   // right
+    recordAnswer(db, 1, 1, { chapter: 0, set: made.set, question: 2, chosen: 3 }, 120);   // wrong
+    const answered = () => { const s = savedQuiz(db, 1, 1, 0); if (!s || "error" in s) throw new Error("no quiz"); return s.answers.map((a) => a.question); };
+    expect(clearAnswers(db, 1, 1, { chapter: 0, set: made.set, questions: [0, 2] })).toEqual({ cleared: 2 });
+    expect(answered()).toEqual([1]);
+    expect(clearAnswers(db, 1, 1, { chapter: 0, set: made.set })).toEqual({ cleared: 1 });
+    expect(answered()).toEqual([]);
+    // Someone else's module, or a set that has since changed, is refused.
+    expect(clearAnswers(db, 2, 1, { chapter: 0, set: made.set })).toMatchObject({ status: 404 });
+    expect(clearAnswers(db, 1, 1, { chapter: 0, set: "0".repeat(32) })).toMatchObject({ status: 409 });
   });
 
   it("checks who is answering and what", async () => {
