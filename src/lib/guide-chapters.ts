@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { decodeDeck } from "./slide-citation";
 
 // A study guide is a preamble followed by one "## N. Title" chapter per
@@ -68,3 +69,28 @@ export function mergeChapters(existing: Chapter[], fresh: Chapter[]): Chapter[] 
 export function assembleGuide(preamble: string, chapters: Chapter[]): string {
   return [preamble.trim(), ...chapters.map((c) => c.markdown.trim())].filter(Boolean).join("\n\n");
 }
+
+// What a chapter teaches, without what the guide wraps it in: the "## N."
+// heading, the "Counts toward" line, lecturer notes and status notes above
+// the first section all go, and "### 4.2" reads "### 1.2" again. For an
+// automatic chapter this is exactly the body written from its slides.
+export function chapterBody(markdown: string): string {
+  const lines = markdown.replace(/\r\n/g, "\n").trim().split("\n");
+  let i = /^## /.test(lines[0] ?? "") ? 1 : 0;
+  while (i < lines.length && (lines[i]!.trim() === "" || /^\s*>/.test(lines[i]!))) i++;
+  let inFence = false;
+  return lines.slice(i).map((l) => {
+    if (/^\s*```/.test(l)) { inFence = !inFence; return l; }
+    return inFence ? l : l.replace(/^### \d+\.(\d+)(\s)/, "### 1.$1$2");
+  }).join("\n").trim();
+}
+
+// The key a chapter's practice quiz (guide_quizzes) and the answers given to
+// it (quiz_attempts) are stored under. It depends on the slide-written body
+// only, so handing in an assessment, a new lecturer note or a reordered
+// guide leaves the quiz and its history alone; a rewritten chapter gets a
+// new one. Runs of blank lines count as one, so a chapter as the guide shows
+// it and the body as stored (guide_topics.body) give the same key even where
+// one of them was tidied.
+export const chapterHash = (markdown: string): string =>
+  createHash("sha256").update(chapterBody(markdown).replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, "\n\n")).digest("hex").slice(0, 32);

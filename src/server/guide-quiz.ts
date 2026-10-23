@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/db/client";
@@ -6,6 +5,7 @@ import { guideQuizzes, modules } from "@/db/schema";
 import { getStudyGuide } from "@/db/repo";
 import { splitGuideIntoChapters } from "@/lib/study-chapters";
 import { parseSlideCitation } from "@/lib/slide-citation";
+import { chapterHash } from "@/lib/guide-chapters";
 import { chatJson, type CompatConfig } from "@/enrich/openai-compat";
 
 // Practice questions for one chapter of the guide: multiple choice, each with
@@ -33,7 +33,9 @@ Each question has exactly 4 options, one clearly correct. Wrong options must be 
 Return ONLY JSON: {"questions": [{"q": "", "options": ["", "", "", ""], "answer": 0, "why": "", "slide": "slide:DECK#PAGE"}]}
 No emoji.`;
 
-export const chapterHash = (markdown: string) => createHash("sha256").update(markdown).digest("hex").slice(0, 32);
+// Keyed on the chapter's slide-written body, not the assembled chapter; see
+// guide-chapters.ts.
+export { chapterHash };
 
 export function cleanQuiz(raw: unknown, chapter: string): QuizQuestion[] {
   const parsed = Raw.safeParse(raw);

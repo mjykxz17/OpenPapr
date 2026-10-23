@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { figureSlides, labelPages, normalizeFences, preferColourDeck, slidePages, validateChapter } from "./study-guide";
+import { figureSlides, normalizeFences, preferColourDeck, slidePages, validateChapter } from "./study-guide";
 
 describe("preferColourDeck", () => {
   it("keeps the colour deck and drops its printable twin", () => {
@@ -116,10 +116,6 @@ describe("slidePages / figureSlides", () => {
     expect(slidePages(deck).map((p) => p.page)).toEqual([1, 2, 3, 4]);
   });
 
-  it("labels each page with the slide it really is", () => {
-    expect(labelPages(deck).split("\n\n")[1]).toBe("[Slide 2]\nFig 1");
-  });
-
   it("treats a page with little text as carrying a figure", () => {
     expect(figureSlides(deck)).toEqual([2]);
   });
@@ -163,5 +159,125 @@ describe("selectGuideDecks", () => {
 
   it("does not fall back once any file has a category, even if no slides were found", () => {
     expect(selectGuideDecks([row("U1-intro1.pdf", "reading")])).toEqual([]);
+  });
+});
+
+import { cleanCitations, deckShort, outlineText, parseSlideRange, sectionText } from "./study-guide";
+
+// A deck as pdf-parse writes it, each page saying which page it is.
+const pagesDeck = (n: number, chars = 40) =>
+  Array.from({ length: n }, (_, i) => `page${i + 1} ${"x".repeat(chars)}\n-- ${i + 1} of ${n} --`).join("\n");
+
+describe("parseSlideRange", () => {
+  it("reads the ways an outline writes a range", () => {
+    expect(parseSlideRange("4-6", 30)).toEqual([4, 5, 6]);
+    expect(parseSlideRange("slides 4 to 6, 9", 30)).toEqual([4, 5, 6, 9]);
+    expect(parseSlideRange("9–11", 30)).toEqual([9, 10, 11]);
+  });
+
+  it("stays inside the deck and gives nothing for no numbers", () => {
+    expect(parseSlideRange("28-35", 30)).toEqual([28, 29, 30]);
+    expect(parseSlideRange("the whole deck", 30)).toEqual([]);
+  });
+
+  it("does not take the deck's number for a slide", () => {
+    expect(parseSlideRange("L1 slides 40-42", 50)).toEqual([40, 41, 42]);
+    expect(parseSlideRange("S4-S6, p9", 50)).toEqual([4, 5, 6, 9]);
+  });
+});
+
+describe("sectionText", () => {
+  it("sends a section its own slides and two either side, not the whole deck", () => {
+    const { text, pages } = sectionText(pagesDeck(300), "100-104", 300);
+    expect(pages).toEqual([98, 99, 100, 101, 102, 103, 104, 105, 106]);
+    expect(text).toContain("[Slide 100]\npage100");
+    expect(text).not.toContain("page50 ");
+  });
+
+  it("falls back to the whole deck, clipped, when the range is unusable", () => {
+    const { text, pages } = sectionText(pagesDeck(300, 400), "intro", 300, 30_000);
+    expect(pages).toHaveLength(300);
+    expect(text.length).toBeLessThan(40_000);
+  });
+});
+
+describe("outlineText", () => {
+  it("keeps a short deck whole", () => {
+    expect(outlineText(pagesDeck(5))).toContain("x".repeat(40));
+  });
+
+  it("shows every slide of a huge deck, each cut short", () => {
+    const text = outlineText(pagesDeck(400, 2000), 30_000);
+    expect(text.length).toBeLessThan(40_000);
+    expect(text).toContain("[Slide 1]\npage1");
+    expect(text).toContain("[Slide 400]\npage400");
+  });
+});
+
+describe("deckShort", () => {
+  it("names a deck the way the course does", () => {
+    expect(deckShort("L1-asymptotics")).toBe("L1");
+    expect(deckShort("U3-memerr1")).toBe("U3");
+    expect(deckShort("IFS4103-Lect-1-v1")).toBe("Lect 1");
+    expect(deckShort("Lecture%205")).toBe("Lecture 5");
+    expect(deckShort("intro")).toBe("intro");
+  });
+
+  it("keeps what tells a week's or a lecture's decks apart", () => {
+    expect(deckShort("Week1-L1")).toBe("Week1 L1");
+    expect(deckShort("Week1-L2")).toBe("Week1 L2");
+    expect(deckShort("Lecture 1 Part A")).toBe("Lecture 1 Part A");
+    expect(deckShort("Lecture 1 Part B")).toBe("Lecture 1 Part B");
+  });
+});
+
+describe("cleanCitations", () => {
+  const decks = new Map([["L1-asymptotics", 30]]);
+
+  it("writes each link's text from where it points", () => {
+    const { markdown } = cleanCitations("Big-O [slide 81](slide:L1-asymptotics#18).", decks);
+    expect(markdown).toBe("Big-O [L1 p18](slide:L1-asymptotics#18).");
+  });
+
+  it("repairs a near-miss deck name and leaves image captions alone", () => {
+    const r = cleanCitations("See [s](slide:L1 asymptotics.pdf#3).\n\n![The tree](slide-img:l1-Asymptotics#4)", decks);
+    expect(r.markdown).toBe("See [L1 p3](slide:L1-asymptotics#3).\n\n![The tree](slide-img:L1-asymptotics#4)");
+    expect(r.repaired).toBe(2);
+  });
+
+  it("takes out citations to a missing deck or a slide past the end", () => {
+    const r = cleanCitations("A claim [slide 99](slide:L1-asymptotics#99). Another (see [slide 2](slide:Other-deck#2)).\n\n![fig](slide-img:L1-asymptotics#0)\n\nEnd.", decks);
+    expect(r.markdown).toBe("A claim. Another.\n\nEnd.");
+    expect(r.removed).toBe(3);
+  });
+
+  it("names decks in full when two would share a short name", () => {
+    const two = new Map([["L1-intro", 10], ["L1-part2", 10]]);
+    expect(cleanCitations("[x](slide:L1-intro#2)", two).markdown).toBe("[L1-intro p2](slide:L1-intro#2)");
+    // A deck in another chapter counts too.
+    expect(cleanCitations("[x](slide:L1-intro#2)", new Map([["L1-intro", 10]]), ["L1-recap"]).markdown).toBe("[L1-intro p2](slide:L1-intro#2)");
+  });
+
+  it("tidies only where a link was taken out", () => {
+    const clean = (md: string) => cleanCitations(md, decks).markdown;
+    expect(clean("Call `f()` then (see [slide 99](slide:L1-asymptotics#99)).")).toBe("Call `f()` then.");
+    expect(clean("Use x : y and `a ; b` [s](slide:L1-asymptotics#99) here.")).toBe("Use x : y and `a ; b` here.");
+    expect(clean("Both [a](slide:L1-asymptotics#2), [b](slide:L1-asymptotics#99), [c](slide:L1-asymptotics#3) say so.")).toBe("Both [L1 p2](slide:L1-asymptotics#2), [L1 p3](slide:L1-asymptotics#3) say so.");
+    expect(clean("(see [b](slide:L1-asymptotics#99), [c](slide:L1-asymptotics#3))")).toBe("(see [L1 p3](slide:L1-asymptotics#3))");
+    expect(clean("Line one  \nends [x](slide:L1-asymptotics#99)")).toBe("Line one  \nends");
+  });
+
+  it("drops a bullet that held only a bad citation", () => {
+    expect(cleanCitations("- first\n- [slide 99](slide:L1-asymptotics#99)\n- third", decks).markdown).toBe("- first\n- third");
+  });
+
+  it("leaves a citation inside inline code as it is", () => {
+    const md = "Write `[slide 99](slide:L1-asymptotics#99)` to cite.";
+    expect(cleanCitations(md, decks).markdown).toBe(md);
+  });
+
+  it("leaves code alone", () => {
+    const md = "```\n[slide 99](slide:L1-asymptotics#99)\n```";
+    expect(cleanCitations(md, decks).markdown).toBe(md);
   });
 });

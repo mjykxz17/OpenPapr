@@ -5,7 +5,7 @@ import type { CanvasClient } from "../connectors/canvas/client";
 import { extractPdfText } from "../lib/pdf-text";
 import { citeDeck } from "../lib/slide-citation";
 import { modelsServed, startServedLog } from "./openai-compat";
-import { createGuideGenerator, figureSlides, selectGuideDecks, validateChapter, type CompatConfig } from "./study-guide-deps";
+import { cleanCitations, createGuideGenerator, figureSlides, selectGuideDecks, validateChapter, type CompatConfig } from "./study-guide-deps";
 
 export type GuideProgress = {
   stage: string;
@@ -132,7 +132,7 @@ export async function generateModuleGuide(opts: {
           return "";
         })));
 
-    const chapter = [`## ${i + 1}. ${outline.title}`, ...bodies.filter(Boolean)].join("\n\n");
+    const chapter = cleanCitations([`## ${i + 1}. ${outline.title}`, ...bodies.filter(Boolean)].join("\n\n"), new Map([[citeDeck(name), pageCount]])).markdown;
     problems.push(...validateChapter(chapter, citeDeck(name), pageCount).map((p) => `${name}: ${p}`));
     chapters.push(chapter);
     used.push(name);
@@ -145,7 +145,7 @@ export async function generateModuleGuide(opts: {
   const cleanName = mod.name.replace(new RegExp(`^${mod.code}\\s*`), "").replace(/\s*\[\d+\]\s*$/, "").trim();
   const preamble = `# ${mod.code} ${cleanName} — Study Guide\n\n` +
     `*Generated from the course's own lecture slides. Each hard idea is explained in plain language first, then precisely. ` +
-    `Where a slide carries a figure worth seeing it is embedded inline, and a link marked "slide N" opens that slide in the source deck at exactly that page.*`;
+    `Where a slide carries a figure worth seeing it is embedded inline, and a slide link such as "L1 p18" opens that slide in the source deck at exactly that page.*`;
 
   progress.stage = "Done";
   report();
@@ -163,6 +163,14 @@ export async function generateModuleGuide(opts: {
 // plus practice sheets. The body starts at the first "### 1.N" section; the
 // chapter heading, the links to quizzes and lecturer notes are added when the
 // guide is assembled, so they can change without rewriting anything.
+//
+// missing counts the parts that could not be written this time — sections
+// the model dropped and practice sheets, and apart from them whole decks
+// whose outline failed — so the caller can keep what was written and try the
+// rest again later. planned is how many sections were attempted.
+//
+// otherDecks: the module's other deck names, so a link reads "Week1 L2"
+// rather than a "Week1" another chapter's deck also goes by.
 export type TopicSource = { name: string; text: string };
 
 export async function generateTopicChapter(opts: {
@@ -171,30 +179,37 @@ export async function generateTopicChapter(opts: {
   title: string;
   lectures: TopicSource[];
   practice: TopicSource[];
+  otherDecks?: string[];
   onStage?: (stage: string) => void;
-}): Promise<{ body: string; problems: string[] }> {
+}): Promise<{ body: string; problems: string[]; missing: { sections: number; decks: number }; planned: number }> {
   const gen = createGuideGenerator(opts.cfg, opts.reader ?? null);
   const problems: string[] = [];
   const parts: string[] = [];
+  const decks = new Map<string, number>();
+  const missing = { sections: 0, decks: 0 };
   let n = 0;
   const pagesOf = (text: string) => Number(text.match(/--\s*\d+\s*of\s*(\d+)\s*--/)?.[1] ?? 0);
 
   for (const deck of opts.lectures) {
     const pageCount = pagesOf(deck.text);
     if (!pageCount || !deck.text.trim()) { problems.push(`${deck.name}: no extractable text`); continue; }
+    const cite = citeDeck(deck.name);
+    decks.set(cite, pageCount);
     opts.onStage?.(`Planning from ${deck.name}`);
-    const outline = await gen.outline(deck.name, deck.text, pageCount);
-    if (!outline) { problems.push(`${deck.name}: outline failed`); continue; }
+    const outline = await gen.outline(deck.name, deck.text, pageCount).catch(() => null);
+    if (!outline) { problems.push(`${deck.name}: outline failed`); missing.decks++; continue; }
     const figures = figureSlides(deck.text);
     let done = 0;
     const start = n;
     n += outline.sections.length;
     const bodies = await Promise.all(outline.sections.map((s, k) =>
-      gen.section(citeDeck(deck.name), deck.text, pageCount, `1.${start + k + 1} ${s.heading}`, s.covers, s.slides, figures)
+      gen.section(cite, deck.text, pageCount, `1.${start + k + 1} ${s.heading}`, s.covers, s.slides, figures)
         .then((b) => { done++; opts.onStage?.(`Writing from ${deck.name}: ${done} of ${outline.sections.length} sections`); return b; })
-        .catch((e) => { problems.push(`${deck.name} section ${k + 1}: ${String(e).slice(0, 80)}`); return ""; })));
-    const written = bodies.filter(Boolean).join("\n\n");
-    problems.push(...validateChapter(written, citeDeck(deck.name), pageCount).map((p) => `${deck.name}: ${p}`));
+        .catch((e) => { problems.push(`${deck.name} section ${k + 1}: ${String(e).slice(0, 80)}`); missing.sections++; return ""; })));
+    // Each section saw only this deck, so a citation to anything else is
+    // either this deck misspelt or made up.
+    const written = cleanCitations(bodies.filter(Boolean).join("\n\n"), new Map([[cite, pageCount]])).markdown;
+    problems.push(...validateChapter(written, cite, pageCount).map((p) => `${deck.name}: ${p}`));
     if (written) parts.push(written);
   }
   if (!parts.length) throw new Error(problems[0] ?? "nothing could be written from these slides");
@@ -202,13 +217,19 @@ export async function generateTopicChapter(opts: {
   for (const sheet of opts.practice) {
     const pageCount = pagesOf(sheet.text);
     if (!pageCount || !sheet.text.trim()) continue;
+    const cite = citeDeck(sheet.name);
+    decks.set(cite, pageCount);
     opts.onStage?.(`Practice: ${sheet.name}`);
     n++;
     try {
-      parts.push(await gen.practice(citeDeck(sheet.name), sheet.text, pageCount, `1.${n} Practice: ${sheet.name}`, opts.title));
+      parts.push(cleanCitations(await gen.practice(cite, sheet.text, pageCount, `1.${n} Practice: ${sheet.name}`, opts.title), new Map([[cite, pageCount]])).markdown);
     } catch (e) {
       problems.push(`${sheet.name}: ${String(e).slice(0, 80)}`);
+      missing.sections++;
     }
   }
-  return { body: parts.join("\n\n"), problems };
+  // Once more over the whole chapter, so two decks that would share a short
+  // name — here or elsewhere in the module — are told apart in their links.
+  const others = (opts.otherDecks ?? []).map((d) => citeDeck(d));
+  return { body: cleanCitations(parts.join("\n\n"), decks, others).markdown, problems, missing, planned: n };
 }
