@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessmentNumber, assessmentNumbers, sameAssessment, sameTask } from "./own-work";
+import { assessmentNumber, assessmentNumbers, isPrep, sameAssessment, sameTask } from "./own-work";
 
 describe("sameAssessment", () => {
   it("matches kind and number however they are written", () => {
@@ -34,5 +34,26 @@ describe("sameAssessment", () => {
     expect(sameTask("Weekly reading", "weekly reading!")).toBe(true);
     expect(sameTask("Prepare for weekly reading", "Weekly reading")).toBe(true);
     expect(sameTask("Weekly reading", "Weekly quiz")).toBe(false);
+  });
+});
+
+describe("two exams that are not the final", () => {
+  it("are one only when they have the same name", () => {
+    expect(sameAssessment("Practical exam", "Oral exam")).toBe(false);
+    expect(sameAssessment("Mock exam", "Lab test exam")).toBe(false);
+    expect(sameAssessment("Practical exam", "Sit the practical examination")).toBe(true);
+  });
+});
+
+describe("isPrep", () => {
+  it("tells getting ready for an assessment from the assessment", () => {
+    expect(isPrep("prep", "Quiz 3")).toBe(true);
+    expect(isPrep(null, "Prepare for Quiz 3")).toBe(true);
+    expect(isPrep(null, "Quiz 3 prep")).toBe(true);
+    expect(isPrep("exam", "Revise L1-L6 for the midterm")).toBe(true);
+    expect(isPrep("reading", "Weekly reading")).toBe(true);
+    expect(isPrep("quiz", "Quiz 3")).toBe(false);
+    expect(isPrep(null, "Midterm")).toBe(false);
+    expect(isPrep("submission", "Lab 4 report")).toBe(false);
   });
 });

@@ -51,7 +51,7 @@ const coreTitle = (t: string) => assessmentText(t).replace(/\([^)]*\)/g, " ")
 // "Quiz 3" and "Submit Quiz-3": the same kind of assessment with the same number.
 // Without a number, a module has one midterm and one final, so "Mid-term" is
 // "Midterm" and "Final Examination" is "Final exam"; anything else unnumbered
-// ("Lab report", "Lab safety quiz") must have the same name.
+// ("Lab report", "Lab safety quiz", "Practical exam") must have the same name.
 export const KIND_WORD = /\b(quiz|test|midterm|exam|assignment|incident|lab|tutorial|project|presentation|milestone|report)\b/i;
 export function sameAssessment(a: string, b: string): boolean {
   const ka = KIND_WORD.exec(assessmentText(a))?.[1], kb = KIND_WORD.exec(assessmentText(b))?.[1];
@@ -59,8 +59,18 @@ export function sameAssessment(a: string, b: string): boolean {
   const na = assessmentNumber(a), nb = assessmentNumber(b);
   if (na !== null || nb !== null) return na === nb;
   if (ka === "midterm") return true;
-  if (ka === "exam") return /\bfinal\b/.test(assessmentText(a)) === /\bfinal\b/.test(assessmentText(b));
-  return coreTitle(a) === coreTitle(b);
+  const fa = /\bfinal\b/.test(assessmentText(a)), fb = /\bfinal\b/.test(assessmentText(b));
+  if (ka === "exam" && fa && fb) return true;
+  return fa === fb && coreTitle(a) === coreTitle(b);
+}
+
+// Getting ready for an assessment rather than sitting it: "Prepare for
+// Quiz 3", "Quiz 3 prep", "Revise L1-L6 for the midterm", a reading. It names
+// the same assessment as the thing itself, but is other work: dismissing the
+// prep says nothing about the quiz, and Canvas's quiz is not the prep's.
+const PREP_TITLE = /^\s*(prepare|prep|revise|revision|study)\b|\bprep(aration)?\b|\b(revise|revision|study|review|prepare)\s+for\b/i;
+export function isPrep(kind: string | null | undefined, title: string): boolean {
+  return kind === "prep" || kind === "reading" || PREP_TITLE.test(title);
 }
 
 // The same piece of work by any name the planner, Canvas or the student gave

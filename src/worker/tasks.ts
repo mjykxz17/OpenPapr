@@ -7,7 +7,7 @@ import { moduleCodes } from "../connectors/nusmods/client";
 import type { CompatConfig } from "../enrich/openai-compat";
 import { ModuleProfile } from "../enrich/profiles";
 import {
-  balanceDays, capWithClasses, fitSteps, mergeTasks, obligationLines, planModuleTasks, quizNumber, quizSeries, refFacts, revisionStepText, sgtDate, stepId,
+  balanceDays, capWithClasses, fitSteps, mergeTasks, obligationLines, planModuleTasks, quizNumber, quizSeries, refFacts, revisionStepText, sgtDate, sgtStamp, stepId,
   weakSpotAdvice, weakSpotGroups, type CleanTask, type ModuleTaskInput, type RefFact, type SignalItem, type TaskSource, type TaskStep,
 } from "../enrich/tasks";
 import { htmlToText } from "../lib/html-text";
@@ -15,7 +15,7 @@ import { variantGroups } from "../lib/variants";
 import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
 import { calendarLines, classSlots, placeInWeek, refreshRoadmaps, roadmapSignals, weekNote, weeksNamed } from "./roadmap";
-import { assessmentNumber, KIND_WORD, ownWork, sameAssessment, sameTask } from "../lib/own-work";
+import { assessmentNumber, assessmentText, isPrep, KIND_WORD, ownWork, sameAssessment, sameTask } from "../lib/own-work";
 import { citedItemIds, concreteTasks, isConcrete } from "../lib/concrete";
 import { weakSpots } from "../server/weak-topics";
 import { classesOn } from "../server/tasks";
@@ -50,10 +50,6 @@ const parseList = <T,>(json: string | null | undefined): T[] => {
   try { const v = JSON.parse(json ?? "[]"); return Array.isArray(v) ? (v as T[]) : []; } catch { return []; }
 };
 const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const sgtLabel = (ms: number) => {
-  const d = new Date(ms + 8 * H);
-  return `${d.toISOString().slice(0, 16).replace("T", " ")} (${WEEKDAY[d.getUTCDay()]})`;
-};
 
 export function usersWithTaskRequests(db: Db): number[] {
   return db.select({ id: users.id }).from(users).where(isNotNull(users.tasksRequestedAt)).all().map((u) => u.id);
@@ -89,7 +85,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
 } {
   const refs = new Map<string, TaskSource>();
   const rows = db.select().from(items).where(and(eq(items.userId, userId), eq(items.moduleId, mod.id))).all();
-  const due = (ms: number | null) => (ms === null ? "no due date" : `due ${sgtLabel(ms)}`);
+  const due = (ms: number | null) => (ms === null ? "no due date" : `due ${sgtStamp(ms)}`);
 
   const byId = new Map(rows.map((r) => [r.id, r]));
   const bySource = new Map(rows.map((r) => [r.sourceId, r]));
@@ -110,10 +106,10 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     const q = i.type === "assignment" ? parseMeta<AssignmentMeta>(i.metaJson) : null;
     const origin = i.type === "deadline" ? (i.sourceId.startsWith("page_todo:") ? "Canvas planner (page to read)" : "From an announcement") : i.type === "event" ? "Calendar"
       : q?.practice ? (/survey|questionnaire|feedback/i.test(i.title) ? "Canvas survey" : "Canvas practice quiz (ungraded)") : q?.quiz ? "Canvas quiz" : "Canvas";
-    const when = q?.closesOnly ? `closes ${sgtLabel(i.dueAt!)}` : due(i.dueAt);
+    const when = q?.closesOnly ? `closes ${sgtStamp(i.dueAt!)}` : due(i.dueAt);
     const set = variants.get(i.id);
     if (set) return { ref: `C${i.id}`, line: `Canvas: ${set.stem} — ${when} — posted ${set.ids.length} times, once per tutorial group; the student hands in only their own. ONE task.` };
-    const opens = q?.opensAt && q.opensAt > now ? `, opens ${sgtLabel(q.opensAt)}` : "";
+    const opens = q?.opensAt && q.opensAt > now ? `, opens ${sgtStamp(q.opensAt)}` : "";
     return { ref: `C${i.id}`, line: `${origin}: ${i.title} — ${when}${opens}${i.missing ? " — Canvas marks this MISSING" : ""}`, body: body || undefined };
   });
   const pastRows: SignalItem[] = past.map((i) => {
@@ -124,7 +120,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   if (series) {
     const lastRow = byId.get(series.lastId)!;
     refs.set(`C${lastRow.id}`, { kind: "canvas", label: lastRow.title, itemId: lastRow.id });
-    pastRows.unshift({ ref: `C${lastRow.id}`, line: `PATTERN: ${series.seen} numbered quizzes on Canvas so far${series.everyDays ? `, about every ${series.everyDays} days` : ""}${series.lastDue ? `, the last ${sgtLabel(series.lastDue)}` : ""}. Quiz ${series.next} is not on Canvas yet — plan it as an anticipated quiz task unless the course says the quizzes are over.` });
+    pastRows.unshift({ ref: `C${lastRow.id}`, line: `PATTERN: ${series.seen} numbered quizzes on Canvas so far${series.everyDays ? `, about every ${series.everyDays} days` : ""}${series.lastDue ? `, the last ${sgtStamp(series.lastDue)}` : ""}. Quiz ${series.next} is not on Canvas yet — plan it as an anticipated quiz task unless the course says the quizzes are over.` });
   }
 
   // Announcements and what lecturers or TAs said in discussions read the same
@@ -134,7 +130,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     .filter((i) => (i.type === "announcement" || i.type === "staff_reply") && (i.sourceCreatedAt ?? i.firstSeenAt) >= now - 45 * D)
     .sort((a, b) => (b.sourceCreatedAt ?? b.firstSeenAt) - (a.sourceCreatedAt ?? a.firstSeenAt)).slice(0, 14)
     .map((i) => {
-      const posted = sgtLabel(i.sourceCreatedAt ?? i.firstSeenAt);
+      const posted = sgtStamp(i.sourceCreatedAt ?? i.firstSeenAt);
       const text = htmlToText(i.body).replace(/\s+/g, " ");
       if (i.type === "staff_reply") {
         const meta = parseMeta<{ topicSourceId: string; topicTitle: string }>(i.metaJson);
@@ -193,7 +189,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   for (const code of moduleCodes(mod.code)) {
     const nm = getNusmods(db, code)?.module;
     const upcoming = (nm?.examDates ?? []).map((d) => Date.parse(d)).filter((t) => !Number.isNaN(t) && t >= now - D && t <= now + 200 * D).sort((a, b) => a - b);
-    if (upcoming.length) { examAt = upcoming[0]!; examDate = sgtLabel(examAt); break; }
+    if (upcoming.length) { examAt = upcoming[0]!; examDate = sgtStamp(examAt); break; }
   }
   if (examDate) refs.set("X", { kind: "nusmods", label: "Final exam (NUSMods)" });
 
@@ -216,10 +212,10 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   }
   const existing = existingRows.map((t) => {
     const steps = parseList<TaskStep>(t.stepsJson);
-    const lockedNote = t.dueLocked && !reopened.has(t.title) ? `, set by the student${t.dueLockedAt ? ` on ${sgtLabel(t.dueLockedAt)}` : ""}` : "";
+    const lockedNote = t.dueLocked && !reopened.has(t.title) ? `, set by the student${t.dueLockedAt ? ` on ${sgtStamp(t.dueLockedAt)}` : ""}` : "";
     return {
       key: t.key, title: t.title,
-      due: t.dueAt === null ? null : `${sgtLabel(t.dueAt)}${lockedNote}${reopened.has(t.title) ? " — the course has announced a change since; use the announcement" : ""}`,
+      due: t.dueAt === null ? null : `${sgtStamp(t.dueAt)}${lockedNote}${reopened.has(t.title) ? " — the course has announced a change since; use the announcement" : ""}`,
       progress: t.status === "open" ? `${steps.filter((s) => s.done).length}/${steps.length} steps done`
         : t.status === "dismissed" ? "dismissed by the student" : t.status,
     };
@@ -228,7 +224,7 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
     // A date correction the course has since announced over is out of date.
     .filter((f) => !(f.kind === "wrong_date" && announcedSince(f.title, f.createdAt, rows)))
     .sort((a, b) => b.createdAt - a.createdAt).slice(0, 15)
-    .map((f) => (f.kind === "not_task" ? `"${f.title}" is NOT a real task — do not plan it` : `"${f.title}": wrong date — ${f.note ?? "the student set it"} (said ${sgtLabel(f.createdAt)})`));
+    .map((f) => (f.kind === "not_task" ? `"${f.title}" is NOT a real task — do not plan it` : `"${f.title}": wrong date — ${f.note ?? "the student set it"} (said ${sgtStamp(f.createdAt)})`));
 
   const road = roadmapSignals(db, mod, now);
   for (const [k, v] of road.refs) refs.set(k, v);
@@ -269,12 +265,26 @@ export function announcedSince(title: string, since: number, rows: { type: strin
     && (re.test(i.title) || re.test(htmlToText(i.body ?? ""))));
 }
 
+// "Covers material up to Week 5", "from Week 3": a week that is the scope,
+// not the date.
+const SCOPE_WEEK = /\b(?:cover(?:s|ing|ed)?|up to|until|till|through|from)\s+(?:\S+\s+){0,3}?weeks?\s*-?\s*\d{1,2}\b/gi;
+const dateWeeks = (text: string) => weeksNamed(text.replace(SCOPE_WEEK, " "));
+// The text names this very assessment: "Quiz 3" for Quiz 3, "the midterm"
+// for an unnumbered midterm.
+function namesTask(title: string, text: string): boolean {
+  const kind = KIND_WORD.exec(assessmentText(title))?.[1]?.toLowerCase();
+  if (!kind) return false;
+  const n = assessmentNumber(title);
+  return new RegExp(n === null ? `\\b${kind}\\b` : `\\b${kind}[\\s_-]*0?${n}\\b`, "i").test(assessmentText(text));
+}
+
 // The planner sometimes counts weeks wrong. When the newest announcement it
 // cites for an assessment names it and exactly one "Week N" — or, failing
-// that, the quotes it cites name exactly one week — the date must fall in
-// that week: if it doesn't, it goes to the module's weekly class that week
-// (or the week's Friday). A date Canvas gave stays as it is.
-export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | null; dueConfidence: "exact" | "estimated"; sources: TaskSource[]; dueFromSource?: boolean }>(db: Db, moduleId: number, planned: T[], now: number): T[] {
+// that, the quotes it cites name it and exactly one week — the date must fall
+// in that week: if it doesn't, it goes to the module's weekly class that week
+// (or the week's Friday). A date Canvas gave stays as it is, and so does
+// prep: revising for the Week 8 midterm happens before Week 8.
+export function fitAnnouncedWeeks<T extends { title: string; kind?: string; dueAt: number | null; dueConfidence: "exact" | "estimated"; sources: TaskSource[]; dueFromSource?: boolean }>(db: Db, moduleId: number, planned: T[], now: number): T[] {
   const rows = db.select().from(items).where(eq(items.moduleId, moduleId)).all();
   const term = db.select({ term: modules.term }).from(modules).where(eq(modules.id, moduleId)).get()?.term;
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -284,14 +294,15 @@ export function fitAnnouncedWeeks<T extends { title: string; dueAt: number | nul
       .sort((a, b) => (b.sourceCreatedAt ?? b.firstSeenAt) - (a.sourceCreatedAt ?? a.firstSeenAt));
     const a = anns[0];
     if (a) {
-      const weeks = weeksNamed(`${a.title} ${htmlToText(a.body ?? "")}`);
+      const weeks = dateWeeks(`${a.title} ${htmlToText(a.body ?? "")}`);
       if (weeks.length === 1 && announcedSince(t.title, -1, [a])) return weeks[0]!;
     }
-    const quoted = weeksNamed(t.sources.map((x) => x.quote ?? "").join(" | "));
+    const quotes = t.sources.map((x) => x.quote ?? "").filter((q) => namesTask(t.title, q));
+    const quoted = dateWeeks(quotes.join(" | "));
     return quoted.length === 1 ? quoted[0]! : null;
   };
   return planned.map((t) => {
-    if (t.dueFromSource) return t;
+    if (t.dueFromSource || isPrep(t.kind, t.title)) return t;
     const week = weekOf(t);
     if (week === null) return t;
     const p = placeInWeek(week, now, slots, term);
@@ -308,35 +319,46 @@ export function applyPlan(db: Db, userId: number, moduleId: number, plannedIn: C
   // seen, and what it is.
   const citedIds = [...new Set(plannedIn.flatMap((t) => t.sources.map((x) => x.itemId).filter((x): x is number => x != null)))];
   const cited = citedIds.length
-    ? db.select({ id: items.id, type: items.type, at: items.sourceCreatedAt, seen: items.firstSeenAt }).from(items).where(and(eq(items.userId, userId), inArray(items.id, citedIds))).all()
+    ? db.select({ id: items.id, type: items.type, title: items.title, body: items.body, at: items.sourceCreatedAt, seen: items.firstSeenAt }).from(items)
+      .where(and(eq(items.userId, userId), inArray(items.id, citedIds))).all()
     : [];
   const postedAt = new Map(cited.map((i) => [i.id, i.at ?? i.seen]));
   const firstSeen = new Map(cited.map((i) => [i.id, i.seen]));
   const typeOf = new Map(cited.map((i) => [i.id, i.type]));
-  // "Not a real task" holds in code, not only in the prompt (which sees the
-  // latest 15): whatever the student dismissed or said is not a task does
-  // not come back under a new key or a new wording. Work Canvas has posted
-  // since they said so is new evidence, and does. A placeholder the app
-  // dismissed itself (an expected quiz making way) never blocks anything.
-  const rejected = [
-    ...current.filter((t) => t.status === "dismissed" && t.touchedAt !== null && !t.key.includes("-series-quiz-")).map((t) => ({ title: t.title, since: t.touchedAt! })),
-    ...db.select().from(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, moduleId), eq(taskFeedback.kind, "not_task"))).all()
-      .map((f) => ({ title: f.title, since: f.createdAt })),
-  ];
+  const citedRow = new Map(cited.map((i) => [i.id, { ...i, sourceCreatedAt: i.at, firstSeenAt: i.seen }]));
   const existingKeys = new Set(current.map((t) => t.key));
-  const postedSince = (p: CleanTask, since: number) => p.sources.some((x) => x.kind === "canvas" && x.itemId != null && (firstSeen.get(x.itemId) ?? 0) > since);
-  const wanted = plannedIn.filter((p) => existingKeys.has(p.key) || !rejected.some((r) => sameTask(r.title, p.title) && !postedSince(p, r.since)));
   // The planner sometimes names a new key for an assessment it already has
   // ("cs4238-quiz-3" next to "cs4238-series-quiz-3"). Same kind and number is
   // the same task: it keeps the existing one, with the student's progress.
-  const claimed = new Set(wanted.map((p) => p.key).filter((k) => existingKeys.has(k)));
-  const planned = wanted.map((p) => {
+  // Prep for a quiz and the quiz are two tasks, never each other's twin.
+  const claimed = new Set(plannedIn.map((p) => p.key).filter((k) => existingKeys.has(k)));
+  const rekeyed = plannedIn.map((p) => {
     if (existingKeys.has(p.key)) return p;
-    const twin = current.find((t) => t.status !== "dismissed" && !claimed.has(t.key) && !t.key.startsWith("manual-") && sameAssessment(t.title, p.title));
+    const twin = current.find((t) => t.status !== "dismissed" && !claimed.has(t.key) && !t.key.startsWith("manual-") && sameAssessment(t.title, p.title)
+      && isPrep(t.kind, t.title) === isPrep(p.kind, p.title));
     if (!twin) return p;
     claimed.add(twin.key);
     return { ...p, key: twin.key };
   });
+  // "Not a real task" holds in code, not only in the prompt (which sees the
+  // latest 15): whatever the student dismissed or said is not a task does
+  // not come back under a new key or a new wording. A quiz that isn't real
+  // takes its prep with it, but dismissing the prep leaves the quiz. What
+  // the course posted since they said so — the work on Canvas, or an
+  // announcement naming it — is new evidence, and brings it back. A
+  // placeholder the app dismissed itself (an expected quiz making way) never
+  // blocks anything.
+  const rejected = [
+    ...current.filter((t) => t.status === "dismissed" && t.touchedAt !== null && !t.key.includes("-series-quiz-"))
+      .map((t) => ({ title: t.title, prep: isPrep(t.kind, t.title), since: t.touchedAt! })),
+    ...db.select().from(taskFeedback).where(and(eq(taskFeedback.userId, userId), eq(taskFeedback.moduleId, moduleId), eq(taskFeedback.kind, "not_task"))).all()
+      .map((f) => ({ title: f.title, prep: isPrep(null, f.title), since: f.createdAt })),
+  ];
+  const postedSince = (p: CleanTask, since: number) => p.sources.some((x) => x.itemId != null
+    && (x.kind === "canvas" ? (firstSeen.get(x.itemId) ?? 0) > since
+      : (x.kind === "announcement" || x.kind === "discussion") && citedRow.has(x.itemId) && announcedSince(p.title, since, [citedRow.get(x.itemId)!])));
+  const planned = rekeyed.filter((p) => existingKeys.has(p.key)
+    || !rejected.some((r) => sameTask(r.title, p.title) && (!r.prep || isPrep(p.kind, p.title)) && !postedSince(p, r.since)));
   // A key the planner reused from another module stays with that module.
   const elsewhere = new Set(db.select({ key: tasks.key, moduleId: tasks.moduleId }).from(tasks).where(eq(tasks.userId, userId)).all()
     .filter((t) => t.moduleId !== moduleId).map((t) => t.key));
@@ -573,8 +595,11 @@ export function ensureCanvasCovered(db: Db, userId: number, now: number): number
     // than a second task appearing beside it until the next plan. One the
     // student closed keeps it closed — unless Canvas posted the work after
     // they dismissed it, which makes it real after all (as in applyPlan).
+    // "Prepare for Quiz 3" is not Canvas's Quiz 3, and a lab is not the page
+    // to read before it: a twin is the same kind of work.
     const twin = set || r.type === "planner_note" ? undefined : all.find((t) => t.moduleId === r.moduleId && !t.key.startsWith("manual-") && !t.key.includes("-series-quiz-")
-      && (t.status === "open" || (t.touchedAt !== null && (t.status === "done" || t.touchedAt >= r.firstSeenAt))) && sameAssessment(t.title, r.title));
+      && (t.status === "open" || (t.touchedAt !== null && (t.status === "done" || t.touchedAt >= r.firstSeenAt))) && sameAssessment(t.title, r.title)
+      && isPrep(t.kind, t.title) === (r.type === "deadline"));
     if (twin) {
       const sources = [{ kind: "canvas" as const, label: r.title, itemId: r.id }, ...parseList<TaskSource>(twin.sourcesJson)];
       const moveDate = twin.status === "open" && !twin.dueLocked && twin.dueAt !== r.dueAt;

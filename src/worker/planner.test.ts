@@ -9,7 +9,8 @@ import type { WeakSpot } from "../server/weak-topics";
 const spots = vi.hoisted(() => ({ list: [] as WeakSpot[] }));
 vi.mock("../server/weak-topics", () => ({ weakSpots: () => spots.list }));
 
-const { addRevisionSteps, applyPlan, ensureCanvasCovered, moduleSignals, refreshTasks, tidyTasks, MAX_STALE } = await import("./tasks");
+const { addRevisionSteps, applyPlan, ensureCanvasCovered, ensureQuizSeries, fitAnnouncedWeeks, moduleSignals, refreshTasks, tidyTasks, MAX_STALE } = await import("./tasks");
+const { concreteTasks } = await import("../lib/concrete");
 
 const NOW = Date.parse("2026-09-25T10:00:00+08:00"); // Fri 25 Sep 2026
 const H = 3_600_000, D = 24 * H;
@@ -65,6 +66,73 @@ describe("not a real task", () => {
     applyPlan(db, 1, 1, [task({ key: "st2334-quiz-3-canvas", title: "Quiz 3", sources: [{ kind: "canvas", label: "Quiz 3", itemId: q.id }] })], NOW + D);
     expect(row(db, "st2334-quiz-3-canvas")!.status).toBe("open");
   });
+
+  it("comes back when the course announces it after the student said so", () => {
+    const { db } = setup();
+    applyPlan(db, 1, 1, [task({ key: "st2334-quiz-3", title: "Quiz 3" })], NOW);
+    db.update(tasks).set({ status: "dismissed", touchedAt: NOW }).where(eq(tasks.key, "st2334-quiz-3")).run();
+    const later = db.insert(items).values({ userId: 1, moduleId: 1, type: "announcement", source: "canvas", sourceId: "n2", title: "Quiz-3 on Friday",
+      body: "<p>Quiz 3 is on Friday in class.</p>", sourceCreatedAt: NOW + D, firstSeenAt: NOW + D }).returning().get();
+    // The old announcement again is no news; the new one is.
+    applyPlan(db, 1, 1, [task({ key: "st2334-q3", title: "Quiz 3" })], NOW + D);
+    expect(row(db, "st2334-q3")).toBeUndefined();
+    applyPlan(db, 1, 1, [task({ key: "st2334-q3", title: "Quiz 3", sources: [{ kind: "announcement", label: "Quiz-3 on Friday", itemId: later.id }] })], NOW + D);
+    expect(row(db, "st2334-q3")!.status).toBe("open");
+  });
+
+  it("dismissing the prep leaves the quiz itself, under any key", () => {
+    const { db } = setup();
+    applyPlan(db, 1, 1, [task({ key: "st2334-quiz-3", title: "Quiz 3" }), task({ key: "st2334-prep-quiz-3", title: "Prepare for Quiz 3", kind: "prep" }),
+      task({ key: "st2334-midterm-prep", title: "Prepare for the midterm", kind: "prep" })], NOW);
+    db.update(tasks).set({ status: "dismissed", touchedAt: NOW }).where(eq(tasks.kind, "prep")).run();
+    applyPlan(db, 1, 1, [task({ key: "st2334-q3", title: "Quiz 3" }), task({ key: "st2334-midterm", title: "Midterm", kind: "exam" }),
+      task({ key: "st2334-q3-prep", title: "Quiz 3 prep", kind: "prep" })], NOW + H);
+    const open = db.select().from(tasks).all().filter((t) => t.status === "open").map((t) => t.key).sort();
+    // Quiz 3 keeps its row; the midterm is new; the prep stays gone.
+    expect(open).toEqual(["st2334-midterm", "st2334-quiz-3"]);
+  });
+
+  it("dismissing the quiz takes its prep with it", () => {
+    const { db } = setup();
+    applyPlan(db, 1, 1, [task({ key: "st2334-quiz-3", title: "Quiz 3" })], NOW);
+    db.update(tasks).set({ status: "dismissed", touchedAt: NOW }).where(eq(tasks.key, "st2334-quiz-3")).run();
+    applyPlan(db, 1, 1, [task({ key: "st2334-prep-quiz-3", title: "Prepare for Quiz 3", kind: "prep" })], NOW + H);
+    expect(row(db, "st2334-prep-quiz-3")).toBeUndefined();
+  });
+});
+
+describe("a quiz the course announces after the app expected it", () => {
+  it("shows, though it keeps the placeholder's key", () => {
+    const { db } = setup();
+    for (const n of [1, 2]) {
+      db.insert(items).values({ userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: `q${n}`, title: `Quiz ${n}`,
+        dueAt: NOW - (3 - n) * 7 * D, submitted: true, firstSeenAt: NOW - 30 * D }).run();
+    }
+    ensureQuizSeries(db, 1, NOW);
+    expect(concreteTasks(db.select().from(tasks).all(), () => "assignment")).toEqual([]);
+    applyPlan(db, 1, 1, [task({ key: "st2334-quiz-3", title: "Quiz 3", sources: [{ kind: "announcement", label: "Quiz 3 on Friday", quote: "Quiz 3 on Friday", itemId: 1 }] })], NOW + H);
+    const all = db.select().from(tasks).all();
+    expect(all.map((t) => [t.key, t.title])).toEqual([["st2334-series-quiz-3", "Quiz 3"]]);
+    expect(concreteTasks(all, (id) => (id === 1 ? "announcement" : "assignment"))).toHaveLength(1);
+  });
+});
+
+describe("an announced week, from the planner's quotes", () => {
+  const t = (title: string, kind: CleanTask["kind"], quote: string) =>
+    task({ key: "k", title, kind, dueAt: sgt("2026-10-02T23:59:00"), dueConfidence: "estimated", sources: [{ kind: "file", label: "L1 p.2", quote }] });
+  it("moves the assessment the quote names into that week", () => {
+    const { db } = setup();
+    expect(fitAnnouncedWeeks(db, 1, [t("Quiz 3", "quiz", "Quiz 3 is held in Week 9")], NOW)[0]!.dueAt).toBe(sgt("2026-10-16T23:59:00"));
+  });
+  it("leaves prep, a scope, and a quote about other work alone", () => {
+    const { db } = setup();
+    const out = fitAnnouncedWeeks(db, 1, [
+      t("Revise L1-L6 for the midterm", "prep", "Midterm test in Week 9"),
+      t("Quiz 3", "quiz", "Quiz 3 covers material up to Week 9"),
+      t("Quiz 3", "quiz", "Lab 4 is due in Week 9"),
+    ], NOW);
+    expect(out.map((x) => x.dueAt)).toEqual([0, 1, 2].map(() => sgt("2026-10-02T23:59:00")));
+  });
 });
 
 describe("steps follow the date", () => {
@@ -107,6 +175,15 @@ describe("the safety net and the planner's own task", () => {
     const open = db.select().from(tasks).all().filter((t) => t.status === "open").map((t) => t.title);
     expect(open).toEqual(["Quiz 3"]);   // Lab 2 was on Canvas when they dismissed it
   });
+
+  it("doesn't give Canvas's quiz to the prep for it", () => {
+    const { db } = setup();
+    applyPlan(db, 1, 1, [task({ key: "st2334-prep-quiz-3", title: "Prepare for Quiz 3", kind: "prep", dueAt: sgt("2026-09-30T23:59:00") })], NOW);
+    const q = db.insert(items).values({ userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: "a3", title: "Quiz 3", dueAt: sgt("2026-10-02T23:59:00"), firstSeenAt: NOW + H }).returning().get();
+    expect(ensureCanvasCovered(db, 1, NOW + H)).toBe(1);
+    expect(row(db, "st2334-prep-quiz-3")).toMatchObject({ dueAt: sgt("2026-09-30T23:59:00") });
+    expect(row(db, `st2334-canvas-${q.id}`)).toMatchObject({ title: "Quiz 3", kind: "quiz", status: "open" });
+  });
 });
 
 describe("tidyTasks", () => {
@@ -124,7 +201,9 @@ describe("tidyTasks", () => {
 
   it("has less room on a day full of classes", () => {
     const { db } = setup();
-    db.insert(items).values([0, 1, 2].map((i) => ({ userId: 1, moduleId: 1, type: "event" as const, source: "canvas" as const, sourceId: `e${i}`, title: `Class ${i}`, dueAt: sgt("2026-09-25T13:00:00") + i * H, firstSeenAt: NOW }))).run();
+    // Three weekly classes on Fridays, each seen three weeks running.
+    db.insert(items).values([0, 1, 2].flatMap((i) => [0, 1, 2].map((w) => ({ userId: 1, moduleId: 1, type: "event" as const, source: "canvas" as const, sourceId: `e${i}-${w}`,
+      title: `Class ${i}`, dueAt: sgt("2026-09-25T13:00:00") + i * H - w * 7 * D, firstSeenAt: NOW })))).run();
     db.insert(tasks).values({ userId: 1, moduleId: 1, key: "st2334-quiz-3", title: "Quiz 3", kind: "quiz", dueAt: NOW + 6 * D,
       sourcesJson: JSON.stringify([{ kind: "announcement", label: "Quiz 3 next week", itemId: 1 }]), stepsJson: JSON.stringify([st("a", "2026-09-25", false, 60), st("b", "2026-09-25", false, 60)]), createdAt: NOW, updatedAt: NOW }).run();
     tidyTasks(db, 1, NOW);

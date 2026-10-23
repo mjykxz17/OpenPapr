@@ -9,19 +9,27 @@ import { assessmentNumber, assessmentNumbers } from "./own-work";
 // information is what the student follows.
 //
 // A source only confirms the task it is about: "Quiz 3 (expected)" citing
-// Quiz 2 on Canvas as its pattern is still only expected.
+// Quiz 2 on Canvas as its pattern is still only expected. The sources decide,
+// not the key: a series placeholder the planner has since tied to the
+// course's announcement of that quiz keeps its key, and shows.
 
 export type SourceLike = { kind: string; itemId?: number | null; label?: string; quote?: string };
 
+// The earlier quiz an expected one is modelled on (ensureQuizSeries).
+const PATTERN_LABEL = /— the last one\s*$/;
+
 export function isConcrete(key: string, sources: SourceLike[], itemType: (id: number) => string | undefined, title?: string): boolean {
   if (key.startsWith("manual-")) return true;
-  // The next quiz of a series is a guess by definition.
-  if (key.includes("-series-quiz-")) return false;
   const n = title === undefined ? null : assessmentNumber(title);
   // A source naming other numbered work only ("Quiz 2", for a Quiz 3 task).
+  // A Canvas item is what its title says; an announcement can say more than
+  // its title ("Lab 2 feedback" may say Lab 3 is due Friday), so only its
+  // quote can rule it out.
   const aboutOther = (s: SourceLike) => {
+    if (PATTERN_LABEL.test(s.label ?? "")) return true;
     if (n === null) return false;
-    const named = assessmentNumbers(`${s.label ?? ""} ${s.quote ?? ""}`);
+    const posted = s.kind === "announcement" || s.kind === "discussion";
+    const named = assessmentNumbers(posted ? s.quote ?? "" : `${s.label ?? ""} ${s.quote ?? ""}`);
     return named.length > 0 && !named.includes(n);
   };
   // A welcome announcement that lists the whole semester is the schedule

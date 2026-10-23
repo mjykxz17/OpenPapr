@@ -35,6 +35,19 @@ describe("isConcrete", () => {
     expect(isConcrete("cs-prep", [{ kind: "canvas", label: "Quiz 2", itemId: 1 }], typeOf, "Read chapter 3")).toBe(true);
   });
 
+  it("shows a series placeholder once the course announces that quiz", () => {
+    // The planner tied "Quiz 3" to the open placeholder; it keeps the series key.
+    expect(isConcrete("cs-series-quiz-3", [{ kind: "announcement", label: "Quiz 3 on Friday", quote: "Quiz 3 on Friday", itemId: 2 }], typeOf, "Quiz 3")).toBe(true);
+    // Without a title to compare, the pattern source still isn't evidence.
+    expect(isConcrete("cs-series-quiz-3", [{ kind: "canvas", label: "Quiz 2 — the last one", itemId: 1 }], typeOf)).toBe(false);
+  });
+
+  it("reads an announcement by its quote, not its title", () => {
+    // "Lab 2 feedback" whose body says Lab 3 is due: the course posted Lab 3.
+    expect(isConcrete("cs-lab-3", [{ kind: "announcement", label: "Lab 2 feedback", itemId: 2 }], typeOf, "Lab 3")).toBe(true);
+    expect(isConcrete("cs-lab-3", [{ kind: "announcement", label: "Lab 2 feedback", quote: "Lab 2 marks are out", itemId: 2 }], typeOf, "Lab 3")).toBe(false);
+  });
+
   it("filters task rows the same way", () => {
     const rows = [
       { key: "a-quiz-2", title: "Quiz 2", sourcesJson: JSON.stringify([{ kind: "canvas", label: "Quiz 2", itemId: 1 }]) },
