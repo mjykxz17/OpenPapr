@@ -295,6 +295,7 @@ fly deploy
 | `OPENAI_COMPAT_MODEL` | | — | Model id on that endpoint. |
 | `OPENAI_COMPAT_RPM` | | unlimited | Requests per minute allowed on the shared key. Extra requests wait in a queue instead of failing. |
 | `EMBED_MODEL` | | host default | Embedding model on the shared provider, used to search your material by meaning. Without one, Papi falls back to word search. |
+| `ALLOW_PRIVATE_LLM_URLS` | | off | Set to `1` to let students' own base URLs point at private addresses (`localhost`, `10.x`, `192.168.x`…), over plain HTTP too. Only for a deployment you trust everyone on. |
 | `SHARED_MONTHLY_CALLS` | | `300` | AI calls each student may make on the shared key per month. Their own key is never limited. |
 | `ANTHROPIC_API_KEY` | | — | Alternative shared provider. |
 | `ANTHROPIC_MODEL` | | `claude-haiku-4-5` | Model on the Anthropic path. |
@@ -307,6 +308,12 @@ fly deploy
 
 Students can also add their own key, and a fallback provider, on the **Account** page. Both are
 encrypted and only ever sent to the endpoint they entered.
+
+**Local models.** A base URL a student enters must be HTTPS and must resolve to a public address;
+it is checked when saved and again before every call, and redirects are refused. That keeps the
+server from being pointed at its own network. To use Ollama, vLLM or another model on your own
+machine or LAN as a student's provider, set `ALLOW_PRIVATE_LLM_URLS=1`. The shared
+`OPENAI_COMPAT_BASE_URL` is yours, so it is never checked and can be a local address either way.
 
 </details>
 

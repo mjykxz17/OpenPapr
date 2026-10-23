@@ -1,32 +1,44 @@
+import { isIP } from "node:net";
 import { decrypt } from "./crypto";
+import { isPrivateAddress, isPrivateName, privateUrlsAllowed } from "./llm-address";
 import type { CompatConfig } from "../enrich/openai-compat";
 
 export { LLM_PRESETS, presetFor } from "./llm-presets";
 
 // The server sends the key to whatever URL is stored, so the URL is checked
-// before anything is saved: HTTPS only, and never an address that resolves
-// inside the deployment's own network. Hostname checks cannot stop DNS that
-// points a public name at a private address, but they stop the obvious cases
-// and keep a typo from shipping a key over plain HTTP.
-export function checkBaseUrl(raw: string): { ok: true; url: string } | { ok: false; error: string } {
+// before anything is saved: HTTPS only, and never a name or address that is
+// private on its face. The host is resolved and checked as well, when the URL
+// is tested and again before every call (./llm-address). With
+// ALLOW_PRIVATE_LLM_URLS=1 a self-hoster may point it at their own network,
+// over plain HTTP when the address is private.
+export function checkBaseUrl(raw: string, allowPrivate = privateUrlsAllowed()): { ok: true; url: string } | { ok: false; error: string } {
   let u: URL;
   try {
     u = new URL(raw.trim());
   } catch {
     return { ok: false, error: "that base URL is not a valid address" };
   }
-  if (u.protocol !== "https:") return { ok: false, error: "the base URL must start with https://" };
+  if (u.protocol !== "https:" && !(allowPrivate && u.protocol === "http:")) return { ok: false, error: "the base URL must start with https://" };
   if (u.username || u.password) return { ok: false, error: "put the key in the key field, not in the URL" };
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  const privateHost =
-    host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")
-    || /^(127|10|0)\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)
-    || /^172\.(1[6-9]|2\d|3[01])\./.test(host) || /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(host)
-    || host === "::1" || host === "::" || /^f[cd][0-9a-f]{2}:/.test(host) || /^fe80:/.test(host);
-  if (privateHost) return { ok: false, error: "that base URL points at a private network address" };
+  if (!allowPrivate && (isPrivateName(host) || (isIP(host) !== 0 && isPrivateAddress(host)))) {
+    return { ok: false, error: "that base URL points at a private network address" };
+  }
   u.search = "";
   u.hash = "";
   return { ok: true, url: u.toString().replace(/\/+$/, "") };
+}
+
+// What a provider's error says, for text a student sees: the message of an
+// OpenAI-style {"error": {"message": …}} body, clipped short. Never the raw
+// body, which could be any page the URL happens to serve.
+export function providerDetail(body: string): string {
+  try {
+    const j = JSON.parse(body) as { error?: { message?: unknown } | string; message?: unknown } | null;
+    const m = typeof j?.error === "string" ? j.error : j?.error?.message ?? j?.message;
+    if (typeof m === "string") return m.replace(/\s+/g, " ").trim().slice(0, 160);
+  } catch { /* not JSON */ }
+  return "";
 }
 
 // Enough of a secret to recognise it, never enough to use it.
@@ -76,7 +88,8 @@ function provider(baseUrl: string | null | undefined, model: string | null | und
   if (!baseUrl || !model || !keyEnc) return null;
   try {
     const extra = parseExtra(extraJson);
-    return { baseUrl, model, apiKey: decrypt(keyEnc, secretHex), rpm: rpm ?? null, extra: extra.ok ? extra.value : null };
+    // Typed in by a student, so its address is checked before every call.
+    return { baseUrl, model, apiKey: decrypt(keyEnc, secretHex), rpm: rpm ?? null, extra: extra.ok ? extra.value : null, vetAddress: true };
   } catch {
     return null;
   }

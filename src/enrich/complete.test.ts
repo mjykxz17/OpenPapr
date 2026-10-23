@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { beforeEach } from "vitest";
-import { complete, resetProviderHealth, type CompatConfig } from "./openai-compat";
+import { afterEach, beforeEach } from "vitest";
+import { complete, isImageRefusal, resetProviderHealth, type CompatConfig } from "./openai-compat";
+import { setAddressLookup } from "../lib/llm-address";
 import { userLlmConfig } from "../lib/llm-provider";
 import { encrypt } from "../lib/crypto";
 
@@ -66,11 +67,100 @@ describe("userLlmConfig with a fallback", () => {
   const fb = { llmFallbackBaseUrl: "https://b.test/v1", llmFallbackModel: "mb", llmFallbackKeyEnc: encrypt("kb", KEY), llmFallbackRpm: null };
   it("attaches the fallback and each RPM", () => {
     expect(userLlmConfig({ ...base, ...fb }, KEY)).toEqual({
-      baseUrl: "https://a.test/v1", model: "ma", apiKey: "ka", rpm: 30, extra: null,
-      fallback: { baseUrl: "https://b.test/v1", model: "mb", apiKey: "kb", rpm: null, extra: null },
+      baseUrl: "https://a.test/v1", model: "ma", apiKey: "ka", rpm: 30, extra: null, vetAddress: true,
+      fallback: { baseUrl: "https://b.test/v1", model: "mb", apiKey: "kb", rpm: null, extra: null, vetAddress: true },
     });
   });
   it("uses a lone fallback as the provider", () => {
     expect(userLlmConfig({ llmBaseUrl: null, llmModel: null, llmKeyEnc: null, ...fb }, KEY)).toMatchObject({ baseUrl: "https://b.test/v1" });
+  });
+});
+
+describe("complete, on a URL a student typed", () => {
+  beforeEach(() => resetProviderHealth());
+  afterEach(() => setAddressLookup(null));
+  const resolvesTo = (map: Record<string, string>) => setAddressLookup(async (h) => [{ address: map[h] ?? "104.18.2.1" }]);
+
+  it("refuses a host that now resolves to a private address, and uses the fallback", async () => {
+    resolvesTo({ "rebound.test": "10.0.0.7" });
+    const { calls, f } = recorder(() => ok("from fallback"));
+    const c = cfg("rebound.test", { vetAddress: true, fallback: cfg("backup.test", { vetAddress: true }) });
+    expect(await complete(c, [{ role: "user", content: "hi" }], { maxTokens: 10, timeoutMs: 5000, fetchFn: f })).toBe("from fallback");
+    expect(calls).toEqual(["backup.test"]);
+  });
+
+  it("says why when there is no fallback, without sending anything", async () => {
+    resolvesTo({ "meta.test": "169.254.169.254" });
+    const { calls, f } = recorder(() => ok("x"));
+    await expect(complete(cfg("meta.test", { vetAddress: true }), [{ role: "user", content: "hi" }], { maxTokens: 10, timeoutMs: 5000, fetchFn: f }))
+      .rejects.toThrow("llm blocked: that base URL points at a private network address");
+    expect(calls).toEqual([]);
+  });
+
+  it("checks again on every call, since DNS can change", async () => {
+    const answers = ["104.18.2.1", "127.0.0.1"];
+    setAddressLookup(async () => [{ address: answers.shift() ?? "127.0.0.1" }]);
+    const { f } = recorder(() => ok("x"));
+    const c = cfg("flip.test", { vetAddress: true });
+    expect(await complete(c, [{ role: "user", content: "hi" }], { maxTokens: 10, timeoutMs: 5000, fetchFn: f })).toBe("x");
+    await expect(complete(c, [{ role: "user", content: "hi" }], { maxTokens: 10, timeoutMs: 5000, fetchFn: f })).rejects.toThrow(/blocked/);
+  });
+
+  it("refuses redirects", async () => {
+    resolvesTo({});
+    let redirect: RequestRedirect | undefined;
+    const f = (async (_url: string, init: RequestInit) => { redirect = init.redirect; return ok("x"); }) as unknown as typeof fetch;
+    await complete(cfg("api.test", { vetAddress: true }), [{ role: "user", content: "hi" }], { maxTokens: 10, timeoutMs: 5000, fetchFn: f });
+    expect(redirect).toBe("error");
+  });
+});
+
+describe("complete's error text", () => {
+  beforeEach(() => resetProviderHealth());
+  const fail = (res: Response) => complete(cfg("err.test"), [{ role: "user", content: "hi" }], { maxTokens: 10, timeoutMs: 5000, fetchFn: (async () => res) as unknown as typeof fetch });
+
+  it("keeps the provider's JSON error message", async () => {
+    await expect(fail(new Response(JSON.stringify({ error: { message: "model gpt-x does not exist" } }), { status: 404 })))
+      .rejects.toThrow("llm 404: model gpt-x does not exist");
+  });
+  it("never echoes a raw body", async () => {
+    const err = await fail(new Response("<html>internal dashboard: token=abc123</html>", { status: 500 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 500");
+  });
+  it("still recognises a plain-text refusal of images", async () => {
+    const err = await fail(new Response("image input is not supported for this model", { status: 400 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 400: image input is not supported");
+    expect(isImageRefusal(err)).toBe(true);
+  });
+  it("does not read an HTML error page as a refusal of images", async () => {
+    const page = `<!doctype html><html><head><meta property="og:image" content="/logo.png"></head><body>${"x".repeat(500)} Not found</body></html>`;
+    const err = await fail(new Response(page, { status: 404 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 404");
+    expect(isImageRefusal(err)).toBe(false);
+  });
+  it("only looks at the start of a plain-text body, as before", async () => {
+    const err = await fail(new Response(`${"x".repeat(300)} image`, { status: 400 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 400");
+  });
+  it("does not label a 5xx as a refusal of images", async () => {
+    const err = await fail(new Response("vision backend overloaded", { status: 502 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 502");
+  });
+  it("recognises a JSON refusal of images named outside the message", async () => {
+    const body = JSON.stringify({ error: { message: "Invalid value for content", param: "messages[1].content[0].image_url", code: "invalid_value" } });
+    const err = await fail(new Response(body, { status: 400 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 400: Invalid value for content (image input is not supported)");
+    expect(isImageRefusal(err)).toBe(true);
+  });
+  it("leaves a JSON message that already names images as it is", async () => {
+    const body = JSON.stringify({ error: { message: "This model does not support image input" } });
+    const err = await fail(new Response(body, { status: 400 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 400: This model does not support image input");
+    expect(isImageRefusal(err)).toBe(true);
+  });
+  it("never shows the JSON fields it read for the image check", async () => {
+    const body = JSON.stringify({ error: { message: "bad request", param: "image_url secret-param" } });
+    const err = await fail(new Response(body, { status: 400 })).catch((e: Error) => e);
+    expect((err as Error).message).toBe("llm 400: bad request (image input is not supported)");
   });
 });

@@ -1,5 +1,5 @@
-import type { CompatConfig } from "./openai-compat";
-import { requestHeaders } from "../lib/llm-provider";
+import { assertPublicBaseUrl, type CompatConfig } from "./openai-compat";
+import { providerDetail, requestHeaders } from "../lib/llm-provider";
 
 // Embeddings for "ask your material": text in, a unit-length vector out, from
 // the same provider the student's chat goes to. Only the primary provider is
@@ -52,15 +52,19 @@ export function dot(a: Float32Array, b: Float32Array): number {
 // marks it as having no embeddings for a few hours.
 export async function embedTexts(cfg: CompatConfig, model: string, texts: string[], fetchFn: typeof fetch = fetch): Promise<Float32Array[]> {
   if (!texts.length) return [];
+  await assertPublicBaseUrl(cfg, "embeddings");
+  // Redirects are refused, as for chat: only the checked URL is ever called.
   const res = await fetchFn(`${cfg.baseUrl.replace(/\/$/, "")}/embeddings`, {
     method: "POST",
     headers: requestHeaders(cfg),
     body: JSON.stringify({ model, input: texts.map((t) => t.slice(0, 6000)) }),
     signal: AbortSignal.timeout(60_000),
+    redirect: "error",
   });
   if (!res.ok) {
     if (res.status >= 400 && res.status < 500 && res.status !== 429) unavailable.set(key(cfg, model), Date.now() + RETRY_AFTER);
-    throw new Error(`embeddings ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    const detail = providerDetail(await res.text().catch(() => ""));
+    throw new Error(detail ? `embeddings ${res.status}: ${detail}` : `embeddings ${res.status}`);
   }
   const data = (await res.json()) as { data?: { index?: number; embedding?: number[] }[] };
   const rows = (data.data ?? []).slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0));

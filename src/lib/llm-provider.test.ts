@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { encrypt } from "./crypto";
-import { checkBaseUrl, presetFor, secretHint, sharedLlmConfig, tokenParams, userLlmConfig } from "./llm-provider";
+import { checkBaseUrl, presetFor, providerDetail, secretHint, sharedLlmConfig, tokenParams, userLlmConfig } from "./llm-provider";
 
 const KEY = "0".repeat(64);
 
@@ -22,10 +22,33 @@ describe("checkBaseUrl", () => {
     "https://openpapr.internal/v1",
     "https://[::1]/v1",
     "https://[fdaa::3]/v1",
+    "https://[::ffff:10.0.0.1]/v1",
+    "https://[::ffff:7f00:1]/v1",
+    "https://100.64.0.1/v1",
+    "https://2130706433/v1",
+    "https://ollama.local/v1",
     "https://user:pw@api.openai.com/v1",
     "not a url",
   ])("refuses %s", (raw) => {
-    expect(checkBaseUrl(raw).ok).toBe(false);
+    expect(checkBaseUrl(raw, false).ok).toBe(false);
+  });
+  it("lets a self-hoster who opted in use a local model over plain HTTP", () => {
+    expect(checkBaseUrl("http://localhost:11434/v1/", true)).toEqual({ ok: true, url: "http://localhost:11434/v1" });
+    expect(checkBaseUrl("https://10.0.0.4/v1", true).ok).toBe(true);
+    expect(checkBaseUrl("ftp://10.0.0.4/v1", true).ok).toBe(false);
+  });
+});
+
+describe("providerDetail", () => {
+  it("keeps an OpenAI-style error message, clipped", () => {
+    expect(providerDetail(JSON.stringify({ error: { message: "Incorrect   API key\nprovided" } }))).toBe("Incorrect API key provided");
+    expect(providerDetail(JSON.stringify({ error: "model not found" }))).toBe("model not found");
+    expect(providerDetail(JSON.stringify({ error: { message: "x".repeat(500) } }))).toHaveLength(160);
+  });
+  it("never echoes a raw body", () => {
+    expect(providerDetail("<html><body>internal admin page</body></html>")).toBe("");
+    expect(providerDetail("secret-token=abc123")).toBe("");
+    expect(providerDetail(JSON.stringify({ error: { message: { nested: "object" } } }))).toBe("");
   });
 });
 
@@ -47,9 +70,9 @@ describe("presetFor", () => {
 });
 
 describe("userLlmConfig", () => {
-  it("decrypts a saved provider", () => {
+  it("decrypts a saved provider, marked for an address check on every call", () => {
     const row = { llmBaseUrl: "https://api.openai.com/v1", llmModel: "m", llmKeyEnc: encrypt("sk-1", KEY) };
-    expect(userLlmConfig(row, KEY)).toEqual({ baseUrl: "https://api.openai.com/v1", model: "m", apiKey: "sk-1", rpm: null, extra: null });
+    expect(userLlmConfig(row, KEY)).toEqual({ baseUrl: "https://api.openai.com/v1", model: "m", apiKey: "sk-1", rpm: null, extra: null, vetAddress: true });
   });
   it("is null when any part is missing", () => {
     expect(userLlmConfig({ llmBaseUrl: "https://x.dev", llmModel: null, llmKeyEnc: encrypt("k", KEY) }, KEY)).toBeNull();

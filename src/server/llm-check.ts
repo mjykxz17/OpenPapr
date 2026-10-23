@@ -1,22 +1,17 @@
 import type { CompatConfig } from "@/enrich/openai-compat";
-import { requestBody, requestHeaders, tokenParams } from "@/lib/llm-provider";
+import { checkBaseUrlAddress } from "@/lib/llm-address";
+import { providerDetail, requestBody, requestHeaders, tokenParams } from "@/lib/llm-provider";
 
 export type LlmCheck = { ok: true } | { ok: false; error: string };
-
-function providerMessage(body: string): string {
-  try {
-    const j = JSON.parse(body) as { error?: { message?: string } | string; message?: string };
-    const m = typeof j.error === "string" ? j.error : j.error?.message ?? j.message;
-    if (m) return m.slice(0, 240);
-  } catch { /* not JSON */ }
-  return body.replace(/\s+/g, " ").trim().slice(0, 240);
-}
 
 // One tiny completion, shaped exactly like the worker's real calls, so a key
 // that passes here is a key the study-guide generator can use. A 200 is the
 // pass mark: reasoning models may spend a small budget thinking and return no
-// text, which says nothing about the key.
+// text, which says nothing about the key. Only URLs a student typed come
+// here, so the host is always resolved and checked first.
 export async function checkLlmProvider(cfg: CompatConfig, fetchFn: typeof fetch = fetch): Promise<LlmCheck> {
+  const address = await checkBaseUrlAddress(cfg.baseUrl);
+  if (!address.ok) return { ok: false, error: address.error };
   let res: Response;
   try {
     res = await fetchFn(`${cfg.baseUrl.replace(/\/$/, "")}/chat/completions`, {
@@ -31,7 +26,7 @@ export async function checkLlmProvider(cfg: CompatConfig, fetchFn: typeof fetch 
     return { ok: false, error: timeout ? "the provider did not answer within 20 seconds" : "could not reach that base URL" };
   }
   if (res.ok) return { ok: true };
-  const detail = providerMessage(await res.text().catch(() => ""));
+  const detail = providerDetail(await res.text().catch(() => ""));
   const lead =
     res.status === 401 || res.status === 403 ? "The provider rejected that key"
     : res.status === 404 ? "Endpoint or model not found — check the base URL and model name"
