@@ -14,31 +14,65 @@ export type Hit = {
 };
 
 const STOP = new Set("a an and are as at be but by can do does for from has have how i in is it its me my of on or so that the their there this to was what when where which who why will with you your about into than then them these they".split(" "));
-export const tokens = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").split(/[^a-z0-9]+/).filter((t) => t.length >= 2 && !STOP.has(t));
+// Plurals fold onto their singular, so "canaries" finds "canary".
+const stem = (t: string) =>
+  t.length <= 3 ? t
+  : t.endsWith("ies") ? `${t.slice(0, -3)}y`
+  : /(sses|shes|ches|xes)$/.test(t) ? t.slice(0, -2)
+  : t.endsWith("s") && !/(ss|us|is)$/.test(t) ? t.slice(0, -1)
+  : t;
+export const tokens = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").split(/[^a-z0-9]+/).filter((t) => t.length >= 2 && !STOP.has(t)).map(stem);
+
+// Words that say how to answer rather than what about: "explain", "give an
+// example". They would otherwise count against a passage that does not repeat them.
+const ASKING = new Set("explain describe define definition meaning mean tell give show example please pls papi understand help know work use used using idea concept thing simple simply word again more detail summarise summarize summary quick quickly briefly lecture".split(" ").map(stem));
+export const queryTokens = (s: string) => tokens(s).filter((t) => !ASKING.has(t));
 
 type Doc = { id: number; tf: Map<string, number>; len: number };
 
-// Okapi BM25 over the given docs; returns ids ranked best first.
-export function bm25(query: string[], docs: Doc[], limit = 40): { id: number; score: number }[] {
+// Okapi BM25 over the given docs; returns ids ranked best first. `cover` is
+// the share of the question's weight (the idf of the `must` words, the whole
+// query by default) that the passage contains, so a passage that only shares
+// one common word with the question can be told apart from one about it.
+export function bm25(query: string[], docs: Doc[], limit = 40, must: string[] = query): { id: number; score: number; cover: number }[] {
   if (!query.length || !docs.length) return [];
   const avg = docs.reduce((n, d) => n + d.len, 0) / docs.length || 1;
-  const df = new Map<string, number>();
-  for (const q of new Set(query)) df.set(q, docs.reduce((n, d) => n + (d.tf.has(q) ? 1 : 0), 0));
+  const terms = new Set([...query, ...must]);
   const k1 = 1.2, b = 0.75, N = docs.length;
-  const out: { id: number; score: number }[] = [];
+  const idf = new Map<string, number>();
+  for (const q of terms) {
+    const n = docs.reduce((c, d) => c + (d.tf.has(q) ? 1 : 0), 0);
+    idf.set(q, Math.log(1 + (N - n + 0.5) / (n + 0.5)));
+  }
+  const mustSet = new Set(must);
+  const mustWeight = [...mustSet].reduce((w, q) => w + idf.get(q)!, 0) || 1;
+  const out: { id: number; score: number; cover: number }[] = [];
   for (const d of docs) {
     let s = 0;
     for (const q of new Set(query)) {
       const f = d.tf.get(q);
       if (!f) continue;
-      const n = df.get(q)!;
-      const idf = Math.log(1 + (N - n + 0.5) / (n + 0.5));
-      s += idf * (f * (k1 + 1)) / (f + k1 * (1 - b + b * d.len / avg));
+      s += idf.get(q)! * (f * (k1 + 1)) / (f + k1 * (1 - b + b * d.len / avg));
     }
-    if (s > 0) out.push({ id: d.id, score: s });
+    let covered = 0;
+    for (const q of mustSet) if (d.tf.has(q)) covered += idf.get(q)!;
+    if (s > 0) out.push({ id: d.id, score: s, cover: covered / mustWeight });
   }
   return out.sort((a, b2) => b2.score - a.score).slice(0, limit);
 }
+
+// The relevance floor. A word match counts only when the passage holds at
+// least half of what the question is about (by idf weight): "capital of
+// France" no longer finds a slide on capital letters. Calibrated on the
+// fixtures in ask-material.test.ts.
+export const LEXICAL_FLOOR = 0.5;
+
+// Meaning matches below this are noise. Each embedding model spreads its
+// scores differently, so the floor is per model; unrelated text sits under it.
+const SEMANTIC_FLOORS: [RegExp, number][] = [
+  [/text-embedding-3/i, 0.3], [/ada-002/i, 0.78], [/mistral-embed/i, 0.72], [/bge/i, 0.6], [/e5/i, 0.8], [/nomic/i, 0.5],
+];
+export const semanticFloor = (model: string) => SEMANTIC_FLOORS.find(([re]) => re.test(model))?.[1] ?? 0.3;
 
 // Reciprocal rank fusion: a passage near the top of either list rises.
 export function fuse(lists: number[][], k = 60): number[] {
@@ -63,29 +97,41 @@ function docsFor(rows: { id: number; title: string; body: string; updatedAt: num
   return docs;
 }
 
+// `context` is the student's previous question, given when the new one is a
+// short follow-up ("why?", "and heap spraying?"): it steers the ranking, but
+// the new question's own words still have to be in a passage for it to count.
 export async function retrieve(
   db: Db, userId: number, question: string,
-  opts: { moduleId?: number | null; cfg?: CompatConfig | null; k?: number; fetchFn?: typeof fetch } = {},
+  opts: { moduleId?: number | null; cfg?: CompatConfig | null; k?: number; fetchFn?: typeof fetch; context?: string | null } = {},
 ): Promise<{ hits: Hit[]; semantic: boolean; total: number }> {
   const where = opts.moduleId ? and(eq(passages.userId, userId), eq(passages.moduleId, opts.moduleId)) : eq(passages.userId, userId);
   const rows = db.select().from(passages).where(where).all();
   if (!rows.length) return { hits: [], semantic: false, total: 0 };
   const byId = new Map(rows.map((r) => [r.id, r]));
 
-  const lexical = bm25(tokens(question), docsFor(rows, `${userId}:${opts.moduleId ?? "all"}`)).map((h) => h.id);
+  const own = queryTokens(question);
+  const ctx = opts.context ? queryTokens(opts.context) : [];
+  // A follow-up with no words of its own ("why?") is about the previous question.
+  const must = own.length ? own : ctx;
+  const lexical = bm25([...own, ...ctx], docsFor(rows, `${userId}:${opts.moduleId ?? "all"}`), 40, must)
+    .filter((h) => h.cover >= LEXICAL_FLOOR).map((h) => h.id);
 
   let semantic: number[] = [];
   const model = embeddingsUsable(opts.cfg ?? null);
   if (model && opts.cfg && rows.some((r) => r.embedModel === model && r.embedding)) {
     try {
-      const [q] = await embedTexts(opts.cfg, model, [question], opts.fetchFn);
+      const [q] = await embedTexts(opts.cfg, model, [opts.context ? `${opts.context}\n${question}` : question], opts.fetchFn);
+      const floor = semanticFloor(model);
       semantic = rows.filter((r) => r.embedModel === model && r.embedding)
         .map((r) => ({ id: r.id, s: dot(q!, fromBlob(r.embedding!)) }))
-        .sort((a, b) => b.s - a.s).slice(0, 40).filter((x) => x.s > 0.15).map((x) => x.id);
+        .filter((x) => x.s >= floor).sort((a, b) => b.s - a.s).slice(0, 40).map((x) => x.id);
     } catch { semantic = []; }
   }
 
-  const ranked = semantic.length ? fuse([lexical, semantic]) : lexical;
+  // The guide is OpenPapr's own writing about the slides, so where both
+  // match, the slides (and notes and announcements) come first.
+  const fused = semantic.length ? fuse([lexical, semantic]) : lexical;
+  const ranked = [...fused.filter((id) => byId.get(id)!.kind !== "guide"), ...fused.filter((id) => byId.get(id)!.kind === "guide")];
   const codes = new Map(db.select({ id: modules.id, code: modules.code }).from(modules).where(eq(modules.userId, userId)).all().map((m) => [m.id, m.code]));
   // No more than three passages from one deck, so an answer can draw on more than one source.
   const perSource = new Map<string, number>();

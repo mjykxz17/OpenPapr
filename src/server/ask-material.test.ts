@@ -3,8 +3,8 @@ import { eq } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { files, items, modules, passages, studyGuides, users } from "../db/schema";
 import { announcementPassages, guidePassages, slidePassages, syncCheapSources, syncPassages } from "./passages";
-import { bm25, fuse, retrieve, tokens } from "./retrieve";
-import { citedSources, sourceHref } from "./ask";
+import { bm25, fuse, queryTokens, retrieve, semanticFloor, tokens } from "./retrieve";
+import { NOT_FOUND, answerFromMaterial, citedSources, isContentQuestion, isFollowUp, previousQuestion, sourceHref } from "./ask";
 import { embedTexts, embeddingsUsable, normalize, resetEmbeddingHealth, toBlob } from "../enrich/embeddings";
 import { embedPending, indexModule } from "../worker/index-material";
 
@@ -121,5 +121,111 @@ describe("indexing and asking", () => {
     const v = normalize([3, 4]);
     expect(Array.from(v)).toEqual([0.6000000238418579, 0.800000011920929]);
     expect(toBlob(v).byteLength).toBe(8);
+  });
+});
+
+describe("the relevance floor", () => {
+  let db: ReturnType<typeof createDb>;
+  let modId: number;
+  beforeEach(() => {
+    resetEmbeddingHealth();
+    db = createDb(":memory:");
+    db.insert(users).values({ name: "a" }).run();
+    modId = db.insert(modules).values({ userId: 1, canvasCourseId: 1, code: "CS4238", name: "Sec" }).returning().get().id;
+    syncPassages(db, 1, modId, "slide:7:", slidePassages(7, "L3", "v1", deckText), 1);
+    db.insert(studyGuides).values({ moduleId: modId, markdown: "## 1. Stack canaries\n\nA stack canary is a guard value the compiler places before the return address; the program checks it on return.", generatedAt: 1 }).run();
+    syncCheapSources(db, 1, modId, 1);
+  });
+
+  it("folds plurals and ignores how a question is asked", () => {
+    expect(tokens("canaries classes boxes processes")).toEqual(["canary", "class", "box", "process"]);
+    expect(queryTokens("please explain stack canaries")).toEqual(["stack", "canary"]);
+  });
+
+  it("finds nothing for a question the material does not cover, even when one word overlaps", async () => {
+    expect((await retrieve(db, 1, "what is the capital of france", { cfg: null })).hits).toEqual([]);
+    expect((await retrieve(db, 1, "how do I return a library book", { cfg: null })).hits).toEqual([]);
+  });
+
+  it("puts the slides above the study guide when both match", async () => {
+    const r = await retrieve(db, 1, "explain stack canaries", { cfg: null });
+    expect(r.hits.map((h) => h.kind)).toEqual(["slide", "guide"]);
+  });
+
+  it("searches a follow-up with the question before it, but needs its own words to match", async () => {
+    expect((await retrieve(db, 1, "why?", { cfg: null })).hits).toEqual([]);
+    expect((await retrieve(db, 1, "why?", { cfg: null, context: "what is a stack canary" })).hits[0]!.page).toBe(2);
+    expect((await retrieve(db, 1, "and heap spraying?", { cfg: null, context: "what is a stack canary" })).hits.map((h) => h.page)).toEqual([3]);
+  });
+
+  it("drops meaning matches under the model's floor", async () => {
+    // Word counts again, with one extra dimension for "none of these words":
+    // a question about something else points away from every passage.
+    const strict = (async (_url: string, init: RequestInit) => {
+      const { input } = JSON.parse(String(init.body)) as { input: string[] };
+      const data = input.map((t, index) => {
+        const v = VOCAB.map((w) => t.toLowerCase().split(w).length - 1);
+        return { index, embedding: [...v, v.some(Boolean) ? 0 : 1] };
+      });
+      return new Response(JSON.stringify({ data }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const deps = { db, now: () => 10, cfgFor: () => cfg, fileText: async () => deckText, fetchFn: strict };
+    await embedPending(deps, 1);
+    expect((await retrieve(db, 1, "what is the capital of france", { cfg, fetchFn: strict })).hits).toEqual([]);
+    expect((await retrieve(db, 1, "what does a canary protect", { cfg, fetchFn: strict })).hits[0]!.page).toBe(2);
+    expect(semanticFloor("text-embedding-3-small")).toBe(0.3);
+    expect(semanticFloor("mistral-embed")).toBeGreaterThan(0.3);
+  });
+});
+
+describe("answering from material", () => {
+  const slide = { id: 1, kind: "slide" as const, moduleId: 2, code: "CS4238", title: "L3 · slide 2", body: "A canary sits before the return address.", fileId: 7, deck: "L3", page: 2, itemId: null, anchor: null };
+  const guide = { id: 2, kind: "guide" as const, moduleId: 2, code: "CS4238", title: "Guide: Stacks", body: "Canaries.", fileId: null, deck: null, page: null, itemId: null, anchor: "stacks" };
+
+  it("says it couldn't find it, without asking the model, when nothing clears the floor", async () => {
+    let calls = 0;
+    const llm = async () => { calls++; return "Paris [1]."; };
+    const out = await answerFromMaterial({ question: "What is the capital of France?", earlier: [], hits: [], system: "S", facts: "F", llm });
+    expect(out).toEqual({ reply: NOT_FOUND, sources: [], grounded: false, askedModel: false });
+    expect(calls).toBe(0);
+  });
+
+  it("still asks the model about dates and chat, from the facts", async () => {
+    let calls = 0;
+    const llm = async () => { calls++; return "Quiz 2 is on Wed."; };
+    expect((await answerFromMaterial({ question: "When is the next quiz?", earlier: [], hits: [], system: "S", facts: "F", llm })).grounded).toBe(false);
+    await answerFromMaterial({ question: "thanks!", earlier: [], hits: [], system: "S", facts: "F", llm });
+    expect(calls).toBe(2);
+  });
+
+  it("flags an answer that cites none of its sources, and keeps out-of-range numbers out", async () => {
+    const llm = async () => "It guards the return address [7].";
+    const out = await answerFromMaterial({ question: "what does a canary guard", earlier: [], hits: [slide], system: "S", facts: "F", llm });
+    expect(out.reply).toBe("It guards the return address.");
+    expect(out.grounded).toBe(false);
+    expect((await answerFromMaterial({ question: "what does a canary guard", earlier: [], hits: [slide], system: "S", facts: "F", llm: async () => "The return address [1]." })).grounded).toBe(true);
+  });
+
+  it("sends history without its old [n] markers and labels the study guide", async () => {
+    let sent: { role: string; content: string }[] = [];
+    const llm = async (m: { role: string; content: string }[]) => { sent = m; return "See [2]."; };
+    const out = await answerFromMaterial({
+      question: "why?", context: "what is a canary", hits: [slide, guide], system: "S", facts: "F", llm,
+      earlier: [{ role: "user", content: "what is a canary" }, { role: "assistant", content: "A guard value [1][2]. It is checked on return [3]." }],
+    });
+    expect(sent[2]!.content).toBe("A guard value. It is checked on return.");
+    expect(sent[0]!.content).toContain("[2] (study guide) CS4238 · Guide: Stacks");
+    expect(out.sources[0]).toMatchObject({ n: 2, label: "study guide", title: "Study guide: Stacks" });
+  });
+
+  it("knows a follow-up and a content question when it sees one", () => {
+    expect(isFollowUp("why?")).toBe(true);
+    expect(isFollowUp("and heap spraying?")).toBe(true);
+    expect(isFollowUp("give an example of that")).toBe(true);
+    expect(isFollowUp("what is the difference between a stack canary and ASLR")).toBe(false);
+    expect(previousQuestion([{ role: "user", content: "a" }, { role: "assistant", content: "b" }, { role: "user", content: "c" }])).toBe("c");
+    expect(isContentQuestion("explain stack canaries")).toBe(true);
+    expect(isContentQuestion("what's due this week?")).toBe(false);
+    expect(isContentQuestion("hi papi")).toBe(false);
   });
 });

@@ -14,22 +14,32 @@ import { isAddRequest, parseQuickAdd } from "@/server/quick-add";
 import { createManualTask, endOfSgtDay } from "@/server/tasks";
 import { dayLabel } from "@/lib/format-date";
 import { retrieve } from "@/server/retrieve";
-import { SOURCES_RULES, citedSources, sourcesBlock, type SourceRef } from "@/server/ask";
+import { answerFromMaterial, isFollowUp, previousQuestion, type SourceRef } from "@/server/ask";
 
 export const dynamic = "force-dynamic";
 
 // Ask Papi something, inside a conversation. The conversation is stored, so
 // its earlier turns give the model context and the student can come back to
 // it. No sessionId starts a new one. With an AI provider the question is
-// answered from a sheet of the student's own facts; without one, simple date
+// answered from a sheet of the student's own facts and the passages of their
+// material that clear the relevance floor; without one, simple date
 // questions still get an answer from the rules.
+//
+// Response: { reply, smart, sources, grounded, sessionId, title?, added? }.
+// `sources` are the passages the reply cites ([n] in the text), each with a
+// `label` ("slides", "study guide", "your note", "announcement").
+// `grounded` is true only when the reply cites at least one of them. It is
+// false for "I couldn't find that in your material" (nothing passed the
+// floor; the model was not asked), for an answer that cites nothing, and for
+// answers about dates and tasks, which come from the student's facts rather
+// than their material. The same flag is kept on the stored message.
 export async function POST(request: Request) {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
     return NextResponse.json({ error: "expected a JSON body" }, { status: 415 });
   }
-  if (!rateLimit(`pet:${userId}`, 40, 10 * 60_000)) return NextResponse.json({ reply: "I need a little breather — too many questions at once. Try again in a few minutes?" });
+  if (!rateLimit(`pet:${userId}`, 40, 10 * 60_000)) return NextResponse.json({ reply: "I need a little breather — too many questions at once. Try again in a few minutes?", grounded: false });
   let body: { message?: unknown; sessionId?: unknown; moduleId?: unknown };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: "invalid body" }, { status: 400 }); }
   const question = typeof body.message === "string" ? body.message.trim().slice(0, 1000) : "";
@@ -57,9 +67,9 @@ export async function POST(request: Request) {
       ? "What should I remind you about? Try “remind me to print the tutorial sheet by Friday”."
       : `Added to your tasks: “${q.title}”${dueAt ? `, due ${dayLabel(dueAt)}` : " (no date — say “by Friday” next time and I'll set one)"}. It's on the Tasks page.`;
     // The demo account is shared by every visitor: nobody's chat is kept for the next one.
-    if (user?.isDemo) return NextResponse.json({ reply, smart: false, sessionId: null, added: id !== null });
+    if (user?.isDemo) return NextResponse.json({ reply, smart: false, grounded: false, sessionId: null, added: id !== null });
     const saved = appendToChat(db, userId, earlierTurns.length ? sessionId : null, question, reply, now);
-    return NextResponse.json({ reply, smart: false, sessionId: saved.id, title: saved.title, added: id !== null });
+    return NextResponse.json({ reply, smart: false, grounded: false, sessionId: saved.id, title: saved.title, added: id !== null });
   }
   const fallback = () => ruleAnswer(question, dueList(db, userId, now), codes, now, recentlySaid(db, userId, now));
   const earlier = earlierTurns;
@@ -67,32 +77,29 @@ export async function POST(request: Request) {
   let reply: string;
   let smart = false;
   let sources: SourceRef[] = [];
+  let grounded = false;
   if (!cfg) reply = fallback();
   else {
     try {
-      // The student's own material that bears on the question, numbered.
+      // The student's own material that bears on the question, numbered. A
+      // short follow-up ("why?") is searched together with the question before it.
       const ownsScope = scope !== null && mods.some((m) => m.id === scope);
-      const found = await retrieve(db, userId, question, { moduleId: ownsScope ? scope : null, cfg, k: 8 }).catch(() => null);
-      const hits = found?.hits ?? [];
-      const system = hits.length
-        ? `${PET_SYSTEM}\n\n${SOURCES_RULES}\n\nFACTS\n${factSheet(db, userId, now)}\n\nSOURCES\n${sourcesBlock(hits)}`
-        : `${PET_SYSTEM}\n\nFACTS\n${factSheet(db, userId, now)}`;
-      const out = await complete(cfg, [
-        { role: "system", content: system },
-        ...earlier.slice(-8).map((m) => ({ role: m.role, content: m.content })),
-        { role: "user", content: question },
-      ], { maxTokens: hits.length ? 700 : 400, temperature: hits.length ? 0.3 : 0.6, timeoutMs: 60_000 });
-      const clean = out.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#+\s*/gm, "").trim();
-      const cited = citedSources(clean, hits);
-      reply = cited.text || fallback();
-      sources = cited.sources;
-      smart = true;
+      const context = isFollowUp(question) ? previousQuestion(earlier) : null;
+      const found = await retrieve(db, userId, question, { moduleId: ownsScope ? scope : null, cfg, k: 8, context }).catch(() => null);
+      const out = await answerFromMaterial({
+        question, earlier, context, hits: found?.hits ?? [], system: PET_SYSTEM, facts: factSheet(db, userId, now),
+        llm: (messages, o) => complete(cfg, messages, { ...o, timeoutMs: 60_000 }),
+      });
+      reply = out.reply || fallback();
+      sources = out.sources;
+      grounded = out.grounded && !!out.reply;
+      smart = out.askedModel;
     } catch {
       // The model is down or out of credit: the rules still know the dates.
       reply = `${fallback()} (My big brain is offline, so that's the short version.)`;
     }
   }
-  if (user?.isDemo) return NextResponse.json({ reply, smart, sources, sessionId: null });
-  const saved = appendToChat(db, userId, earlier.length ? sessionId : null, question, reply, now, sources);
-  return NextResponse.json({ reply, smart, sources, sessionId: saved.id, title: saved.title });
+  if (user?.isDemo) return NextResponse.json({ reply, smart, sources, grounded, sessionId: null });
+  const saved = appendToChat(db, userId, earlier.length ? sessionId : null, question, reply, now, sources, grounded);
+  return NextResponse.json({ reply, smart, sources, grounded, sessionId: saved.id, title: saved.title });
 }
