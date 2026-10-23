@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { LockTimeoutError, processLock } from "./process-lock";
@@ -67,6 +67,37 @@ describe("processLock", () => {
     await Promise.all([runs[0], runs[2]]);
     expect(order).toEqual([1, 2, 3]);
     lock.close();
+  });
+
+  it("takes turns: a backlog in one process does not starve a waiter in another", async () => {
+    const path = lockPath();
+    const a = processLock(path);
+    const b = processLock(path);
+    const order: string[] = [];
+    // The worker with a guide's worth of decks to convert, 100ms each.
+    const backlog = Array.from({ length: 8 }, (_, i) => a.run(async () => { order.push(`a${i}`); await sleep(100); }, { pollMs: 50 }));
+    await sleep(20);
+    // A viewer arriving meanwhile, polling more slowly than a holder hands over.
+    const viewer = b.run(async () => { order.push("b"); }, { pollMs: 50, maxWaitMs: 600 });
+    await expect(viewer).resolves.toBeUndefined();
+    await Promise.all(backlog);
+    expect(order.indexOf("b")).toBeLessThanOrEqual(2);
+    a.close(); b.close();
+  });
+
+  it("does not stand back for a waiter that has gone", async () => {
+    const path = lockPath();
+    const a = processLock(path);
+    await a.run(async () => {});
+    // A marker left by a process that died waiting, long untouched.
+    const stale = `${path}.wait-999-dead`;
+    writeFileSync(stale, "");
+    const old = new Date(Date.now() - 30_000);
+    utimesSync(stale, old, old);
+    const t = Date.now();
+    await a.run(async () => {}, { pollMs: 200 });
+    expect(Date.now() - t).toBeLessThan(150);
+    a.close();
   });
 
   it("is released when the process holding it is killed", async () => {

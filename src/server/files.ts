@@ -132,13 +132,14 @@ export function sofficeBin(): string | null {
 // hundred MB, and the web server and the worker can each want one at once on
 // 1GB. The lock is shared between the two processes (see process-lock).
 let convertLock: { path: string; lock: ProcessLock } | null = null;
-function oneConversionAtATime<T>(work: () => Promise<T>): Promise<T> {
+function oneConversionAtATime<T>(work: () => Promise<T>, maxWaitMs: number): Promise<T> {
   const path = join(dirname(dbPath()), "convert.lock");
   if (convertLock?.path !== path) convertLock = { path, lock: processLock(path) };
-  // A conversion is capped at three minutes; past five in line, something is
-  // queued behind several, and the viewer is better told to come back.
-  return convertLock.lock.run(work, { maxWaitMs: 5 * 60_000 });
+  return convertLock.lock.run(work, { maxWaitMs });
 }
+// A conversion is capped at three minutes; past five in line, something is
+// queued behind several, and the viewer is better told to come back.
+const VIEWER_WAIT_MS = 5 * 60_000;
 
 async function runSoffice(bin: string, srcPath: string, ext: string): Promise<Uint8Array | null> {
   const work = mkdtempSync(join(tmpdir(), "op-convert-"));
@@ -161,7 +162,9 @@ async function runSoffice(bin: string, srcPath: string, ext: string): Promise<Ui
 }
 
 // The file as a PDF: itself for a PDF, a converted copy for an office file.
-export function ensurePdf(db: Db, userId: number, row: Row): Promise<Served> {
+// Background readers can afford to wait longer for the converter than a
+// viewer (convertWaitMs); a 503 means "busy, try later", never "unreadable".
+export function ensurePdf(db: Db, userId: number, row: Row, opts: { convertWaitMs?: number } = {}): Promise<Served> {
   const kind = fileKind(row.file.displayName);
   if (kind === "pdf") return ensureOriginal(db, userId, row);
   if (kind !== "office") return Promise.resolve({ error: "no PDF form for this file", status: 415 });
@@ -177,17 +180,24 @@ export function ensurePdf(db: Db, userId: number, row: Row): Promise<Served> {
     const original = await ensureOriginal(db, userId, row);
     if ("error" in original) return original;
     const ext = row.file.displayName.split(".").pop()!.toLowerCase();
-    let pdf: Uint8Array | null;
+    let outcome: "converted" | "cached" | "failed";
     try {
-      pdf = await oneConversionAtATime(() => runSoffice(bin, original.path, ext));
+      outcome = await oneConversionAtATime(async () => {
+        // The other process may have converted this very deck while we
+        // waited; it writes the copy before letting go of the lock.
+        if (cacheIsCurrent(db, target, row)) return "cached";
+        const pdf = await runSoffice(bin, original.path, ext);
+        if (!pdf || pdf.length === 0) return "failed";
+        writeAtomic(target, pdf);
+        recordSource(target, row);
+        return "converted";
+      }, opts.convertWaitMs ?? VIEWER_WAIT_MS);
     } catch (err) {
       if (err instanceof LockTimeoutError) return { error: "lots of files are being converted right now — try again in a minute", status: 503 };
       throw err;
     }
-    if (!pdf || pdf.length === 0) return { error: "this file could not be converted for preview", status: 422 };
-    writeAtomic(target, pdf);
-    recordSource(target, row);
-    await optimizePdf(target);
+    if (outcome === "failed") return { error: "this file could not be converted for preview", status: 422 };
+    if (outcome === "converted") await optimizePdf(target);
     return stat(target);
   });
 }
