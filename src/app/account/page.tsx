@@ -10,6 +10,7 @@ import { AppearanceMenu } from "@/components/AppearanceMenu";
 import { SignOutButton } from "@/components/SignOutButton";
 import { userProfileView } from "@/server/profiles";
 import { canGenerateGuides } from "@/server/llm-access";
+import { demoLlmConfig } from "@/server/llm-config";
 import { usageThisMonth } from "@/server/llm-usage";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,10 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
   const shared = sharedLlmConfig(env);
   const sharedModel = shared?.model ?? (env.ANTHROPIC_API_KEY ? env.ANTHROPIC_MODEL : null);
   const about = { ...userProfileView(getDb(), userId), hasModel: canGenerateGuides(getDb(), userId) };
+  // The shared demo has no token or key of its own: it shows sample courses
+  // and borrows this server's AI, so the page says that instead of
+  // "Not linked" and offers no forms the server would refuse.
+  const demo = user.isDemo ? { aiModel: demoLlmConfig(getDb())?.model ?? null, dailyCalls: env.DEMO_DAILY_CALLS } : null;
 
   return (
     <AppShell>
@@ -60,6 +65,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         about={about}
         usage={{ ...usageThisMonth(getDb(), userId, Date.now()), limit: env.SHARED_MONTHLY_CALLS }}
         calendarUrl={user.calendarToken ? `/api/calendar/feed/${user.calendarToken}.ics` : null}
+        demo={demo}
       />
     </AppShell>
   );
