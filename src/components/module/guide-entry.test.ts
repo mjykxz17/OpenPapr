@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guideEntry } from "./guide-entry";
+import { guideEmptyText, guideEntry } from "./guide-entry";
 
 const none = { hasGuide: false, writing: null, ready: 0, total: 0, canWrite: true };
 
@@ -21,5 +21,19 @@ describe("guideEntry", () => {
   it("doesn't send a demo visitor to set up AI they can't use", () => {
     expect(guideEntry({ ...none, canWrite: false, demo: true }).label).toBe("Guide: not in the demo");
     expect(guideEntry({ ...none, hasGuide: true, demo: true }).primary).toBe(true);
+  });
+});
+
+describe("guideEmptyText", () => {
+  it("tells a demo visitor the guide isn't coming, like the button does", () => {
+    const text = guideEmptyText({ ...none, demo: true });
+    expect(text).toMatch(/no guide in the demo/);
+    expect(text).not.toMatch(/writes itself/);
+  });
+  it("matches the button for work in progress and a missing AI model", () => {
+    expect(guideEmptyText({ ...none, writing: "Graphs" })).toMatch(/“Graphs” is being written now/);
+    expect(guideEmptyText({ ...none, total: 5, ready: 2 })).toMatch(/2 of 5 chapters are written/);
+    expect(guideEmptyText({ ...none, canWrite: false })).toMatch(/Once AI is turned on in Account/);
+    expect(guideEmptyText(none)).toMatch(/^No guide yet\. It writes itself/);
   });
 });
