@@ -90,6 +90,7 @@ export function SyncButton({ lastSyncedAt, label }: { lastSyncedAt?: number | nu
     if (auto.current || lastSyncedAt === undefined) return;
     auto.current = true;
     if (lastSyncedAt !== null && Date.now() - lastSyncedAt < SYNC_ON_OPEN_AFTER_MS) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing on open starts once, after mount
     void syncNow(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastSyncedAt]);

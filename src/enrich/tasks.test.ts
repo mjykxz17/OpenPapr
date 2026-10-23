@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { balanceDays, cleanPlan, dailyCap, mergeTasks, obligationLines, quizNumber, quizSeries, rollForward, sgtDate, stepId, type TaskSource, type TaskStep } from "./tasks";
+import { balanceDays, cleanPlan, dailyCap, mergeTasks, obligationLines, quizNumber, quizSeries, rollForward, stepId, type TaskSource, type TaskStep } from "./tasks";
+import { sgtDate } from "../lib/sgt";
 
 const NOW = Date.UTC(2026, 8, 25, 2, 0); // Fri 25 Sep 2026, 10:00 SGT
 const refs = new Map<string, TaskSource>([

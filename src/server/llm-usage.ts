@@ -1,12 +1,13 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { llmUsage } from "@/db/schema";
+import { sgtMonth } from "@/lib/sgt";
 
 // Counts AI calls per student per month, and says whether they may still use
 // the shared key. Kept to the database so the worker and the web server count
 // into the same place.
 
-export const usageMonth = (now: number) => new Date(now + 8 * 3_600_000).toISOString().slice(0, 7);
+export const usageMonth = (now: number) => sgtMonth(now);
 
 export function recordLlmCall(db: Db, userId: number, shared: boolean, now: number): void {
   const month = usageMonth(now);

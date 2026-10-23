@@ -2,7 +2,8 @@ import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { items, modules, taskChanges, taskFeedback, tasks } from "@/db/schema";
 import { sameAssessment } from "@/lib/own-work";
-import { fitSteps, sgtDate, type TaskStep } from "@/enrich/tasks";
+import { fitSteps, type TaskStep } from "@/enrich/tasks";
+import { sgtDate } from "@/lib/sgt";
 
 // The bell: what the courses changed. A proposal (a date the student set that
 // an announcement now contradicts) waits for "Use the new date" or "Keep

@@ -6,6 +6,7 @@ import type { TasksView } from "@/server/tasks";
 import { clip, firstSentence, fmtMinutes } from "@/components/profile/WeekPlan";
 import { WeightBar } from "@/components/WeightBar";
 import { dayLabel } from "@/lib/format-date";
+import { sgtNoon } from "@/lib/sgt";
 
 // The small faces of the home widgets. Server-rendered, so every date is
 // formatted once, in Singapore time, and the browser never disagrees.
@@ -65,7 +66,7 @@ export function TodayWidget({ view, size, tomorrow }: { view: TasksView; size: "
     return (
       <WidgetCard title="Today" href="/tasks">
         {steps.length ? <Big n={steps.length} unit={steps.length === 1 ? "step" : "steps"} /> : <Big n="0" unit="steps" />}
-        <p className="mt-auto text-[13px] text-ink-2">{steps.length ? fmtMinutes(view.todayMinutes) : view.nextDay ? `Next: ${dayLabel(Date.parse(`${view.nextDay.date}T12:00:00+08:00`))}` : "A free day"}</p>
+        <p className="mt-auto text-[13px] text-ink-2">{steps.length ? fmtMinutes(view.todayMinutes) : view.nextDay ? `Next: ${dayLabel(sgtNoon(view.nextDay.date))}` : "A free day"}</p>
       </WidgetCard>
     );
   }
@@ -73,7 +74,7 @@ export function TodayWidget({ view, size, tomorrow }: { view: TasksView; size: "
   return (
     <WidgetCard title={steps.length ? `Today · ${fmtMinutes(view.todayMinutes)}` : "Today"} href="/tasks" linkLabel="All tasks">
       {steps.length === 0 ? (
-        <Empty>{view.nextDay ? `Nothing today. Next steps on ${dayLabel(Date.parse(`${view.nextDay.date}T12:00:00+08:00`))}.` : "Nothing scheduled. Enjoy it."}</Empty>
+        <Empty>{view.nextDay ? `Nothing today. Next steps on ${dayLabel(sgtNoon(view.nextDay.date))}.` : "Nothing scheduled. Enjoy it."}</Empty>
       ) : (
         <ul className="flex flex-col gap-2 text-[13px]">
           {steps.slice(0, max).map((s) => (

@@ -4,13 +4,14 @@
 // hour. Opening the app syncs on the spot if the last sync is more than a
 // couple of minutes old, so what a student sees is fresh either way.
 
+import { sgtHour } from "./sgt";
+
 const H = 3_600_000;
 const QUIET_FROM = 1;  // 01:00 SGT
 const QUIET_TO = 7;    // 07:00 SGT
 export const QUIET_INTERVAL_MS = H;
 export const SYNC_ON_OPEN_AFTER_MS = 2 * 60_000;
 
-export const sgtHour = (ms: number) => new Date(ms + 8 * H).getUTCHours();
 export const isQuietHour = (ms: number) => sgtHour(ms) >= QUIET_FROM && sgtHour(ms) < QUIET_TO;
 
 export function pollIntervalAt(now: number, baseMs: number): number {

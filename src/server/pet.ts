@@ -6,6 +6,7 @@ import { components, items, modules, tasks } from "@/db/schema";
 import { getNusmods } from "@/db/profiles-repo";
 import { moduleCodes } from "@/connectors/nusmods/client";
 import { htmlToText } from "@/lib/html-text";
+import { sgtDate, sgtDayLabel, sgtHHMM, sgtHour } from "@/lib/sgt";
 
 // Papi, the paper creature at the bottom of every page. Everything it says
 // about the student's work comes from here: a plain-text sheet of facts built
@@ -14,15 +15,8 @@ import { htmlToText } from "@/lib/html-text";
 
 const H = 3_600_000;
 const D = 24 * H;
-const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-export function sgt(ms: number): string {
-  const d = new Date(ms + 8 * H);
-  const hh = String(d.getUTCHours()).padStart(2, "0"), mm = String(d.getUTCMinutes()).padStart(2, "0");
-  return `${WEEKDAY[d.getUTCDay()]} ${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}, ${hh}:${mm}`;
-}
-const sgtDay = (ms: number) => sgt(ms).replace(/, \d\d:\d\d$/, "");
+// "Wed 1 Oct, 23:59" in Singapore time.
+export const sgt = (ms: number) => `${sgtDayLabel(ms)}, ${sgtHHMM(ms)}`;
 
 export type Due = {
   id: number; code: string | null; title: string; kind: string; dueAt: number;
@@ -129,7 +123,7 @@ export function factSheet(db: Db, userId: number, now: number): string {
     const codes = new Map(mods.map((m) => [m.id, m.code]));
     for (const a of said) {
       const who = a.type === "staff_reply" ? `${a.sender ?? "Lecturer"} in a discussion` : "announcement";
-      lines.push(`- ${codes.get(a.moduleId!)} | ${sgtDay(a.sourceCreatedAt ?? a.firstSeenAt)} | ${who} | ${a.title}: ${htmlToText(a.body).replace(/\s+/g, " ").slice(0, 350)}`);
+      lines.push(`- ${codes.get(a.moduleId!)} | ${sgtDayLabel(a.sourceCreatedAt ?? a.firstSeenAt)} | ${who} | ${a.title}: ${htmlToText(a.body).replace(/\s+/g, " ").slice(0, 350)}`);
     }
   }
   return lines.join("\n").slice(0, 16_000);
@@ -152,7 +146,7 @@ export function ruleAnswer(question: string, due: Due[], codes: string[], now: n
   if (/\b(say|said|announce|announcement|lecturer|prof|professor|ta|update|news)\b/.test(q)) {
     const pool = said.filter((x) => !code || x.code === code).slice(0, 4);
     return pool.length
-      ? `Recently: ${pool.map((x) => `${x.code ?? ""} ${x.who} — "${x.title}" (${sgtDay(x.at)})`.trim()).join("; ")}. Open the module page for the full text.`
+      ? `Recently: ${pool.map((x) => `${x.code ?? ""} ${x.who} — "${x.title}" (${sgtDayLabel(x.at)})`.trim()).join("; ")}. Open the module page for the full text.`
       : `Nothing new from ${code ?? "your courses"} in the last three weeks.`;
   }
   const kind = KIND_RE.find(([re]) => re.test(q))?.[1] ?? (/\bdiscussion|forum|post\b/.test(q) ? "discussion" : null);
@@ -183,7 +177,7 @@ export function reminders(db: Db, userId: number, now: number): string[] {
       ? `${d.code ?? ""} ${d.title} is due in about ${Math.max(1, hrs)} hour${hrs === 1 ? "" : "s"}. I believe in you. Mostly.`.trim()
       : `Heads up: ${d.code ? `${d.code} ` : ""}${d.title} is due ${sgt(d.dueAt)}.${d.weightPct ? ` It counts toward ${d.weightName} (${d.weightPct}%).` : ""}`);
   }
-  const today = new Date(now + 8 * H).toISOString().slice(0, 10);
+  const today = sgtDate(now);
   const steps = shownTasks(db, userId).flatMap((t) => {
     try { return (JSON.parse(t.stepsJson) as { text: string; doBy: string; done: boolean; minutes: number }[]).filter((s) => !s.done && s.doBy <= today); } catch { return []; }
   });
@@ -217,7 +211,7 @@ const QUIPS = [
   "I don't sleep. Well. From 1 to 7am I do. Very important paper business.",
 ];
 export function quips(codes: string[], now: number): string[] {
-  const hour = new Date(now + 8 * H).getUTCHours();
+  const hour = sgtHour(now);
   const out = [...QUIPS];
   if (codes.length) {
     const c = codes[Math.floor((now / H) % codes.length)];

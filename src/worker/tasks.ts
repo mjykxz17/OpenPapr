@@ -7,10 +7,11 @@ import { moduleCodes } from "../connectors/nusmods/client";
 import type { CompatConfig } from "../enrich/openai-compat";
 import { ModuleProfile } from "../enrich/profiles";
 import {
-  balanceDays, capWithClasses, fitSteps, mergeTasks, obligationLines, planModuleTasks, quizNumber, quizSeries, refFacts, revisionStepText, sgtDate, sgtStamp, stepId,
+  balanceDays, capWithClasses, fitSteps, mergeTasks, obligationLines, planModuleTasks, quizNumber, quizSeries, refFacts, revisionStepText, stepId,
   weakSpotAdvice, weakSpotGroups, type CleanTask, type ModuleTaskInput, type RefFact, type SignalItem, type TaskSource, type TaskStep,
 } from "../enrich/tasks";
 import { htmlToText } from "../lib/html-text";
+import { sgtDate, sgtStamp, sgtWeekday } from "../lib/sgt";
 import { variantGroups } from "../lib/variants";
 import type { AssignmentMeta } from "../connectors/canvas/normalize";
 import { effectiveComponents } from "./profiles";
@@ -230,9 +231,8 @@ export function moduleSignals(db: Db, userId: number, mod: typeof modules.$infer
   for (const [k, v] of road.refs) refs.set(k, v);
   const slots = classSlots(rows).map((s) => `${WEEKDAY[s.weekday]} ${s.time} — "${s.title}" (${s.count} on the calendar)`);
 
-  const d = new Date(now + 8 * H);
   const input: ModuleTaskInput = {
-    today: `${sgtDate(now)} (${WEEKDAY[d.getUTCDay()]})`,
+    today: `${sgtDate(now)} (${WEEKDAY[sgtWeekday(now)]})`,
     module: { code: mod.code, name: mod.name },
     canvas, past: pastRows, announcements, discussions, notes, fileHints: fileLines, weightage, examDate, studyAdvice, existing, feedback,
     roadmap: road.lines, calendar: calendarLines(now, mod.term), classSlots: slots,

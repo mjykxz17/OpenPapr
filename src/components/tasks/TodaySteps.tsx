@@ -120,10 +120,12 @@ function useHold(steps: TodayStep[]) {
     return () => { for (const t of all.values()) clearTimeout(t); };
   }, []);
   // An un-ticked step stays put until the server lists it again.
-  useEffect(() => {
+  const [listed, setListed] = useState(steps);
+  if (steps !== listed) {
+    setListed(steps);
     const have = new Set(steps.map(keyOf));
     setHeld((h) => (h.some((x) => x.undone && have.has(keyOf(x.step))) ? h.filter((x) => !(x.undone && have.has(keyOf(x.step)))) : h));
-  }, [steps]);
+  }
 
   const stop = (k: string) => { clearTimeout(timers.current.get(k)); timers.current.delete(k); waiting.current.delete(k); };
   const forget = (k: string) => setHeld((h) => h.filter((x) => keyOf(x.step) !== k));

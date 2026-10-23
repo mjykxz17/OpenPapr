@@ -1,6 +1,8 @@
 // A minimal iCalendar (RFC 5545) writer for the student's private feed:
 // timed events, all-day events, escaping and line folding. Nothing else.
 
+import { SGT_ZONE } from "./sgt";
+
 export type CalEvent =
   | { uid: string; title: string; description?: string; url?: string | null; start: number; end: number; allDay?: false }
   | { uid: string; title: string; description?: string; url?: string | null; date: string; allDay: true }; // date: YYYY-MM-DD
@@ -28,7 +30,7 @@ function fold(line: string): string {
 export function buildIcs(name: string, events: CalEvent[], now: number): string {
   const lines = [
     "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//OpenPapr//Deadlines//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
-    `X-WR-CALNAME:${esc(name)}`, "X-WR-TIMEZONE:Asia/Singapore", "REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H",
+    `X-WR-CALNAME:${esc(name)}`, `X-WR-TIMEZONE:${SGT_ZONE}`, "REFRESH-INTERVAL;VALUE=DURATION:PT1H", "X-PUBLISHED-TTL:PT1H",
   ];
   for (const e of events) {
     lines.push("BEGIN:VEVENT", `UID:${e.uid}`, `DTSTAMP:${utc(now)}`);

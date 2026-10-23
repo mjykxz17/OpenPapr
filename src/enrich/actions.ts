@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { chatJson, type CompatConfig } from "./openai-compat";
-import { parseSgt, sgtStamp } from "./tasks";
+import { parseSgt, sgtStamp } from "../lib/sgt";
 
 // Deadline extraction from announcement/email prose. Contract:
 //   null  = LLM call failed or output unusable → caller leaves the item

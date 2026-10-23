@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/server/db";
 import { currentUserId } from "@/server/session";
 import { rateLimit } from "@/server/rate-limit";
-import { createManualTask, isDay, isTime, sgtAt, USER_KINDS } from "@/server/tasks";
+import { createManualTask, isDay, isTime, USER_KINDS } from "@/server/tasks";
+import { sgtAt } from "@/lib/sgt";
 
 export const dynamic = "force-dynamic";
 

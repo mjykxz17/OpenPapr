@@ -5,6 +5,7 @@ import { items, modules, tasks, users } from "@/db/schema";
 import type { CalEvent } from "@/lib/ics";
 import { variantGroups } from "@/lib/variants";
 import { isConcrete } from "@/lib/concrete";
+import { sgtDate } from "@/lib/sgt";
 
 // What goes into the student's calendar feed: every dated piece of work that
 // is still to do (Canvas assignments and quizzes, extracted deadlines, their
@@ -14,7 +15,6 @@ import { isConcrete } from "@/lib/concrete";
 
 const D = 86_400_000;
 const parse = <T,>(json: string | null | undefined, fallback: T): T => { try { return json ? (JSON.parse(json) as T) : fallback; } catch { return fallback; } };
-const sgtDate = (ms: number) => new Date(ms + 8 * 3_600_000).toISOString().slice(0, 10);
 
 export function calendarEvents(db: Db, userId: number, now: number, opts: { steps: boolean; baseUrl: string }): CalEvent[] {
   const mods = new Map(db.select().from(modules).where(eq(modules.userId, userId)).all().filter((m) => m.active && !m.hidden).map((m) => [m.id, m]));

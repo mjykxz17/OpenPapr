@@ -22,6 +22,8 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
   const userId = await requireUserId();
   const { welcome } = await searchParams;
   const env = loadEnv();
+  // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this is that request's time
+  const now = Date.now();
   const user = getUser(getDb(), userId)!;
 
   let canvasHint: string | null = null;
@@ -63,7 +65,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         sharedModel={sharedModel}
         signIn={{ username: user.username ?? null, hasPassword: Boolean(user.passwordHash) }}
         about={about}
-        usage={{ ...usageThisMonth(getDb(), userId, Date.now()), limit: env.SHARED_MONTHLY_CALLS }}
+        usage={{ ...usageThisMonth(getDb(), userId, now), limit: env.SHARED_MONTHLY_CALLS }}
         calendarUrl={user.calendarToken ? `/api/calendar/feed/${user.calendarToken}.ics` : null}
         demo={demo}
       />

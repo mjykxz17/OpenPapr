@@ -14,6 +14,7 @@ export function OfflineButton({ moduleId, markdown }: { moduleId: number; markdo
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only state, read after mount so the server render and hydration agree
     try { const v = localStorage.getItem(offlineKey(moduleId)); setSavedAt(v ? Number(v) : null); } catch { /* none */ }
   }, [moduleId]);
 

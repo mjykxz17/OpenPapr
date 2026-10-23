@@ -1,10 +1,11 @@
-import { and, desc, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { items, modules, taskFeedback, taskPlans, tasks, users } from "@/db/schema";
-import { capWithClasses, dayLoads, fitSteps, sgtDate, type DayLoad, type TaskKind, type TaskSource, type TaskStep } from "@/enrich/tasks";
+import { capWithClasses, dayLoads, fitSteps, type DayLoad, type TaskKind, type TaskSource, type TaskStep } from "@/enrich/tasks";
 import { TASK_KINDS } from "@/db/schema";
 import { dueLabel, shortDate } from "@/lib/format-date";
 import { isConcrete } from "@/lib/concrete";
+import { addSgtDays, sgtAt, sgtDate, sgtHHMM, sgtTime } from "@/lib/sgt";
 
 export type SourceLink = TaskSource & { href: string | null; external: boolean };
 export type TaskView = {
@@ -99,7 +100,7 @@ export function tasksView(db: Db, userId: number, now: number): TasksView {
 // their length, and NUSMods timetables are not stored, so it is a count,
 // not hours.
 export function classesOn(db: Db, userId: number, today: string, days = 22): Map<string, number> {
-  const from = Date.parse(`${today}T00:00:00+08:00`);
+  const from = sgtTime(today);
   const active = new Set(db.select({ id: modules.id }).from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all().map((m) => m.id));
   const events = db.select({ dueAt: items.dueAt, moduleId: items.moduleId, title: items.title, dismissed: items.dismissed }).from(items)
     .where(and(eq(items.userId, userId), eq(items.type, "event"))).all()
@@ -144,16 +145,11 @@ export type TaskChange = {
 
 export const USER_KINDS: TaskKind[] = ["admin", "personal", "meeting", "submission", "prep", "reading", "project", "quiz", "exam", "presentation"];
 export const isTime = (s: unknown): s is string => typeof s === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
-// A time on a Singapore day; without one, by the end of it.
-export const sgtAt = (day: string, time: string | null | undefined) => (time ? Date.parse(`${day}T${time}:00+08:00`) : endOfSgtDay(day));
 export const isManual = (key: string) => key.startsWith("manual-");
 
 export const isDay = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`));
-// The end of that day in Singapore: "due Friday" means by Friday night.
-export const endOfSgtDay = (day: string) => Date.parse(`${day}T23:59:00+08:00`);
-const hhmm = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Singapore" });
 // "15:00", or null for "by the end of the day".
-export const timeOf = (ms: number) => { const t = hhmm.format(ms); return t === "23:59" ? null : t; };
+export const timeOf = (ms: number) => { const t = sgtHHMM(ms); return t === "23:59" ? null : t; };
 
 export function updateTask(db: Db, userId: number, taskId: number, change: TaskChange, now: number): boolean {
   const t = db.select().from(tasks).where(and(eq(tasks.id, taskId), eq(tasks.userId, userId))).get();
@@ -235,7 +231,7 @@ export function createManualTask(db: Db, userId: number, input: { title: string;
   const today = sgtDate(now);
   // One step, on the day before it is due (or today, if that is sooner).
   const due = input.dueAt === null ? null : sgtDate(input.dueAt);
-  const dayBefore = due ? sgtDate(Date.parse(`${due}T12:00:00+08:00`) - D) : today;
+  const dayBefore = due ? addSgtDays(due, -1) : today;
   const doBy = !due ? today : dayBefore < today ? (due < today ? today : due) : dayBefore;
   const row = db.insert(tasks).values({
     userId, moduleId, key: `manual-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`, title,

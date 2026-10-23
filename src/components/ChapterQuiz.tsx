@@ -93,6 +93,7 @@ export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: num
     if (start === seen.current) return;
     seen.current = start;
     box.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a press of Start in the parent kicks off the load here
     if (!qs && !busy) void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [start]);

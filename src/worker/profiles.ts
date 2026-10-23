@@ -15,6 +15,7 @@ import {
   ModuleProfile, UserProfile, WritingStyle, type ModuleProfileInput,
 } from "../enrich/profiles";
 import { htmlToText } from "../lib/html-text";
+import { sgtClock } from "../lib/sgt";
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -250,7 +251,6 @@ export async function refreshProfiles(deps: ProfileDeps, userId: number): Promis
 }
 
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const SGT = 8 * H;
 
 async function refreshWeeklyPlan(deps: ProfileDeps, userId: number, cfg: CompatConfig): Promise<"built" | "skipped" | string> {
   const { db } = deps;
@@ -266,7 +266,7 @@ async function refreshWeeklyPlan(deps: ProfileDeps, userId: number, cfg: CompatC
     eq(items.dismissed, false), eq(items.submitted, false), eq(items.canvasDone, false),
     isNotNull(items.dueAt), gte(items.dueAt, now - 6 * H), lte(items.dueAt, now + 14 * D),
   )).orderBy(items.dueAt).limit(40).all();
-  const fmt = (ms: number) => new Date(ms + SGT).toUTCString().replace(/:\d\d GMT$/, "").replace(/^(\w+), 0?(\d+) (\w+) \d+ /, "$1 $2 $3 ");
+  const fmt = (ms: number) => sgtClock(ms).toUTCString().replace(/:\d\d GMT$/, "").replace(/^(\w+), 0?(\d+) (\w+) \d+ /, "$1 $2 $3 ");
   const todayIdx = Math.floor((now - week) / D);
   const input = {
     today: fmt(now).replace(/ \d\d:\d\d$/, ""),

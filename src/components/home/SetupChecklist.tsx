@@ -19,6 +19,7 @@ export function SetupChecklist({ steps }: { steps: SetupStep[] }) {
   const [howTo, setHowTo] = useState(false);
   const [open, setOpen] = useState(false);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only state, read after mount so the server render and hydration agree
     setDismissed(get(DISMISSED) === "1");
     setInstalled(get(INSTALLED) === "1" || window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true);
     setReady(true);

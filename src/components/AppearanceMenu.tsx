@@ -26,6 +26,7 @@ export function AppearanceMenu({ placement = "rail" }: { placement?: "rail" | "b
     try {
       const t = localStorage.getItem(THEME_KEY);
       const a = localStorage.getItem(ACCENT_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- browser-only state, read after mount so the server render and hydration agree
       if (isThemePref(t)) setTheme(t);
       if (isAccent(a)) setAccent(a);
     } catch {}

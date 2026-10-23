@@ -157,7 +157,7 @@ describe("runUserSync + createGuard integration", () => {
 
 describe("guard.resetUser", () => {
   it("clears a user's backoff so a manual sync is not skipped mid-penalty", async () => {
-    let now = 0;
+    const now = 0;
     const guard = createGuard(1000, () => now);
     const failing = guard("canvas", async () => { throw new Error("canvas down"); });
 
@@ -174,7 +174,7 @@ describe("guard.resetUser", () => {
   });
 
   it("only resets the user asked for", async () => {
-    let now = 0;
+    const now = 0;
     const guard = createGuard(1000, () => now);
     const failing = guard("canvas", async () => { throw new Error("down"); });
     await expect(failing(1)).rejects.toThrow("down");

@@ -4,13 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChangeView } from "@/server/changes";
+import { SGT_ZONE } from "@/lib/sgt";
 
 // The bell: what the courses changed. A date you set that an announcement
 // contradicts waits here for you to choose; dates moved for you can be
 // undone; newly found work can be confirmed or thrown out.
 
-const fmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Singapore" });
-const fmtDay = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Singapore" });
+const fmt = new Intl.DateTimeFormat("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: SGT_ZONE });
+const fmtDay = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: SGT_ZONE });
 // "Tue 13 Oct, 18:30", or "Tue 13 Oct" for "by the end of the day".
 function when(ms: number | null): string {
   if (ms === null) return "no date";
@@ -38,7 +39,8 @@ async function act(id: number, action: string): Promise<boolean> {
 function useChanges(initial: number) {
   const router = useRouter();
   const [count, setCount] = useState(initial);
-  useEffect(() => setCount(initial), [initial]);
+  const [was, setWas] = useState(initial);
+  if (initial !== was) { setWas(initial); setCount(initial); }
   const [list, setList] = useState<ChangeView[] | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
@@ -79,7 +81,7 @@ function Panel({ c, onClose }: { c: ReturnType<typeof useChanges>; onClose: () =
           <button type="button" onClick={onClose} aria-label="Close" className="h-7 w-7 rounded-md text-ink-3 hover:bg-sunken hover:text-ink">✕</button>
         </div>
       </div>
-      {c.failed && <p role="alert" className="px-4 pt-2 text-[12.5px] text-danger">That didn't save. Try again.</p>}
+      {c.failed && <p role="alert" className="px-4 pt-2 text-[12.5px] text-danger">That didn&rsquo;t save. Try again.</p>}
       {c.list === null ? <p className="px-4 py-6 text-[13px] text-ink-3">Loading…</p>
         : !c.list.length ? <p className="px-4 py-6 text-[13px] leading-relaxed text-ink-2">Nothing has changed. When a course moves a date or adds work, it shows up here.</p>
         : (

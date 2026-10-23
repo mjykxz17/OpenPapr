@@ -48,7 +48,8 @@ export function TasksApp({ rows: initial, modules, today, weeks }: { rows: TaskR
   const router = useRouter();
   const [, start] = useTransition();
   const [rows, setRows] = useState(initial);
-  useEffect(() => setRows(initial), [initial]);
+  const [was, setWas] = useState(initial);
+  if (initial !== was) { setWas(initial); setRows(initial); }
   const [view, setView] = useState<View>("table");
   const [showDone, setShowDone] = useState(false);
   const [thisWeek, setThisWeek] = useState(false);
@@ -63,6 +64,7 @@ export function TasksApp({ rows: initial, modules, today, weeks }: { rows: TaskR
     const q = new URLSearchParams(window.location.search).get("view");
     let v: string | null = q;
     if (!v) { try { v = localStorage.getItem(KEY); } catch { /* private mode */ } }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the view from the URL or storage, read after mount so the server render and hydration agree
     if (v === "table" || v === "calendar" || v === "board") setView(v);
     // A link to a task (from search, the home calendar, or shared) opens it.
     const t = taskFromUrl(window.location.search, window.location.hash);

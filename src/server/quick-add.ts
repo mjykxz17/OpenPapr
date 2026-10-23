@@ -3,6 +3,7 @@
 // and it must never guess a date the student did not say.
 
 import type { TaskKind } from "@/enrich/tasks";
+import { sgtDate as sgtDay, sgtNoon, sgtWeekday } from "@/lib/sgt";
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -17,8 +18,6 @@ export function isAddRequest(text: string): boolean {
 
 export type QuickAdd = { title: string; day: string | null; moduleCode: string | null };
 
-const sgtDay = (ms: number) => new Date(ms + 8 * H).toISOString().slice(0, 10);
-const sgtWeekday = (ms: number) => new Date(ms + 8 * H).getUTCDay();
 const addDays = (ms: number, n: number) => sgtDay(ms + n * D);
 
 // The day the words name, as YYYY-MM-DD in Singapore, and the words removed.
@@ -57,7 +56,7 @@ function dayFrom(date: number, month: number, now: number): string | null {
   const year = Number(sgtDay(now).slice(0, 4));
   for (const y of [year, year + 1]) {
     const iso = `${y}-${String(month + 1).padStart(2, "0")}-${String(date).padStart(2, "0")}`;
-    const t = Date.parse(`${iso}T12:00:00+08:00`);
+    const t = sgtNoon(iso);
     if (Number.isNaN(t) || sgtDay(t) !== iso) return null;        // 31 Sep
     if (iso >= sgtDay(now)) return iso;
   }

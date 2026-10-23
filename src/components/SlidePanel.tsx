@@ -57,6 +57,7 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, th
     if (!tab) return;
     const known = pageCounts.get(tab.deck);
     if (known) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- the count is cached outside React, per deck; this effect fetches it otherwise
       setTotal(known);
       return;
     }
@@ -75,7 +76,9 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, th
     };
   }, [moduleId, tab?.deck]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => setImgState("loading"), [tab?.deck, tab?.page]);
+  const slideKey = `${tab?.deck}#${tab?.page}`;
+  const [shownKey, setShownKey] = useState(slideKey);
+  if (slideKey !== shownKey) { setShownKey(slideKey); setImgState("loading"); }
 
   const setPage = useCallback(
     (page: number) => {
@@ -277,6 +280,7 @@ function SlideNote({ moduleId, slide, onSaved }: { moduleId: number; slide: Slid
   const [state, setState] = useState<"loading" | "saved" | "dirty" | "saving" | "error">("loading");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latest = useRef({ key, text: "", dirty: false });
+  // eslint-disable-next-line react-hooks/refs -- the debounced save reads the slide being shown; writing it on each render is idempotent
   latest.current.key = key;
 
   const save = useCallback(async (forKey: string, markdown: string) => {

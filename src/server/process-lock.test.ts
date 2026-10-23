@@ -13,8 +13,11 @@ function holdInChild(path: string) {
   const script = join(mkdtempSync(join(tmpdir(), "lock-child-")), "child.ts");
   writeFileSync(script, [
     `import { processLock } from ${JSON.stringify(resolve(__dirname, "process-lock.ts"))};`,
-    `void processLock(process.argv[2]!).run(async () => { console.log("held"); await new Promise(() => {}); });`,
-    `setInterval(() => {}, 1000);`,
+    // The interval keeps the lock reachable: a lock nothing refers to is
+    // garbage-collected, its connection closed, and the lock let go early.
+    `const lock = processLock(process.argv[2]!);`,
+    `void lock.run(async () => { console.log("held"); await new Promise(() => {}); });`,
+    `setInterval(() => lock, 1000);`,
   ].join("\n"));
   // node itself with tsx's loader, not the tsx wrapper: the wrapper runs the
   // script in a second process, which would survive the kill below.

@@ -2,10 +2,11 @@
 // "Indemnity Form (TD2)" … "Indemnity Form (TE12)". The student does only
 // their own, so the set reads as one to-do, and submitting any one clears it.
 
+import { sgtDayNumber } from "./sgt";
+
 // A trailing group code: letters then digits, as in TD11, G03, B2, T01A.
 const VARIANT_RE = /^(.*?\S)[\s\-–:_]*[([]?\b([A-Z]{1,4}\d{1,3}[A-Z]?)\b[)\]]?\s*$/;
 export const MIN_VARIANTS = 4;
-const DAY = 86_400_000;
 
 export function variantStem(title: string): string | null {
   const m = VARIANT_RE.exec(title.trim());
@@ -23,7 +24,7 @@ export function variantGroups(rows: { id: number; moduleId: number | null; type:
     if (r.type !== "assignment" || r.moduleId === null) continue;
     const stem = variantStem(r.title);
     if (!stem) continue;
-    const day = r.dueAt === null ? "none" : String(Math.floor((r.dueAt + 8 * 3_600_000) / DAY));
+    const day = r.dueAt === null ? "none" : String(sgtDayNumber(r.dueAt));
     const key = `${r.moduleId}::${stem.toLowerCase()}::${day}`;
     const g = groups.get(key) ?? { key, stem, ids: [] };
     g.ids.push(r.id);

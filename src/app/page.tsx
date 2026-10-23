@@ -23,6 +23,7 @@ import { calendarDues } from "@/server/calendar-dues";
 import { MonthWidget } from "@/components/home/MonthWidget";
 import { SemesterBar } from "@/components/home/SemesterBar";
 import { shortDate, syncedLabel } from "@/lib/format-date";
+import { sgtDate } from "@/lib/sgt";
 import { todayLine } from "@/components/home/today-line";
 import { AccountLink } from "@/components/home/AccountLink";
 import { mailConnected, mailEnabled } from "@/components/mail-access";
@@ -31,6 +32,7 @@ export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const userId = await requireUserId();
+  // eslint-disable-next-line react-hooks/purity -- a server component renders once per request; this is that request's time
   const now = Date.now();
   const overview = getOverview(getDb(), userId, now, loadEnv().POLL_INTERVAL_MS);
   const user = getUser(getDb(), userId);
@@ -72,7 +74,7 @@ export default async function Home() {
       L: <WeekWidget plan={week.plan} today={todaySteps} size="L" />,
       F: <WeekPlan {...week} todaySteps={todaySteps} moduleIdByCode={moduleIdByCode} hasModel={canGenerateGuides(db, userId)} />,
     },
-    today: { S: <TodayWidget view={tv} size="S" />, W: <TodayWidget view={tv} size="W" />, L: <TodayWidget view={tv} size="L" tomorrow={new Date(now + 8 * 3_600_000 + 86_400_000).toISOString().slice(0, 10)} /> },
+    today: { S: <TodayWidget view={tv} size="S" />, W: <TodayWidget view={tv} size="W" />, L: <TodayWidget view={tv} size="L" tomorrow={sgtDate(now + 86_400_000)} /> },
     next: { S: <NextWidget items={nextUp} overdue={overdue} now={now} size="S" />, W: <NextWidget items={nextUp} overdue={overdue} now={now} size="W" /> },
     done: { S: <DoneWidget view={tv} size="S" />, W: <DoneWidget view={tv} size="W" /> },
     due: {
@@ -100,8 +102,8 @@ export default async function Home() {
   // The header: which week of the NUS semester it is, and whether anything
   // is due today.
   const sem = env.ACADEMIC_CALENDAR === "nus" ? semesterView(now) : null;
-  const todayKey = new Date(now + 8 * 3_600_000).toISOString().slice(0, 10);
-  const dueToday = overview.todos.filter((t) => t.category !== "routine" && t.dueAt !== null && t.dueAt >= now && new Date(t.dueAt + 8 * 3_600_000).toISOString().slice(0, 10) === todayKey).length;
+  const todayKey = sgtDate(now);
+  const dueToday = overview.todos.filter((t) => t.category !== "routine" && t.dueAt !== null && t.dueAt >= now && sgtDate(t.dueAt) === todayKey).length;
   // Under the bar: only whether a deadline falls today; the week is the title.
   const semLine = todayLine(dueToday);
   const canvasOkAt = overview.syncStatus.find((x) => x.source === "canvas")?.lastOkAt ?? null;

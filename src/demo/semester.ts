@@ -10,6 +10,7 @@ import { chapterHash } from "../server/guide-quiz";
 import { DEMO_DECK_SOURCES, deckPages } from "./decks";
 import { DEMO_GUIDES } from "./guides";
 import { DEMO_HISTORY, DEMO_MODULE_PROFILES, DEMO_USER_PROFILE } from "./profiles";
+import { sgtClock, sgtDate, sgtDayLabel, sgtMidnight, sgtWeekday } from "../lib/sgt";
 
 // A fictional semester: four modules, tasks broken into steps, a weekly plan,
 // announcements, a lecturer's forum reply, a study guide with practice
@@ -29,14 +30,13 @@ export { DEMO_DECKS } from "./decks";
 
 const H = 3_600_000;
 const D = 24 * H;
-const SGT = 8 * H;
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-const sgt = (t: number) => new Date(t + SGT);
+const sgt = sgtClock;
 // "Friday 30 Oct" and "Fri 30 Oct", in Singapore time.
 export const longDate = (t: number) => `${DAY_NAMES[sgt(t).getUTCDay()]} ${sgt(t).getUTCDate()} ${MONTHS[sgt(t).getUTCMonth()]}`;
-export const shortDay = (t: number) => `${DAY_NAMES[sgt(t).getUTCDay()]!.slice(0, 3)} ${sgt(t).getUTCDate()} ${MONTHS[sgt(t).getUTCMonth()]}`;
+export const shortDay = sgtDayLabel;
 // What the academic calendar calls the week a moment falls in: "Week 11",
 // "recess week", "exam week 1"; null between semesters.
 export function weekName(t: number): string | null {
@@ -73,12 +73,12 @@ export function isHoliday(date: string): boolean {
 
 export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { moduleIds: number[] } {
   // Midnight (Singapore) starting the day `n` days from now, and that day.
-  const dayStart = (n: number) => Math.floor((now + SGT) / D) * D - SGT + n * D;
-  const day = (n: number) => sgt(dayStart(n)).toISOString().slice(0, 10);
+  const dayStart = (n: number) => sgtMidnight(now) + n * D;
+  const day = (n: number) => sgtDate(dayStart(n));
   // "n days from now at hh:mm Singapore time"
   const at = (n: number, hh = 23, mm = 59) => dayStart(n) + hh * H + mm * 60_000;
   // The first day at least `from` days ahead that falls on one of `weekdays` (0 = Sunday).
-  const nextOn = (from: number, weekdays: number[]) => { let n = from; while (!weekdays.includes(sgt(dayStart(n)).getUTCDay())) n++; return n; };
+  const nextOn = (from: number, weekdays: number[]) => { let n = from; while (!weekdays.includes(sgtWeekday(dayStart(n)))) n++; return n; };
   const WEEKDAYS = [1, 2, 3, 4, 5];
 
   const mod = (canvasCourseId: number, code: string, name: string, position: number) =>
@@ -136,7 +136,7 @@ export function seedSemester(db: Db, u: number, now: number, courseBase = 0): { 
   };
   const exams = (term: string | null): Fits => (n) => termOf(noon(n)) === term && semesterView(noon(n)).phase === "exams";
   const vacation: Fits = (n) => semesterView(noon(n)).phase === "vacation";
-  const free = (n: number, weekdays: number[], fits: Fits) => weekdays.includes(sgt(dayStart(n)).getUTCDay()) && !isHoliday(day(n)) && fits(n);
+  const free = (n: number, weekdays: number[], fits: Fits) => weekdays.includes(sgtWeekday(dayStart(n))) && !isHoliday(day(n)) && fits(n);
   // The first free day `from` to `to` days out.
   const first = (from: number, to: number, weekdays: number[], fits: Fits) => { for (let n = from; n <= to; n++) if (free(n, weekdays, fits)) return n; return null; };
   // A free day and the one an announcement moves it to: a week later where
