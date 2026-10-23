@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleGuide, chapterDeck, mergeChapters, renumber, splitChapters } from "./guide-chapters";
+import { assembleGuide, chapterBody, chapterDeck, chapterHash, mergeChapters, renumber, splitChapters } from "./guide-chapters";
 
 const ch = (n: number, title: string, deck: string) =>
   `## ${n}. ${title}\n\n### ${n}.1 Intro\n\nText [slide 2](slide:${deck}#2) and [slide 3](slide:${deck}#3).\n\n### ${n}.2 More\n\n![fig](slide-img:${deck}#4)`;
@@ -70,5 +70,26 @@ describe("deck names with spaces", () => {
     expect(citedPagesByDeck(md)).toEqual({ "Lecture 5 (Threats)": [2] });
     expect(chapterDeck(md)).toBe("Lecture 5 (Threats)");
     expect(validateChapter(md, cite, 10)).toEqual([]);
+  });
+});
+
+describe("chapterHash", () => {
+  const body = "### 1.1 Growth\n\nText [L1 p2](slide:L1#2).\n\n```\n### 9.9 not a heading\n```\n\n### 1.2 Bounds\n\nMore.";
+  // The chapter as the assembled guide shows it, as chapter n.
+  const wrapped = (n: number, extra: string[]) =>
+    [`## ${n}. Asymptotics`, ...extra, body.replace(/^### 1\./gm, `### ${n}.`)].join("\n\n");
+
+  it("is the body the chapter was written from", () => {
+    expect(chapterBody(wrapped(3, ["> **Counts toward:** Quiz 3 — Fri 9 Oct (done)", "> **Lecturer, 2 Oct:** Scope"]))).toBe(body);
+  });
+
+  it("stays the same when the assessment is handed in, a note arrives or chapters move", () => {
+    const before = chapterHash(wrapped(1, ["> **Counts toward:** Quiz 3 — Fri 9 Oct"]));
+    expect(chapterHash(wrapped(1, ["> **Counts toward:** Quiz 3 — Fri 9 Oct (done)"]))).toBe(before);
+    expect(chapterHash(wrapped(4, ["> **Counts toward:** Quiz 3 — Fri 9 Oct", "> **Lecturer, 2 Oct:** Scope", "> *Newer slides are out for this topic.*"]))).toBe(before);
+  });
+
+  it("changes when the chapter is rewritten", () => {
+    expect(chapterHash(wrapped(1, []))).not.toBe(chapterHash(wrapped(1, []).replace("More.", "More, and new.")));
   });
 });
