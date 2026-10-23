@@ -3,8 +3,8 @@ import { eq } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { files, items, modules, passages, studyGuides, users } from "../db/schema";
 import { announcementPassages, guidePassages, slidePassages, syncCheapSources, syncPassages } from "./passages";
-import { bm25, fuse, queryTokens, retrieve, semanticFloor, tokens } from "./retrieve";
-import { NOT_FOUND, answerFromMaterial, citedSources, isContentQuestion, isFollowUp, previousQuestion, sourceHref } from "./ask";
+import { bm25, demoteGuide, fuse, queryTokens, retrieve, semanticFloor, tokens } from "./retrieve";
+import { NOT_FOUND, NO_SOURCES_RULE, answerFromMaterial, citedSources, isContentQuestion, isFollowUp, previousQuestion, sourceHref, stripCitations } from "./ask";
 import { embedTexts, embeddingsUsable, normalize, resetEmbeddingHealth, toBlob } from "../enrich/embeddings";
 import { embedPending, indexModule } from "../worker/index-material";
 
@@ -175,6 +175,23 @@ describe("the relevance floor", () => {
     expect((await retrieve(db, 1, "what does a canary protect", { cfg, fetchFn: strict })).hits[0]!.page).toBe(2);
     expect(semanticFloor("text-embedding-3-small")).toBe(0.3);
     expect(semanticFloor("mistral-embed")).toBeGreaterThan(0.3);
+
+    // A follow-up's context orders the meaning matches but does not let the
+    // earlier topic's passages in: "and heap spraying?" after a canary question
+    // finds the heap slide only.
+    const after = await retrieve(db, 1, "and heap spraying?", { cfg, fetchFn: strict, context: "what is a stack canary" });
+    expect(after.semantic).toBe(true);
+    expect(after.hits.map((h) => h.page)).toEqual([3]);
+    // "why?" has no subject of its own, so it is searched as the question before it.
+    expect((await retrieve(db, 1, "why?", { cfg, fetchFn: strict, context: "what is a stack canary" })).hits[0]!.page).toBe(2);
+  });
+
+  it("lets a guide passage well ahead of the rest stay ahead", () => {
+    const guide = new Set([1]);
+    // Level with a slide: the slide goes first. Far ahead: it keeps a place in the top few.
+    expect(demoteGuide([1, 2], (id) => guide.has(id))).toEqual([2, 1]);
+    expect(demoteGuide([1, 2, 3, 4, 5, 6, 7], (id) => guide.has(id)).indexOf(1)).toBe(3);
+    expect(demoteGuide([2, 3, 1], (id) => guide.has(id))).toEqual([2, 3, 1]);
   });
 });
 
@@ -192,10 +209,33 @@ describe("answering from material", () => {
 
   it("still asks the model about dates and chat, from the facts", async () => {
     let calls = 0;
-    const llm = async () => { calls++; return "Quiz 2 is on Wed."; };
+    let system = "";
+    const llm = async (m: { role: string; content: string }[]) => { calls++; system = m[0]!.content; return "Quiz 2 is on Wed."; };
     expect((await answerFromMaterial({ question: "When is the next quiz?", earlier: [], hits: [], system: "S", facts: "F", llm })).grounded).toBe(false);
+    // With nothing from their material, the model is told not to teach from general knowledge.
+    expect(system).toContain(NO_SOURCES_RULE);
     await answerFromMaterial({ question: "thanks!", earlier: [], hits: [], system: "S", facts: "F", llm });
-    expect(calls).toBe(2);
+    // A date question after a content one is still about dates…
+    await answerFromMaterial({ question: "when is it due?", context: "what is a heap", earlier: [], hits: [], system: "S", facts: "F", llm });
+    expect(calls).toBe(3);
+    // …but "why?" carries the question before it.
+    expect((await answerFromMaterial({ question: "why?", context: "what is a heap", earlier: [], hits: [], system: "S", facts: "F", llm })).reply).toBe(NOT_FOUND);
+    expect(calls).toBe(3);
+  });
+
+  it("does not let a content question through just because it says when, test or lecturer", async () => {
+    let calls = 0;
+    const llm = async () => { calls++; return "Here is what I know."; };
+    for (const question of [
+      "when does a deadlock occur?", "what did the lecturer say about paging?", "when should I use a hash table over a BST?",
+      "how is a test case different from an oracle?", "what does the week 3 slide on convexity mean?",
+      "When does a buffer overflow happen?", "What is a weighted graph?", "How does the query optimiser pick a plan?",
+      "Explain a paired t-test", "What does the lecture say about ASLR?", "What is the capital of France and when was it founded?",
+    ]) {
+      expect(isContentQuestion(question), question).toBe(true);
+      expect((await answerFromMaterial({ question, earlier: [], hits: [], system: "S", facts: "F", llm })).reply).toBe(NOT_FOUND);
+    }
+    expect(calls).toBe(0);
   });
 
   it("flags an answer that cites none of its sources, and keeps out-of-range numbers out", async () => {
@@ -227,5 +267,16 @@ describe("answering from material", () => {
     expect(isContentQuestion("explain stack canaries")).toBe(true);
     expect(isContentQuestion("what's due this week?")).toBe(false);
     expect(isContentQuestion("hi papi")).toBe(false);
+    for (const q of ["When is the next quiz?", "How much is the midterm worth?", "When is lab 4 due for CS2040S?", "what does L3 cover?", "Anything due on Friday?", "what did the prof announce?", "thanks, that helps"]) {
+      expect(isContentQuestion(q), q).toBe(false);
+    }
+    expect(isContentQuestion("thanks! what is a heap?")).toBe(true);
+    // Short is not enough to lean on the question before.
+    for (const q of ["what is a heap?", "explain recursion", "what is TCP", "define big-O"]) expect(isFollowUp(q), q).toBe(false);
+  });
+
+  it("takes old citation markers out of history but leaves code alone", () => {
+    expect(stripCitations("See [1], and [2-3]. Also arr[0] is first.")).toBe("See, and. Also arr[0] is first.");
+    expect(stripCitations("A guard value [1][2]. In m[1][2] too.")).toBe("A guard value. In m[1][2] too.");
   });
 });

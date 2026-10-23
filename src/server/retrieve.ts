@@ -97,9 +97,20 @@ function docsFor(rows: { id: number; title: string; body: string; updatedAt: num
   return docs;
 }
 
+// The guide is OpenPapr's own writing about the slides, so it gives way to
+// them: each guide passage drops this many places and loses ties. A guide
+// passage well ahead of everything else still makes the list; one level with
+// a slide on the same point goes under it.
+export const GUIDE_DEMOTION = 3;
+export function demoteGuide(ids: number[], isGuide: (id: number) => boolean): number[] {
+  const place = new Map(ids.map((id, i) => [id, isGuide(id) ? i + GUIDE_DEMOTION + 0.5 : i]));
+  return [...ids].sort((a, b) => place.get(a)! - place.get(b)!);
+}
+
 // `context` is the student's previous question, given when the new one is a
 // short follow-up ("why?", "and heap spraying?"): it steers the ranking, but
-// the new question's own words still have to be in a passage for it to count.
+// the new question's own words (or, for meaning matches, the new question on
+// its own) still have to clear the floor for a passage to count.
 export async function retrieve(
   db: Db, userId: number, question: string,
   opts: { moduleId?: number | null; cfg?: CompatConfig | null; k?: number; fetchFn?: typeof fetch; context?: string | null } = {},
@@ -120,18 +131,23 @@ export async function retrieve(
   const model = embeddingsUsable(opts.cfg ?? null);
   if (model && opts.cfg && rows.some((r) => r.embedModel === model && r.embedding)) {
     try {
-      const [q] = await embedTexts(opts.cfg, model, [opts.context ? `${opts.context}\n${question}` : question], opts.fetchFn);
+      // With a follow-up, two vectors: the question alone decides what clears
+      // the floor, the question with its context decides the order. Only a
+      // follow-up with no subject of its own ("why?") is judged with its context.
+      const texts = opts.context
+        ? (own.length ? [question, `${opts.context}\n${question}`] : [`${opts.context}\n${question}`])
+        : [question];
+      const vecs = await embedTexts(opts.cfg, model, texts, opts.fetchFn);
+      const gate = vecs[0]!, steer = vecs[vecs.length - 1]!;
       const floor = semanticFloor(model);
       semantic = rows.filter((r) => r.embedModel === model && r.embedding)
-        .map((r) => ({ id: r.id, s: dot(q!, fromBlob(r.embedding!)) }))
-        .filter((x) => x.s >= floor).sort((a, b) => b.s - a.s).slice(0, 40).map((x) => x.id);
+        .map((r) => { const v = fromBlob(r.embedding!); return { id: r.id, gate: dot(gate, v), s: gate === steer ? 0 : dot(steer, v) }; })
+        .filter((x) => x.gate >= floor).sort((a, b) => (b.s - a.s) || (b.gate - a.gate)).slice(0, 40).map((x) => x.id);
     } catch { semantic = []; }
   }
 
-  // The guide is OpenPapr's own writing about the slides, so where both
-  // match, the slides (and notes and announcements) come first.
   const fused = semantic.length ? fuse([lexical, semantic]) : lexical;
-  const ranked = [...fused.filter((id) => byId.get(id)!.kind !== "guide"), ...fused.filter((id) => byId.get(id)!.kind === "guide")];
+  const ranked = demoteGuide(fused, (id) => byId.get(id)!.kind === "guide");
   const codes = new Map(db.select({ id: modules.id, code: modules.code }).from(modules).where(eq(modules.userId, userId)).all().map((m) => [m.id, m.code]));
   // No more than three passages from one deck, so an answer can draw on more than one source.
   const perSource = new Map<string, number>();

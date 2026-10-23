@@ -1,4 +1,4 @@
-import { queryTokens, type Hit } from "./retrieve";
+import { queryTokens, tokens, type Hit } from "./retrieve";
 
 // Turning retrieved passages into numbered sources for the model, and the
 // model's [n] citations back into links the student can open.
@@ -61,36 +61,57 @@ export function citedSources(reply: string, hits: Hit[]): { text: string; source
 // --- follow-ups and history ---------------------------------------------------------
 
 // Takes the [n] markers out of an earlier answer. They pointed at that turn's
-// sources; left in, the model reads them as this turn's numbers.
+// sources; left in, the model reads them as this turn's numbers. A bracket
+// straight after a name or another bracket is code ("arr[0]", "m[1][2]"), not
+// a citation, and stays.
 export const stripCitations = (text: string) =>
-  text.replace(/\s*\[\d+(?:\s*[,–-]\s*\d+)*\]/g, "").replace(/\s+([.,;:!?])/g, "$1");
+  text.replace(/\s*(?<![\w\])])(?:\[\d+(?:\s*[,–-]\s*\d+)*\])+/g, "");
 
 export type Turn = { role: "user" | "assistant"; content: string };
 export const historyForModel = (turns: Turn[]): Turn[] =>
   turns.map((m) => ({ role: m.role, content: m.role === "assistant" ? stripCitations(m.content) : m.content }));
 
 // "why?", "and heap spraying?", "give an example of that": short, and leaning
-// on the question before it.
+// on the question before it. Being short is not enough: "what is a heap?" is
+// a new question, so it needs a leaning word or no subject of its own.
 const LEANS = /^(and|but|so|also|then|why|how come|what about|how about|what if|ok|okay|wait|more|another)\b|\b(it|its|that|this|those|these|they|them)\b/i;
 export function isFollowUp(question: string): boolean {
   const words = question.trim().split(/\s+/).filter(Boolean);
   if (!words.length || words.length > 8) return false;
-  return queryTokens(question).length <= 1 || LEANS.test(question.trim());
+  return queryTokens(question).length === 0 || LEANS.test(question.trim());
 }
 export const previousQuestion = (turns: Turn[]): string | null => [...turns].reverse().find((m) => m.role === "user")?.content ?? null;
 
 // Questions about what the course teaches, as opposed to dates, logistics and
 // chat. Only these get "not in your material" when nothing matches; the rest
-// still go to the model with the student's facts.
-const LOGISTICS = /\b(due|deadlines?|submit\w*|submission|missing|overdue|late|when|today|tonight|tomorrow|week|weekend|schedule|timetable|announce\w*|said|say|lecturers?|prof\w*|tutors?|ta|weight\w*|worth|grades?|marks?|remind\w*|tasks?|plan|quiz\w*|exams?|mid-?terms?|finals?|tests?|assignments?|labs?|projects?|tutorials?|homework|venue|cover\w*)\b/i;
+// still go to the model with the student's facts. A question is logistics
+// only when every word in it is: "when is the next quiz?" is, but "when does
+// a deadlock occur?" keeps "deadlock" and is a content question.
+const LOGISTICS = new Set(`due deadline submit submitted submitting submission missing overdue late early when today tonight tomorrow yesterday
+  week weekend weekly month next last coming upcoming soon left still first schedule timetable calendar time date day
+  announce announced announcement said say lecturer prof professor tutor ta weight weightage worth grade mark score result
+  remind reminder task todo plan quiz exam midterm mid term final test assignment lab project tutorial homework hw venue room
+  cover covered start begin end finish need should study revise revision prepare happen happening anything any much many long
+  did done get got go going
+  monday tuesday wednesday thursday friday saturday sunday mon tue tues wed thu thur thurs fri sat sun
+  january february march april may june july august september october november december jan feb mar apr jun jul aug sep sept oct nov dec`
+  .split(/\s+/).filter(Boolean).map((w) => tokens(w)[0] ?? w));
+const CHAT_WORDS = new Set("hi hey hello yo thank thanks ty ok okay cool nice great awesome lol bye good morning night evening sure yes yeah no nope sorry".split(" ").map((w) => tokens(w)[0] ?? w));
+// Module codes ("cs2040s"), lecture labels ("l3"), numbers and ordinals.
+const NOT_A_SUBJECT = /^([a-z]{2,4}\d{4}[a-z]{0,2}|[a-z]\d{1,2}|\d+|\d+(st|nd|rd|th))$/;
 const CHAT = /^(hi|hey|hello|yo|thanks?|thank you|ty|ok(ay)?|cool|nice|lol|bye|good (morning|night|evening)|who are you|how are you)\b/i;
 export function isContentQuestion(question: string): boolean {
   const q = question.trim();
-  if (LOGISTICS.test(q) || CHAT.test(q)) return false;
-  return queryTokens(q).length > 0;
+  // "thanks, that helps": a short reply, not a question.
+  if (CHAT.test(q) && q.split(/\s+/).length <= 3) return false;
+  return queryTokens(q).some((t) => !LOGISTICS.has(t) && !CHAT_WORDS.has(t) && !NOT_A_SUBJECT.test(t));
 }
 
 // --- answering ----------------------------------------------------------------------
+
+// Asked with no SOURCES (a question about dates, tasks or chat): the model
+// still must not teach from what it happens to know.
+export const NO_SOURCES_RULE = "None of the student's material matched this question. Answer about dates, tasks and the course from FACTS. If they ask what something means or how it works, say their material doesn't seem to cover it; never answer course content from general knowledge.";
 
 export const NOT_FOUND = "I couldn't find that in your material. Try other words, or open the slides from the module page.";
 
@@ -106,11 +127,13 @@ export async function answerFromMaterial(input: {
   question: string; earlier: Turn[]; hits: Hit[]; system: string; facts: string; context?: string | null; llm: Llm;
 }): Promise<Answer> {
   const { question, hits } = input;
-  const content = isContentQuestion(question) || (!!input.context && isContentQuestion(input.context));
+  // "why?" is as much a content question as the one before it; "when is it
+  // due?" after a content question is still about dates.
+  const content = isContentQuestion(question) || (!!input.context && !queryTokens(question).length && isContentQuestion(input.context));
   if (!hits.length && content) return { reply: NOT_FOUND, sources: [], grounded: false, askedModel: false };
   const system = hits.length
     ? `${input.system}\n\n${SOURCES_RULES}\n\nFACTS\n${input.facts}\n\nSOURCES\n${sourcesBlock(hits)}`
-    : `${input.system}\n\nFACTS\n${input.facts}`;
+    : `${input.system}\n\n${NO_SOURCES_RULE}\n\nFACTS\n${input.facts}`;
   const out = await input.llm([
     { role: "system", content: system },
     ...historyForModel(input.earlier.slice(-8)),
