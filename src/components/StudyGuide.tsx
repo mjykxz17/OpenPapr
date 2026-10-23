@@ -217,6 +217,10 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   const [quizAsk, setQuizAsk] = useState(0);   // bumps when the toolbar's Quiz button is pressed
   const [read, setRead] = useState<boolean[]>([]); // chapters marked as read, one flag per chapter
+  // Whether `read` came from the server; until it has, the page doesn't
+  // claim "0 read". saveError: the last mark as read that didn't stick.
+  const [progress, setProgress] = useState<"loading" | "ready" | "offline">("loading");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const pendingScroll = useRef<string | null>(null); // section to scroll to after a restored chapter renders
   const tabsRef = useRef<HTMLDivElement | null>(null);      // the sticky chapter bar
   const tabsAnchor = useRef<HTMLDivElement | null>(null);   // zero-height marker at the bar's resting position
@@ -280,24 +284,34 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   }, [active]);
 
   // Which chapters are read lives on the server, so it follows the student
-  // to another device. Offline, the ticks just don't show.
+  // to another device. Offline (a guide saved for offline), it can't be
+  // known: the count and the Mark as read button wait until it can, rather
+  // than show "0 read" or a tick that silently comes undone.
   useEffect(() => {
     let live = true;
+    setProgress("loading");
     fetch(`/api/modules/${moduleId}/guide/progress`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { read?: boolean[] } | null) => { if (live && Array.isArray(d?.read)) setRead(d.read); })
-      .catch(() => {});
+      .then((d: { read?: boolean[] } | null) => {
+        if (!live) return;
+        if (Array.isArray(d?.read)) { setRead(d.read); setProgress("ready"); } else setProgress("offline");
+      })
+      .catch(() => { if (live) setProgress("offline"); });
     return () => { live = false; };
   }, [moduleId, markdown]);
   async function markRead(i: number, on: boolean) {
     const before = read;
+    setSaveError(null);
     setRead((r) => Object.assign([...r], { [i]: on }));
     const r = await fetch(`/api/modules/${moduleId}/guide/progress`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, read: on }),
     }).catch(() => null);
     const d = (await r?.json().catch(() => null)) as { read?: boolean[] } | null;
-    setRead(r?.ok && Array.isArray(d?.read) ? d.read : before);
+    if (r?.ok && Array.isArray(d?.read)) { setRead(d.read); return; }
+    setRead(before);
+    setSaveError(r ? "Couldn't save that. Try again." : "Couldn't save that — you seem to be offline.");
   }
+  useEffect(() => setSaveError(null), [active]);
   const readCount = chapters.filter((_, i) => read[i]).length;
 
   // Persist position as the reader moves (only after the initial restore).
@@ -445,6 +459,22 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   const docked = panelOpen && isXl;
   const chaptersFit = isLg && (!docked || is2xl);
   const outlineFits = isLg && !docked;
+
+  // Below xl the panel is a drawer over the page, so Esc closes it wherever
+  // focus is (the panel's own Esc only works with focus inside it, and a
+  // tapped citation leaves focus on the page). Typing in a field keeps its Esc.
+  const drawerOpen = panelOpen && !isXl;
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      setPanel((p) => ({ ...p, open: false }));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [drawerOpen]);
 
   // The reading bar: one strip pinned to the top of the reading area, the
   // same buttons in the same order on every page and in every state. The
@@ -713,13 +743,15 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
         <div className="guide mb-2">
           <p className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <span className="text-[13px] font-semibold uppercase tracking-[0.06em] text-accent">Chapter {active + 1} of {chapters.length}</span>
-            <span className="text-[13px] tabular-nums text-ink-3">{readCount} of {chapters.length} chapters read</span>
+            {progress === "ready" && <span className="text-[13px] tabular-nums text-ink-3">{readCount} of {chapters.length} chapters read</span>}
           </p>
         </div>
         <Body markdown={chapters[active].markdown} moduleId={moduleId} />
         <div className="guide mt-10">
-          <div className="flex flex-wrap items-center gap-3 border-t border-line pt-5">
-            {read[active] ? (
+          <div className="flex min-h-[57px] flex-wrap items-center gap-3 border-t border-line pt-5">
+            {progress === "loading" ? null : progress === "offline" ? (
+              <p className="text-[13px] text-ink-3">Which chapters you&apos;ve read shows when you&apos;re back online.</p>
+            ) : read[active] ? (
               <>
                 <span className="flex items-center gap-1.5 text-[14px] font-medium text-ok">{tick}Read</span>
                 <button type="button" onClick={() => markRead(active, false)} className="text-[13px] text-ink-3 underline decoration-line-2 underline-offset-2 hover:text-ink">
@@ -731,6 +763,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
                 {tick}Mark as read
               </button>
             )}
+            {saveError && <p role="alert" className="basis-full text-[13px] text-danger">{saveError}</p>}
           </div>
         </div>
         <ChapterQuiz key={`${active}:${chapters[active].label}`} moduleId={moduleId} chapter={active} label={chapters[active].label} start={quizAsk} />

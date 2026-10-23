@@ -135,8 +135,10 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, th
     >
       {/* Controls. Two fixed rows: what you do to the view (page, mode,
           close) and which file you are on. Nothing here wraps, moves or
-          disappears with the number of open tabs or the mode. */}
-      <div className="flex h-11 items-center gap-2 border-b border-line bg-panel px-3">
+          disappears with the number of open tabs or the mode. On a phone the
+          first row is tighter and leaves out "Both" (unless it is the view
+          already), so the close button stays on screen at 360px. */}
+      <div className="flex h-11 items-center gap-1.5 border-b border-line bg-panel px-2.5 sm:gap-2 sm:px-3">
         <div className="flex items-center gap-1">
           <button type="button" aria-label="Previous page" onClick={() => setPage(tab.page - 1)} disabled={tab.page <= 1} className="h-[30px] w-[30px] rounded-md border border-line-2 bg-panel text-ink-2 disabled:opacity-40">‹</button>
           <label className="flex items-center gap-1 px-1 text-[13px] tabular-nums text-ink-2">
@@ -149,7 +151,7 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, th
               onChange={(e) => { const n = Number(e.target.value); if (Number.isInteger(n)) setPage(n); }}
               className="h-7 w-11 rounded-md border border-line-2 bg-panel text-center text-[13px] tabular-nums text-ink [appearance:textfield] focus:border-accent focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             />
-            <span className="min-w-[2.75rem]">/ {total ?? "…"}</span>
+            <span className="whitespace-nowrap sm:min-w-[2.75rem]">/ {total ?? "…"}</span>
           </label>
           <button type="button" aria-label="Next page" onClick={() => setPage(tab.page + 1)} disabled={total !== null && tab.page >= total} className="h-[30px] w-[30px] rounded-md border border-line-2 bg-panel text-ink-2 disabled:opacity-40">›</button>
         </div>
@@ -159,7 +161,8 @@ export function SlidePanel({ moduleId, cited = {}, decks, tabs, active, mode, th
             ["split", "Both", "Slide and notes"],
             ["notes", "Notes", "Notes only — the slide collapses"],
           ] as const).map(([m, label, title]) => (
-            <button key={m} type="button" title={title} aria-pressed={mode === m} onClick={() => onMode(m)} className={`h-[26px] rounded px-2.5 text-xs font-medium ${mode === m ? "bg-panel text-ink shadow-sm" : "text-ink-2 hover:text-ink"}`}>{label}</button>
+            <button key={m} type="button" title={title} aria-pressed={mode === m} onClick={() => onMode(m)}
+              className={`h-[26px] rounded px-2 text-xs font-medium sm:px-2.5 ${m === "split" && mode !== m ? "hidden sm:block" : ""} ${mode === m ? "bg-panel text-ink shadow-sm" : "text-ink-2 hover:text-ink"}`}>{label}</button>
           ))}
         </div>
         <button type="button" aria-label="Close viewer" title="Close the slide panel (Esc)" onClick={onClose} className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md text-lg text-ink-2 hover:bg-ink/[0.06] hover:text-ink">×</button>
