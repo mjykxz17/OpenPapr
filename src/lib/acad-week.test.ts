@@ -54,3 +54,45 @@ describe("semesterWeeks", () => {
     expect(weeks.find((w) => w.label === "Week 8")!.teachingWeek).toBe(8);
   });
 });
+
+describe("semesterWeeks in a vacation", () => {
+  it("maps weeks to the semester coming up, not the one just finished", async () => {
+    const { semesterWeeks } = await import("./acad-week");
+    const dec = semesterWeeks(sgt("2026-12-20"));
+    expect(dec).toMatchObject({ sem: 2, year: "26/27" });
+    const by = Object.fromEntries(dec.weeks.map((w) => [w.label, day(w.monday)]));
+    expect(by["Week 1"]).toBe("2027-01-11");
+    expect(by["Week 3"]).toBe("2027-01-25");
+    // Right after exams too, and on the last vacation day.
+    expect(day(semesterWeeks(sgt("2026-12-07", "09:00")).weeks[0]!.monday)).toBe("2027-01-11");
+    expect(day(semesterWeeks(sgt("2027-01-03", "23:00")).weeks[0]!.monday)).toBe("2027-01-11");
+    // Still in exams: this semester's weeks.
+    expect(day(semesterWeeks(sgt("2026-12-01")).weeks[0]!.monday)).toBe("2026-08-10");
+  });
+
+  it("leads the May–August break (and its special terms) to next year's Semester 1", async () => {
+    const { semesterWeeks } = await import("./acad-week");
+    for (const d of ["2027-05-20", "2027-06-15", "2027-07-30", "2027-08-08"]) {
+      const s = semesterWeeks(sgt(d));
+      expect(s).toMatchObject({ sem: 1, year: "27/28" });
+      expect(day(s.weeks[0]!.monday)).toBe("2027-08-09");
+    }
+    // Semester 2's exams are still Semester 2.
+    expect(semesterWeeks(sgt("2027-05-05")).sem).toBe(2);
+  });
+
+  it("keeps a module to its own Canvas term", async () => {
+    const { semesterWeeks, termSemester } = await import("./acad-week");
+    expect(termSemester("[2610] AY2026/27 Semester 1")).toEqual({ startYear: 2026, sem: 1 });
+    expect(termSemester("[2630] Special Term I")).toBeNull();
+    expect(termSemester(null)).toBeNull();
+    // A Semester 1 module looked at in December: its weeks stay in August–November.
+    const s1 = semesterWeeks(sgt("2026-12-20"), "[2610] AY2026/27 Semester 1");
+    expect(s1.sem).toBe(1);
+    expect(day(s1.weeks.find((w) => w.label === "Week 3")!.monday)).toBe("2026-08-24");
+    const s2 = semesterWeeks(sgt("2026-10-03"), "[2620] AY2026/27 Semester 2");
+    expect(day(s2.weeks[0]!.monday)).toBe("2027-01-11");
+    // Unknown or special terms fall back to the date.
+    expect(day(semesterWeeks(sgt("2026-12-20"), "[2630] ST I").weeks[0]!.monday)).toBe("2027-01-11");
+  });
+});

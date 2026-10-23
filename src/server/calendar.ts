@@ -8,8 +8,9 @@ import { isConcrete } from "@/lib/concrete";
 
 // What goes into the student's calendar feed: every dated piece of work that
 // is still to do (Canvas assignments and quizzes, extracted deadlines, their
-// own planner notes, discussions that need a post), the quizzes and exams
-// the planner expects, and — if they ask for it — each day's study steps.
+// own planner notes, discussions that need a post), the exams and other work
+// the course has confirmed, and — if they ask for it — each day's study steps.
+// What is only expected stays out, as on the Tasks page (concrete.ts).
 
 const D = 86_400_000;
 const parse = <T,>(json: string | null | undefined, fallback: T): T => { try { return json ? (JSON.parse(json) as T) : fallback; } catch { return fallback; } };
@@ -51,7 +52,7 @@ export function calendarEvents(db: Db, userId: number, now: number, opts: { step
   for (const t of db.select().from(tasks).where(eq(tasks.userId, userId)).all()) {
     if (t.status !== "open") continue;
     // Only what the course posted or the student added (see concrete.ts).
-    if (!isConcrete(t.key, parse<{ kind: string; itemId?: number; label?: string }[]>(t.sourcesJson, []), (id) => typeOf.get(id))) continue;
+    if (!isConcrete(t.key, parse<{ kind: string; itemId?: number; label?: string }[]>(t.sourcesJson, []), (id) => typeOf.get(id), t.title)) continue;
     // Work already on Canvas is in the feed as itself; tasks add what is not:
     // expected quizzes, exams, things the student added, things only an
     // announcement or a slide mentioned.

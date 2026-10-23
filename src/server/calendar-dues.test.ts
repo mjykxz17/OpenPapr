@@ -23,7 +23,7 @@ describe("calendarDues", () => {
   const ov = (todos: unknown[] = []) => ({ modules: [{ id: 1, code: "CS4238", name: "CS4238 Computer Security Practice [2610]", components: [] }], todos } as unknown as Overview);
   const task = (v: Partial<TaskView>): TaskView => ({ id: 1, moduleId: 1, code: "CS4238", title: "T", kind: "quiz", dueAt: null, dueConfidence: "exact", anticipated: false,
     weightPct: null, why: null, sources: [], steps: [], status: "open", done: 0, total: 0, dueText: "", overdue: false, missing: false, manual: false, notes: null, started: false, time: null, ...v });
-  const tv = (open: TaskView[]): TasksView => ({ today: [], todayMinutes: 0, nextDay: null, soon: open, later: [], done: [] });
+  const tv = (open: TaskView[]): TasksView => ({ today: [], todayMinutes: 0, nextDay: null, soon: open, later: [], done: [], days: [] });
 
   it("shows a quiz task that cites the previous quiz as its pattern", () => {
     const q3 = task({ title: "Submit Quiz 3", dueAt: Date.parse("2026-10-06T23:59:00+08:00"), sources: [{ kind: "canvas", label: "Quiz-2", itemId: 330, href: null, external: false }] });

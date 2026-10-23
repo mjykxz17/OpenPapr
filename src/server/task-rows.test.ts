@@ -8,7 +8,7 @@ const ov = (todos: unknown[] = []) => ({ modules: [{ id: 1, code: "CS4238", name
 const task = (v: Partial<TaskView>): TaskView => ({ id: 1, moduleId: 1, code: "CS4238", title: "T", kind: "quiz", dueAt: null, dueConfidence: "exact", anticipated: false,
   weightPct: null, why: null, sources: [], steps: [], status: "open", done: 0, total: 0, dueText: "", overdue: false, missing: false,
   manual: false, notes: null, started: false, time: null, ...v });
-const tv = (open: TaskView[], done: TaskView[] = []): TasksView => ({ today: [], todayMinutes: 0, nextDay: null, soon: open, later: [], done });
+const tv = (open: TaskView[], done: TaskView[] = []): TasksView => ({ today: [], todayMinutes: 0, nextDay: null, soon: open, later: [], done, days: [] });
 const due = (v: Partial<CalDue>): CalDue => ({ key: "i1", day: "2026-10-06", time: "23:59", title: "X", code: "CS4238", moduleId: 1, href: "/modules/1",
   counts: null, estimated: false, exam: false, overdue: false, plan: null, event: null, ...v });
 

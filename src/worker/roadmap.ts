@@ -159,8 +159,8 @@ export function classSlots(rows: { type: string; title: string; dueAt: number | 
 
 // "Week 8 = Mon 5 Oct – Sun 11 Oct" for the semester, so the planner can
 // place week-numbered items itself.
-export function calendarLines(now: number): string[] {
-  const { sem, year, weeks } = semesterWeeks(now);
+export function calendarLines(now: number, term?: string | null): string[] {
+  const { sem, year, weeks } = semesterWeeks(now, term);
   return [`AY${year} Semester ${sem}:`, ...weeks.map((w) => `${w.label}: ${dayLabel(w.monday)} – ${dayLabel(w.sunday)}`)];
 }
 
@@ -173,7 +173,7 @@ export function roadmapSignals(db: Db, mod: Mod, now: number): { lines: SignalIt
   if (!row) return { lines: [], refs };
   const found = parseList<RoadmapItem>(row.itemsJson);
   const sources = new Map(parseList<SourceRef>(row.sourcesJson).map((s) => [s.ref, s]));
-  const { weeks } = semesterWeeks(now);
+  const { weeks } = semesterWeeks(now, mod.term);
   const slots = classSlots(db.select().from(items).where(eq(items.moduleId, mod.id)).all());
   const lines: SignalItem[] = [];
   found.forEach((it, i) => {
@@ -232,7 +232,7 @@ export function roadmapCalendar(db: Db, mod: Mod, now: number): RoadmapEntry[] {
   if (!row) return [];
   const found = parseList<RoadmapItem>(row.itemsJson);
   const sources = new Map(parseList<SourceRef>(row.sourcesJson).map((s) => [s.ref, s]));
-  const { weeks } = semesterWeeks(now);
+  const { weeks } = semesterWeeks(now, mod.term);
   const slots = classSlots(db.select().from(items).where(eq(items.moduleId, mod.id)).all());
   const out: RoadmapEntry[] = [];
   for (const it of found) {
@@ -273,8 +273,8 @@ export function weeksNamed(text: string): number[] {
   return [...new Set([...text.matchAll(/\bweek\s*-?\s*(\d{1,2})\b/gi)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= 13))];
 }
 
-export function placeInWeek(week: number, now: number, slots: ClassSlot[]): { at: number; from: number; to: number; inClass: boolean } | null {
-  const wk = semesterWeeks(now).weeks.find((w) => w.teachingWeek === week);
+export function placeInWeek(week: number, now: number, slots: ClassSlot[], term?: string | null): { at: number; from: number; to: number; inClass: boolean } | null {
+  const wk = semesterWeeks(now, term).weeks.find((w) => w.teachingWeek === week);
   if (!wk) return null;
   const day = (offset: number) => new Date(wk.monday + offset * D + SGT).toISOString().slice(0, 10);
   if (slots.length === 1) {
@@ -285,11 +285,11 @@ export function placeInWeek(week: number, now: number, slots: ClassSlot[]): { at
 }
 
 // The note added to an announcement for the planner.
-export function weekNote(text: string, now: number, slots: ClassSlot[]): string {
+export function weekNote(text: string, now: number, slots: ClassSlot[], term?: string | null): string {
   const notes = weeksNamed(text).slice(0, 3).flatMap((n) => {
-    const wk = semesterWeeks(now).weeks.find((w) => w.teachingWeek === n);
+    const wk = semesterWeeks(now, term).weeks.find((w) => w.teachingWeek === n);
     if (!wk) return [];
-    const p = placeInWeek(n, now, slots);
+    const p = placeInWeek(n, now, slots, term);
     return [`Week ${n} = ${dayLabel(wk.monday)} – ${dayLabel(wk.sunday)}${p?.inClass ? `; the module's weekly class that week is ${dayLabel(p.at)} ${hhmm(p.at)}` : ""}`];
   });
   return notes.length ? ` [${notes.join("; ")}]` : "";

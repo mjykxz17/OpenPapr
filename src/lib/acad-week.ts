@@ -79,10 +79,29 @@ export function semesterView(now: number): SemesterView {
 // The semester around `now`, week by week, for prompts that turn "Week 8" or
 // "in recess" into dates: Week 1 to Week 13, recess, reading week and the two
 // exam weeks, each Monday to Sunday.
+//
+// In a vacation it is the semester coming up: on 20 December "Week 3" means
+// January's Week 3, not the August one just finished. The May–August break
+// (special terms included) leads to next year's Semester 1. Special terms
+// keep their own weeks, which this does not model.
+//
+// A module's Canvas term ("[2610] AY2026/27 Semester 1") says which semester
+// it belongs to outright: a Semester 1 module's "Week 3" stays in August even
+// when the student looks at it in December.
 export type SemesterWeek = { label: string; teachingWeek: number | null; monday: number; sunday: number };
 
-export function semesterWeeks(now: number): { sem: 1 | 2; year: string; weeks: SemesterWeek[] } {
-  const v = semesterView(now);
+// "[2610] ..." is AY2026/27 Semester 1, "[2620] ..." Semester 2. Special
+// terms (…30, …40) and other shells give null.
+export function termSemester(term: string | null | undefined): { startYear: number; sem: 1 | 2 } | null {
+  const m = /^\[(\d{2})([12])0\]/.exec(term ?? "");
+  return m ? { startYear: 2000 + Number(m[1]), sem: Number(m[2]) as 1 | 2 } : null;
+}
+
+export function semesterWeeks(now: number, term?: string | null): { sem: 1 | 2; year: string; weeks: SemesterWeek[] } {
+  const own = termSemester(term);
+  const here = semesterView(own ? semOrientation(acadYearStart(own.startYear), own.sem) + W + D : now);
+  // nextSemStart is that semester's Week 1 Monday; a day into it is safely inside.
+  const v = here.phase === "vacation" && here.nextSemStart !== null ? semesterView(here.nextSemStart + D) : here;
   // Orientation Monday, from where the reading week sits (o + 15 weeks, minus
   // the Saturday shift).
   const o = v.readingFrom + 2 * D - 15 * W;

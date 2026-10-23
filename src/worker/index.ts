@@ -386,6 +386,8 @@ const guardedTasks = (deps: TaskDeps) => taskGuard("tasks", async (userId: numbe
     const r = await refreshTasks(deps, userId);
     if (r.planned || r.files) console.log(`tasks for user ${userId}: ${r.planned} module(s) planned, ${r.files} file(s) read`);
     if (r.errors.length) console.warn(`task issues for user ${userId}: ${r.errors.slice(0, 4).join(" | ")}`);
+    // Where Canvas, NUSMods or the sources overrode the planner.
+    if (r.checked.length) console.log(`task checks for user ${userId} (${r.checked.length}): ${r.checked.slice(0, 6).join(" | ")}`);
   } catch (err) {
     db.update(users).set({ tasksRequestedAt: null }).where(eq(users.id, userId)).run();
     throw err;

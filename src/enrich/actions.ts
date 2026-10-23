@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { chatJson, type CompatConfig } from "./openai-compat";
+import { parseSgt, sgtStamp } from "./tasks";
 
 // Deadline extraction from announcement/email prose. Contract:
 //   null  = LLM call failed or output unusable → caller leaves the item
@@ -25,7 +26,7 @@ export function parseActions(raw: unknown, referenceMs: number): ExtractedAction
   if (!parsed.data.found) return [];
   const out: ExtractedAction[] = [];
   for (const a of parsed.data.actions) {
-    const dueAt = Date.parse(a.due_at);
+    const dueAt = parseSgt(a.due_at);
     if (Number.isNaN(dueAt)) continue;
     if (dueAt < referenceMs - WINDOW_PAST_MS || dueAt > referenceMs + WINDOW_FUTURE_MS) continue;
     out.push({ title: a.title, dueAt, evidence: a.evidence });
@@ -39,8 +40,10 @@ export function createCompatActionExtractor(cfg: CompatConfig, fetchFn: typeof f
   return async (item: { title: string; body: string | null; postedAt: number | null }): Promise<ExtractedAction[] | null> => {
     const reference = item.postedAt ?? Date.now();
     try {
+      // In Singapore time: a post at 07:00 there is still the previous day in
+      // UTC, and "tomorrow" would land a day early.
       const raw = await chatJson(cfg, fetchFn, SYSTEM,
-        `Posted: ${new Date(reference).toISOString()}\nTitle: ${item.title}\n\n${(item.body ?? "").slice(0, 4000)}`, 2048);
+        `Posted: ${sgtStamp(reference)} Singapore time (+08:00)\nTitle: ${item.title}\n\n${(item.body ?? "").slice(0, 4000)}`, 2048);
       return parseActions(raw, reference);
     } catch {
       return null;

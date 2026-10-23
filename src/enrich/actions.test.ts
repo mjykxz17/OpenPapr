@@ -26,6 +26,18 @@ describe("parseActions", () => {
     ]};
     expect(parseActions(raw, posted)!.map((a) => a.title)).toEqual(["fine"]);
   });
+  it("reads dates without an offset as Singapore time, whatever the server's zone", () => {
+    const raw = { found: true, actions: [
+      { title: "date only", due_at: "2026-08-20", evidence: "e" },
+      { title: "local time", due_at: "2026-08-20T18:30", evidence: "e" },
+      { title: "with seconds", due_at: "2026-08-20 18:30:00", evidence: "e" },
+      { title: "utc", due_at: "2026-08-20T10:30:00Z", evidence: "e" },
+    ]};
+    expect(parseActions(raw, posted)!.map((a) => a.dueAt)).toEqual([
+      Date.parse("2026-08-20T23:59:00+08:00"), Date.parse("2026-08-20T18:30:00+08:00"),
+      Date.parse("2026-08-20T18:30:00+08:00"), Date.parse("2026-08-20T18:30:00+08:00"),
+    ]);
+  });
   it("returns [] for found=false", () => {
     expect(parseActions({ found: false, actions: [] }, posted)).toEqual([]);
   });
@@ -42,6 +54,13 @@ describe("createCompatActionExtractor", () => {
     expect(out).toEqual([{ title: "Lab closes", dueAt: Date.parse("2026-08-17T23:59:00+08:00"), evidence: "open till 23:59 tonight" }]);
     const body = JSON.parse((fetchFn.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
     expect(body.messages[1].content).toContain("2026-08-17");
+  });
+  it("gives the posted time in Singapore time, so an early-morning post is still that day", async () => {
+    const fetchFn = vi.fn(async () => chat('{"found":false,"actions":[]}'));
+    // 07:30 on Tue 18 Aug in Singapore is still Mon 17 Aug in UTC.
+    await createCompatActionExtractor(cfg, fetchFn as never)({ ...ann, postedAt: Date.parse("2026-08-18T07:30:00+08:00") });
+    const body = JSON.parse((fetchFn.mock.calls[0] as unknown as [string, RequestInit])[1].body as string);
+    expect(body.messages[1].content).toContain("Posted: 2026-08-18 07:30 (Tue) Singapore time");
   });
   it("returns [] when nothing is found (item is done forever)", async () => {
     const fetchFn = vi.fn(async () => chat('{"found":false,"actions":[]}'));

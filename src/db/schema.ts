@@ -362,7 +362,8 @@ export const tasks = sqliteTable("tasks", {
   stepsJson: text("steps_json").notNull().default("[]"),      // [{id, text, minutes, doBy, done}]
   status: text("status", { enum: ["open", "done", "dismissed"] }).notNull().default("open"),
   // Set once the student ticks a step or changes the task: from then on a
-  // rebuild may refresh the date and sources but leaves the steps alone.
+  // rebuild may refresh the date and sources and add steps, and undone steps
+  // move with the date; steps are never reworded and done ones stay as they are.
   touchedAt: integer("touched_at"),
   // The student set the date themselves: a rebuild never moves it again.
   dueLocked: integer("due_locked", { mode: "boolean" }).notNull().default(false),

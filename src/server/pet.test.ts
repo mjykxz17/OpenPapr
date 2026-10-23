@@ -22,7 +22,15 @@ function setup() {
     { userId: 1, moduleId: 2, type: "event", source: "canvas", sourceId: "e2", title: "Lecture", dueAt: NOW + 8 * D, firstSeenAt: NOW },
     { userId: 1, moduleId: 1, type: "staff_reply", source: "canvas", sourceId: "r1", title: "Re: Quiz 3 thread", sender: "Dr Lim", body: "<p>Quiz 3 covers L4-L6.</p>", sourceCreatedAt: NOW - H, firstSeenAt: NOW },
   ]).run();
-  db.insert(tasks).values({ userId: 1, moduleId: 1, key: "k", title: "Quiz 3 prep", kind: "quiz", dueAt: NOW + 5 * D, stepsJson: JSON.stringify([{ id: "s", text: "Redo L5 exercises", minutes: 30, doBy: "2026-09-25", done: false }]), createdAt: NOW, updatedAt: NOW }).run();
+  db.insert(tasks).values({ userId: 1, moduleId: 1, key: "k", title: "Quiz 3 prep", kind: "quiz", dueAt: NOW + 5 * D, sourcesJson: JSON.stringify([{ kind: "canvas", label: "Quiz 3", itemId: 2 }]),
+    stepsJson: JSON.stringify([{ id: "s", text: "Redo L5 exercises", minutes: 30, doBy: "2026-09-25", done: false }]), createdAt: NOW, updatedAt: NOW }).run();
+  return db;
+}
+// A quiz only the app expects: hidden on the Tasks page, so Papi keeps quiet about it too.
+function withExpected(db: ReturnType<typeof setup>) {
+  db.insert(tasks).values({ userId: 1, moduleId: 1, key: "cs4238-series-quiz-4", title: "Quiz 4 (expected)", kind: "quiz", dueAt: NOW + 9 * D, dueConfidence: "estimated", anticipated: true,
+    sourcesJson: JSON.stringify([{ kind: "canvas", label: "Quiz 3 — the last one", itemId: 2 }]),
+    stepsJson: JSON.stringify([{ id: "e", text: "Skim L7", minutes: 45, doBy: "2026-09-25", done: false }]), createdAt: NOW, updatedAt: NOW }).run();
   return db;
 }
 const codes = ["CS4238", "ST2334"];
@@ -78,5 +86,12 @@ describe("reminders", () => {
     expect(r).toContain("CS4238 Incident report 1 is due in about 6 hours");
     expect(r).toContain("1 step on today's list (30m)");
     expect(r).toContain("Dr Lim just replied in \"Quiz 3 thread\"");
+  });
+  it("counts only the tasks the student can see", () => {
+    const db = withExpected(setup());
+    expect(reminders(db, 1, NOW).join("\n")).toContain("1 step on today's list (30m)");
+    const f = factSheet(db, 1, NOW);
+    expect(f).toContain("Quiz 3 prep");
+    expect(f).not.toContain("Quiz 4 (expected)");
   });
 });
