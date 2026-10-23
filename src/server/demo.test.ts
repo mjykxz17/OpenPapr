@@ -113,7 +113,8 @@ describe("demo account", () => {
     const now = Date.parse("2026-10-23T08:00:00+08:00");
     const id = await resetDemo(db, now, dbPath);
     const algo = db.select().from(modules).where(eq(modules.userId, id)).all().find((m) => m.code === "CS3230")!;
-    const png = slidePngPath(algo.canvasCourseId, "L1-asymptotics.pdf", 12, 2, dbPath);
+    const file = db.select().from(files).where(eq(files.moduleId, algo.id)).all().find((f) => f.displayName === "L1-asymptotics.pdf")!;
+    const png = slidePngPath({ path: deckCachePath(algo.canvasCourseId, file.displayName, dbPath), file }, 12, 2);
     mkdirSync(dirname(png), { recursive: true });
     writeFileSync(png, "old");
     await resetDemo(db, now + 86_400_000, dbPath);
