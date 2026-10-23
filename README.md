@@ -267,6 +267,15 @@ docker run -d -p 3000:3000 -v openpapr:/data \
 
 One container runs both the web server and the worker, and restarts the worker if it ever dies.
 
+Keep `/data` on a Docker volume (`-v openpapr:/data`, as above), not a folder of the host
+(`-v ./data:/data`). The web server and the worker write the same SQLite database at once, and
+SQLite's locking is not reliable through Docker Desktop's file sharing on a Mac: a test run there
+ended with `database disk image is malformed`. A named volume (like Fly's volume) is a real Linux
+filesystem and stays consistent.
+
+The image is built for the machine you build it on (amd64 or arm64). Fly builds amd64; to build
+the same image on an Apple Silicon Mac, add `--platform linux/amd64`.
+
 ### Fly.io
 
 `fly.toml` is ready to use: one machine, one volume, a health check.
@@ -420,6 +429,8 @@ first.
 ```bash
 npm test                                 # Vitest: 500+ unit tests next to the code they cover
 npx playwright test                      # e2e: seeds a fixture, builds, drives a real browser
+                                         #   (once: npx playwright install chromium,
+                                         #    or PW_CHANNEL=chrome to use the installed Chrome)
 npx tsc --noEmit                         # strict types
 ```
 
