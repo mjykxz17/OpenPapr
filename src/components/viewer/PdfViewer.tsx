@@ -55,6 +55,9 @@ export function PdfViewer({ src, storageKey, preparing }: { src: string; storage
           cMapPacked: true,
           standardFontDataUrl: "/pdfjs/standard_fonts/",
           wasmUrl: "/pdfjs/wasm/",
+          // The site's Content-Security-Policy forbids eval; pdf.js would
+          // otherwise try it to speed up some decks' drawing functions.
+          isEvalSupported: false,
           withCredentials: true,
         });
         task.onProgress = ({ loaded: l }: { loaded: number }) => { if (!cancelled) setLoaded(l); };

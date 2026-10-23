@@ -15,4 +15,9 @@ describe("home layout", () => {
     ]);
     expect(l.map((s) => s.id).sort()).toEqual(["done", "due", "modules", "next", "today", "week"]);
   });
+  it("falls back to the default for anything that is not a list of slots", () => {
+    for (const bad of [{ layout: [] }, "x", [{ id: "today" }], [{ id: "today", size: "L", hidden: "yes" }], [null]]) {
+      expect(normalizeLayout(bad)).toEqual(DEFAULT_LAYOUT);
+    }
+  });
 });

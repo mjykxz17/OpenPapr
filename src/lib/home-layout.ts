@@ -1,6 +1,5 @@
 // The home screen is a grid of widgets, like a phone's: each one takes a
 // snap size and a place, and can be hidden. The layout is saved per student.
-import { z } from "zod";
 
 export const SIZES = ["S", "W", "L", "F"] as const;
 export type Size = (typeof SIZES)[number];
@@ -27,17 +26,24 @@ const START_HIDDEN: WidgetId[] = ["week", "next", "done"];
 export const DEFAULT_LAYOUT: Slot[] = (["today", "due", "modules", "week", "next", "done"] as WidgetId[])
   .map((id) => ({ id, size: WIDGETS[id].size, hidden: START_HIDDEN.includes(id) }));
 
-const SlotIn = z.object({ id: z.string(), size: z.string(), hidden: z.boolean().optional() });
+// Checked by hand rather than with zod: this module is in the home page's
+// browser bundle, and zod probes for eval there, which the site's
+// Content-Security-Policy reports as a violation.
+type SlotIn = { id: string; size: string; hidden?: boolean };
+const isSlotIn = (v: unknown): v is SlotIn => {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return typeof o.id === "string" && typeof o.size === "string" && (o.hidden === undefined || typeof o.hidden === "boolean");
+};
 
 // Whatever was saved, return a complete, valid layout: unknown widgets and
 // duplicates dropped, a size a widget can't take replaced by its default,
 // and widgets added since the layout was saved appended at the end.
 export function normalizeLayout(raw: unknown): Slot[] {
-  const parsed = z.array(SlotIn).safeParse(raw);
-  if (!parsed.success) return DEFAULT_LAYOUT.map((s) => ({ ...s }));
+  if (!Array.isArray(raw) || !raw.every(isSlotIn)) return DEFAULT_LAYOUT.map((s) => ({ ...s }));
   const out: Slot[] = [];
   const seen = new Set<string>();
-  for (const s of parsed.data) {
+  for (const s of raw) {
     if (!(s.id in WIDGETS) || seen.has(s.id)) continue;
     seen.add(s.id);
     const w = WIDGETS[s.id as WidgetId];
