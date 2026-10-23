@@ -23,6 +23,27 @@ const VIEWS: { id: View; label: string; icon: React.ReactNode }[] = [
 ];
 const KEY = "openpapr.tasks.view";
 
+// The page's address with ?task= for the open task (or without, once it
+// closes), so a task can be linked to. Old /tasks#task-12 links become it.
+export function taskHref(href: string, id: string | null): string {
+  const u = new URL(href);
+  if (id) u.searchParams.set("task", id); else u.searchParams.delete("task");
+  if (/^#task-\d+$/.test(u.hash)) u.hash = "";
+  return `${u.pathname}${u.search}${u.hash}`;
+}
+// Which task an address opens: ?task=t12, or the older #task-12.
+export function taskFromUrl(search: string, hash: string): string | null {
+  const q = new URLSearchParams(search).get("task");
+  if (q) return q;
+  const m = /^#task-(\d+)$/.exec(hash);
+  return m ? `t${m[1]}` : null;
+}
+// Back to the row a task was opened from, when the panel closes.
+function focusRow(id: string) {
+  const els = [...document.querySelectorAll<HTMLElement>(`[data-open="${CSS.escape(id)}"]`)];
+  els.find((el) => el.getClientRects().length > 0)?.focus({ preventScroll: true });
+}
+
 export function TasksApp({ rows: initial, modules, today, weeks }: { rows: TaskRow[]; modules: Mod[]; today: string; weeks: WeekBand[] }) {
   const router = useRouter();
   const [, start] = useTransition();
@@ -43,10 +64,20 @@ export function TasksApp({ rows: initial, modules, today, weeks }: { rows: TaskR
     let v: string | null = q;
     if (!v) { try { v = localStorage.getItem(KEY); } catch { /* private mode */ } }
     if (v === "table" || v === "calendar" || v === "board") setView(v);
-    // From search or the home calendar: /tasks#task-12 opens that task.
-    const m = /^#task-(\d+)$/.exec(window.location.hash);
-    if (m) setSelected(`t${m[1]}`);
+    // A link to a task (from search, the home calendar, or shared) opens it.
+    const t = taskFromUrl(window.location.search, window.location.hash);
+    if (t) { setSelected(t); window.history.replaceState(null, "", taskHref(window.location.href, t)); }
   }, []);
+  // The open task is in the address, without a navigation or a scroll.
+  const open = useCallback((id: string | null) => {
+    setSelected(id);
+    window.history.replaceState(null, "", taskHref(window.location.href, id));
+  }, []);
+  const close = useCallback(() => {
+    const id = selected;
+    open(null);
+    if (id) requestAnimationFrame(() => focusRow(id));
+  }, [open, selected]);
   const pick = (v: View) => {
     setView(v);
     try { localStorage.setItem(KEY, v); } catch { /* private mode */ }
@@ -64,7 +95,7 @@ export function TasksApp({ rows: initial, modules, today, weeks }: { rows: TaskR
     refresh();
     return ok;
   }, [refresh]);
-  const drop = useCallback((id: string) => { setRows((all) => all.filter((x) => x.id !== id)); setSelected((s) => (s === id ? null : s)); refresh(); }, [refresh]);
+  const drop = useCallback((id: string) => { setRows((all) => all.filter((x) => x.id !== id)); if (selected === id) open(null); refresh(); }, [refresh, open, selected]);
 
   const end = addDays(today, 6);
   const visible = rows.filter((r) =>
@@ -94,7 +125,7 @@ export function TasksApp({ rows: initial, modules, today, weeks }: { rows: TaskR
       </div>
 
       <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none]">
-        <button type="button" className={chip(!showDone)} onClick={() => setShowDone((d) => !d)} aria-pressed={!showDone}>{showDone ? "Open + done" : "Open"}</button>
+        <button type="button" className={chip(showDone)} onClick={() => setShowDone((d) => !d)} aria-pressed={showDone}>Show done</button>
         <button type="button" className={chip(thisWeek)} onClick={() => setThisWeek((w) => !w)} aria-pressed={thisWeek}>Next 7 days</button>
         <span className="mx-1 w-px shrink-0 bg-line" aria-hidden />
         {modules.map((m) => (
@@ -106,14 +137,14 @@ export function TasksApp({ rows: initial, modules, today, weeks }: { rows: TaskR
 
       <div className="mt-4">
         {view === "table" && <TableView rows={visible.filter((r) => !r.event)} today={today} weeks={weeks} color={color} selected={selected}
-          onOpen={setSelected} onChange={change} onAdd={setAdding} />}
+          onOpen={open} onChange={change} onAdd={setAdding} />}
         {view === "calendar" && <CalendarView rows={visible} today={today} color={color} selected={selected}
-          onOpen={setSelected} onChange={change} onAdd={setAdding} />}
+          onOpen={open} onChange={change} onAdd={setAdding} />}
         {view === "board" && <BoardView rows={rows.filter((r) => !r.event && (!mods.size || (r.moduleId !== null && mods.has(r.moduleId))))} today={today} color={color}
-          selected={selected} onOpen={setSelected} onChange={change} />}
+          selected={selected} onOpen={open} onChange={change} />}
       </div>
 
-      {sel && <TaskPanel key={sel.id} row={sel} today={today} modules={modules} color={color} onClose={() => setSelected(null)}
+      {sel && <TaskPanel key={sel.id} row={sel} today={today} modules={modules} color={color} onClose={close}
         onChange={change} onGone={drop} onRefresh={refresh} />}
       {adding && <QuickAdd at={adding} today={today} modules={modules} onClose={() => setAdding(null)} onAdded={() => { setAdding(null); refresh(); }} />}
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TaskRow } from "@/server/task-rows";
 import { Check, createTask, deleteTask, EDIT_KINDS, fmtMin, hideItem, KIND, ORIGIN_LINE, StatusPill, whenText, type Change, type Mod, dayText } from "./task-ui";
 
@@ -17,6 +17,10 @@ export function TaskPanel({ row: r, today, modules, color, onClose, onChange, on
   const [title, setTitle] = useState(r.title);
   const [notes, setNotes] = useState(r.notes ?? "");
   const [busy, setBusy] = useState(false);
+  const box = useRef<HTMLElement>(null);
+  // Opening it moves focus in (Esc closes it, and the page puts focus back on
+  // the row it came from).
+  useEffect(() => { box.current?.focus({ preventScroll: true }); }, []);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === "Escape" && !(e.target as HTMLElement).closest?.("input,textarea,select")) onClose(); };
     window.addEventListener("keydown", k);
@@ -35,8 +39,8 @@ export function TaskPanel({ row: r, today, modules, color, onClose, onChange, on
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={onClose} aria-hidden />
-      <aside role="dialog" aria-label={r.title}
-        className="fixed inset-x-0 bottom-0 z-50 flex max-h-[86svh] flex-col overflow-y-auto rounded-t-2xl border-t border-line bg-panel px-5 pb-8 pt-2 shadow-2xl lg:inset-x-auto lg:bottom-0 lg:right-0 lg:top-0 lg:max-h-none lg:w-[380px] lg:rounded-none lg:border-l lg:border-t-0 lg:pt-5">
+      <aside ref={box} role="dialog" aria-label={r.title} tabIndex={-1}
+        className="fixed outline-none inset-x-0 bottom-0 z-50 flex max-h-[86svh] flex-col overflow-y-auto rounded-t-2xl border-t border-line bg-panel px-5 pb-8 pt-2 shadow-2xl lg:inset-x-auto lg:bottom-0 lg:right-0 lg:top-0 lg:max-h-none lg:w-[380px] lg:rounded-none lg:border-l lg:border-t-0 lg:pt-5">
         <div className="mx-auto mb-2 h-1.5 w-10 shrink-0 rounded-full bg-line-2 lg:hidden" aria-hidden />
         <div className="flex items-start justify-between gap-3">
           <p className="text-[12px] text-ink-3">
@@ -143,10 +147,10 @@ export function TaskPanel({ row: r, today, modules, color, onClose, onChange, on
           )}
           {r.can.remove === "dismiss" && r.status !== "done" && (
             <>
-              <button type="button" disabled={busy} onClick={() => act(() => onChange(r, { status: "dismissed" }))} title="It's real, but you don't need to do it"
-                className="h-9 rounded-md border border-line-2 px-3 text-ink-2 hover:text-ink disabled:opacity-50">Not needed</button>
+              <button type="button" disabled={busy} onClick={() => act(() => onChange(r, { status: "dismissed" }))} aria-describedby="panel-remove-hint"
+                className="h-9 rounded-md border border-line-2 px-3 text-ink-2 hover:text-ink disabled:opacity-50">I don&apos;t need to do this</button>
               {r.origin === "ai" && (
-                <button type="button" disabled={busy} onClick={() => act(() => onChange(r, { notTask: true }))} title="Removes it, and the planner won't suggest it again"
+                <button type="button" disabled={busy} onClick={() => act(() => onChange(r, { notTask: true }))} aria-describedby="panel-remove-hint"
                   className="h-9 rounded-md px-2 text-ink-3 hover:text-danger disabled:opacity-50">Not a real task</button>
               )}
             </>
@@ -155,6 +159,15 @@ export function TaskPanel({ row: r, today, modules, color, onClose, onChange, on
             <button type="button" disabled={busy} onClick={() => act(() => hideItem(r.itemId!))} className="h-9 rounded-md border border-line-2 px-3 text-ink-2 hover:text-ink disabled:opacity-50">Hide</button>
           )}
         </div>
+        {/* Both hide it for good (a rebuilt plan keeps it hidden); only the
+            second tells the planner it was wrong to suggest it. */}
+        {r.can.remove === "dismiss" && r.status !== "done" && (
+          <p id="panel-remove-hint" className="mt-2 text-[12px] leading-snug text-ink-3">
+            {r.origin === "ai"
+              ? "Either one hides it from your tasks, and it stays hidden when the plan is rebuilt. “Not a real task” also tells the planner it got this wrong, so it won’t suggest it again."
+              : "Hides it from your tasks. It stays hidden when the plan is rebuilt."}
+          </p>
+        )}
       </aside>
     </>
   );
