@@ -10,9 +10,15 @@ const built = (ms: number) => {
   const d = relativeDay(ms, Date.now());
   return d === "Today" ? `today ${shortTime(ms)}` : d === "Yesterday" ? "yesterday" : d;
 };
+// Everything this rebuilds is kept fresh by the worker on its own, within
+// hours of its inputs changing, so a build more than a day old means it is
+// stuck and worth saying.
+const stale = (ms: number) => Date.now() - ms > 86_400_000;
 
-// "Built today 14:02 · Rebuild". Rebuilding is done by the worker, so the
-// button asks for it and then watches for the new version to land.
+// A quiet "Rebuild" while the last build is fresh; "Built 14 Sep · Rebuild"
+// once it is more than a day old, failed, or "Not built yet · Build now".
+// Rebuilding is done by the worker, so the button asks for it and then
+// watches for the new version to land.
 export function RebuildButton({ scope, moduleId, status, noun = "profile" }: {
   scope: "me" | "plan" | "module" | "tasks"; moduleId?: number; status: Status; noun?: string;
 }) {
@@ -79,11 +85,13 @@ export function RebuildButton({ scope, moduleId, status, noun = "profile" }: {
         </span>
       ) : (
         <>
-          {status.builtAt ? <span suppressHydrationWarning>Built {built(status.builtAt)}</span> : <span>Not built yet</span>}
-          <span aria-hidden>·</span>
-          <button type="button" onClick={rebuild} className="font-medium text-accent hover:underline">
-            {status.builtAt ? "Rebuild" : "Build now"}
-          </button>
+          {(!status.builtAt || error || stale(status.builtAt)) && <>
+            {status.builtAt ? <span suppressHydrationWarning>Built {built(status.builtAt)}</span> : <span>Not built yet</span>}
+            <span aria-hidden>·</span>
+          </>}
+          {status.builtAt
+            ? <button type="button" onClick={rebuild} title={`Built ${built(status.builtAt)}`} suppressHydrationWarning className="text-ink-3 hover:text-ink hover:underline">Rebuild</button>
+            : <button type="button" onClick={rebuild} className="font-medium text-accent hover:underline">Build now</button>}
         </>
       )}
       {error && !pending && <span className="basis-full text-danger">{error}</span>}
