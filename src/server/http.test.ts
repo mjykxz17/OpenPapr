@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { isJsonRequest, publicBaseUrl, requireJson } from "./http";
 
 describe("publicBaseUrl", () => {
@@ -10,6 +10,19 @@ describe("publicBaseUrl", () => {
     expect(publicBaseUrl({ PUBLIC_URL: "not a url", FLY_APP_NAME: "openpapr" })).toBe("https://openpapr.fly.dev");
     expect(publicBaseUrl({ PUBLIC_URL: "javascript:alert(1)" })).toBe("http://localhost:3000");
     expect(publicBaseUrl({ PORT: "3101" })).toBe("http://localhost:3101");
+  });
+
+  // A self-hosted server without PUBLIC_URL would hand out localhost links.
+  it("warns once when a production server falls back to localhost", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      publicBaseUrl({ PORT: "3000" });
+      expect(warn).not.toHaveBeenCalled();
+      publicBaseUrl({ NODE_ENV: "production" });
+      publicBaseUrl({ NODE_ENV: "production" });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]![0])).toMatch(/PUBLIC_URL/);
+    } finally { warn.mockRestore(); }
   });
 });
 

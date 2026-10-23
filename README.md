@@ -259,8 +259,11 @@ docker run -d -p 3000:3000 -v openpapr:/data \
   -e SESSION_KEY=$(openssl rand -hex 32) \
   -e APP_PASSWORD=your-invite-code \
   -e CANVAS_BASE_URL=https://canvas.your-uni.edu \
+  -e PUBLIC_URL=https://openpapr.your-uni.edu \
   openpapr
 ```
+
+`PUBLIC_URL` is the address students open the site at. The calendar feed links back to it.
 
 One container runs both the web server and the worker, and restarts the worker if it ever dies.
 
@@ -290,6 +293,7 @@ fly deploy
 | `SESSION_KEY` | recommended | `SECRET_KEY` | Signs session cookies. Rotating it signs everyone out and leaves credentials intact. |
 | `DATABASE_PATH` | | `data/openpapr.db` | The SQLite file. All data lives here. |
 | `CANVAS_BASE_URL` | | `https://canvas.nus.edu.sg` | Your institution's Canvas. |
+| `PUBLIC_URL` | recommended | `https://<app>.fly.dev` on Fly, else `http://localhost:<PORT>` | The address students open the site at, for the links in calendar feeds. |
 | `OPENAI_COMPAT_BASE_URL` | | — | Any OpenAI-compatible `/v1` endpoint, used as the shared model. |
 | `OPENAI_COMPAT_API_KEY` | | — | Key for that endpoint. |
 | `OPENAI_COMPAT_MODEL` | | — | Model id on that endpoint. |
