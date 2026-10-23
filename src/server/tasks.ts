@@ -92,17 +92,24 @@ export function tasksView(db: Db, userId: number, now: number): TasksView {
   };
 }
 
-// How many classes (Canvas calendar events of active modules) fall on each
-// Singapore day from `today`. Canvas gives their start, not their length,
-// and NUSMods timetables are not stored, so it is a count, not hours.
+// How many classes fall on each Singapore day from `today`. A class is a
+// Canvas calendar event of an active module whose title comes back three
+// times or more (the rule classSlots uses for weekly classes): a one-off
+// "Midterm" or consultation is not a class. Canvas gives their start, not
+// their length, and NUSMods timetables are not stored, so it is a count,
+// not hours.
 export function classesOn(db: Db, userId: number, today: string, days = 22): Map<string, number> {
   const from = Date.parse(`${today}T00:00:00+08:00`);
   const active = new Set(db.select({ id: modules.id }).from(modules).where(and(eq(modules.userId, userId), eq(modules.active, true))).all().map((m) => m.id));
+  const events = db.select({ dueAt: items.dueAt, moduleId: items.moduleId, title: items.title, dismissed: items.dismissed }).from(items)
+    .where(and(eq(items.userId, userId), eq(items.type, "event"))).all()
+    .filter((e) => !e.dismissed && e.dueAt !== null && e.moduleId !== null && active.has(e.moduleId));
+  const seen = new Map<string, number>();
+  for (const e of events) seen.set(`${e.moduleId}|${e.title}`, (seen.get(`${e.moduleId}|${e.title}`) ?? 0) + 1);
   const out = new Map<string, number>();
-  for (const e of db.select({ dueAt: items.dueAt, moduleId: items.moduleId, dismissed: items.dismissed }).from(items)
-    .where(and(eq(items.userId, userId), eq(items.type, "event"), gte(items.dueAt, from), lt(items.dueAt, from + days * D))).all()) {
-    if (e.dismissed || e.dueAt === null || (e.moduleId !== null && !active.has(e.moduleId))) continue;
-    const day = sgtDate(e.dueAt);
+  for (const e of events) {
+    if ((seen.get(`${e.moduleId}|${e.title}`) ?? 0) < 3 || e.dueAt! < from || e.dueAt! >= from + days * D) continue;
+    const day = sgtDate(e.dueAt!);
     out.set(day, (out.get(day) ?? 0) + 1);
   }
   return out;

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { chatJson, type CompatConfig } from "./openai-compat";
 import { TASK_KINDS } from "../db/schema";
-import { assessmentNumber, assessmentNumbers, ownWork, quizNumber, sameTask } from "../lib/own-work";
+import { assessmentNumber, assessmentNumbers, assessmentText, ownWork, quizNumber, sameTask } from "../lib/own-work";
 import type { WeakSpot } from "../server/weak-topics";
 export { quizNumber };
 
@@ -172,13 +172,20 @@ export function refFacts(input: ModuleTaskInput, dated: Map<string, { dueAt: num
 
 // Words for comparing a quote with its source: lower case, no accents or
 // punctuation, "Quiz3" read as "quiz 3" and "02" as "2".
-const words = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "")
+const words = (s: string) => assessmentText(s).normalize("NFKD").replace(/[̀-ͯ]/g, "")
   .replace(/([a-z])(\d)/g, "$1 $2").replace(/(\d)([a-z])/g, "$1 $2").split(/[^a-z0-9]+/).filter(Boolean)
   .map((w) => (/^\d+$/.test(w) ? String(Number(w)) : w));
 const QUOTE_STOP = new Set(["a", "an", "the", "is", "are", "be", "will", "on", "in", "at", "of", "by", "to", "and", "for"]);
+// Words a number belongs to: "Quiz 9" and "Week 5" are claims of their own,
+// not just a 9 and a 5 somewhere in the source.
+const NUMBERED_WORD = new Set(["quiz", "test", "midterm", "exam", "assignment", "incident", "lab", "tutorial", "homework", "hw", "ps", "milestone", "report", "project", "week", "lecture", "chapter"]);
+const numberedPhrases = (w: string[]) => w.flatMap((x, i) => (NUMBERED_WORD.has(x) && /^\d+$/.test(w[i + 1] ?? "") ? [[x, w[i + 1]!] as const] : []));
+// "quiz 4" in the source, or in a list of them: "Quizzes 3, 4 and 5".
+const phraseIn = (hay: string, [x, n]: readonly [string, string]) => new RegExp(` ${x}(?: \\d+(?: and| or| to)?)* ${n} `).test(hay);
 
 // The model's quote really is in the source: word for word (each piece of it
-// between "…"), or nearly so — most of its words there, and every number.
+// between "…"), or nearly so — most of its words there, every number, and
+// every "Quiz 9" or "Week 5" as those very words.
 export function quoteFound(quote: string, text: string): boolean {
   const q = words(quote);
   if (!q.length) return true;
@@ -189,6 +196,7 @@ export function quoteFound(quote: string, text: string): boolean {
   const have = new Set(t);
   const content = q.filter((w) => !QUOTE_STOP.has(w));
   return content.length >= 3 && content.filter((w) => /\d/.test(w)).every((w) => have.has(w))
+    && numberedPhrases(q).every((p) => phraseIn(hay, p))
     && content.filter((w) => have.has(w)).length >= 0.7 * content.length;
 }
 
@@ -258,10 +266,11 @@ export function cleanPlan(raw: unknown, refs: Map<string, TaskSource>, now: numb
     let dueAt = Number.isNaN(parsed) ? null : parsed;
     let dueConfidence: "exact" | "estimated" = dueAt === null ? "estimated" : t.dueConfidence;
     let anticipated = t.anticipated || weightOnly;
-    // "Quiz 9" that no source names is the model's guess at most.
+    // "Quiz 9" that no source names is the model's guess at most. What the
+    // source says decides, not the model's own quote of it.
     const n = assessmentNumber(t.title);
     if (facts && n !== null && !anticipated
-      && !grounded.some((c) => assessmentNumbers(`${c.source.label} ${c.source.quote ?? ""} ${facts.get(c.ref)?.text ?? ""}`).includes(n))) {
+      && !grounded.some((c) => assessmentNumbers(`${c.source.label} ${facts.get(c.ref)?.text ?? ""}`).includes(n))) {
       anticipated = true;
       dueConfidence = "estimated";
       checks.push(`no source names "${t.title}"`);
@@ -335,7 +344,16 @@ export type MergeOps = {
 
 const STEP_STOP = new Set(["the", "and", "for", "from", "with", "your", "this", "that", "all", "any"]);
 const stepWords = (s: string) => new Set(words(s).filter((w) => (w.length >= 3 || /\d/.test(w)) && !STEP_STOP.has(w)));
-const numbersIn = (s: string) => [...stepWords(s)].filter((w) => /\d/.test(w));
+// The lectures, chapters and weeks a step covers: "Review L6-L7" is l6 and
+// l7, "Read Ch 3 to 5" ch3 to ch5. Other numbers ("Q1-5", "2019 paper",
+// "30 min") say nothing about scope.
+const MATERIAL_RE = /\b(l|lec|lectures?|ch|chap|chapters?|w|wk|weeks?|topics?|units?)\s*\.?\s*(\d{1,2})(?:\s*(?:-|–|to)\s*(?:l|lec|lectures?|ch|chap|chapters?|w|wk|weeks?|topics?|units?)?\s*\.?\s*(\d{1,2}))?\b/gi;
+const materialIn = (s: string) => [...s.matchAll(MATERIAL_RE)].flatMap((m) => {
+  const w = m[1]!.toLowerCase();
+  const kind = w.startsWith("l") ? "l" : w.startsWith("c") ? "ch" : w.startsWith("w") ? "w" : w.startsWith("t") ? "topic" : "unit";
+  const a = Number(m[2]), b = m[3] ? Number(m[3]) : a;
+  return b >= a && b - a <= 20 ? Array.from({ length: b - a + 1 }, (_, i) => `${kind}${a + i}`) : [`${kind}${a}`];
+});
 // "Redo L4 examples" and "Redo the L4 worked examples" are one step.
 export function similarStep(a: string, b: string): boolean {
   const x = stepWords(a), y = stepWords(b);
@@ -346,13 +364,15 @@ export function similarStep(a: string, b: string): boolean {
 
 // The planner's steps a touched task does not have yet. Never more than the
 // planner itself now asks for in all (a far-out task given two steps gets the
-// rest as it nears), plus one that names material none of its steps do
-// ("Review L6-L7" once the quiz covers L1-L7). At most ten in all.
+// rest as it nears), plus one that names a lecture, chapter or week none of
+// its steps do ("Review L6-L7" once the quiz covers L1-L7). A reworded step
+// with some other number ("Past paper 2019") is not a wider scope. At most
+// ten in all.
 export function newSteps(have: TaskStep[], planned: TaskStep[]): TaskStep[] {
   const fresh = planned.filter((p) => !have.some((h) => h.id === p.id || similarStep(h.text, p.text)));
   if (!fresh.length) return [];
-  const known = new Set(have.flatMap((h) => numbersIn(h.text)));
-  const widens = (p: TaskStep) => numbersIn(p.text).some((w) => !known.has(w));
+  const known = new Set(have.flatMap((h) => materialIn(h.text)));
+  const widens = (p: TaskStep) => materialIn(p.text).some((w) => !known.has(w));
   const room = Math.min(10 - have.length, Math.max(planned.length - have.length, fresh.some(widens) ? 1 : 0));
   if (room <= 0) return [];
   // New material first, then in the planner's order.

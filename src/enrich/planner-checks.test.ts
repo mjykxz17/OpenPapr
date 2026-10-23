@@ -93,6 +93,25 @@ describe("checking the planner against its sources", () => {
     expect(quoteFound("Quiz 2 covers L1-L5, held in Week 7", text)).toBe(true);
     expect(quoteFound("Quiz 2 covers L1-L6 and is held in Week 7", text)).toBe(false);
     expect(quoteFound("held in Week 8", text)).toBe(false);
+    // Every number there somewhere is not enough: "Quiz 9" must be there as such.
+    const lab = "Quiz 2 results are out. Next quiz is on Friday. Lab 9 is due 30 October.";
+    expect(quoteFound("Quiz 9 is on Friday 30 October", lab)).toBe(false);
+    expect(quoteFound("Lab 9 due on 30 October", lab)).toBe(true);
+    // A quiz in a list of them is named all the same.
+    expect(quoteFound("Quiz 4 held in Week 9", "Quizzes 3, 4 and 5 are held in Week 9.")).toBe(true);
+    // Spelled another way, still the same words.
+    expect(quoteFound("Midterm on 10 Oct", "The Mid-term is on 10 Oct")).toBe(true);
+  });
+
+  it("doesn't let an invented quiz confirm itself with its own quote", () => {
+    const labInput = { ...input, announcements: [{ ref: "A9", line: "Quiz 2 results (posted 2026-09-24 09:00 (Thu))", body: "Quiz 2 results are out. Next quiz is on Friday. Lab 9 is due 30 October." }] };
+    const quiz9 = (sources: unknown[]) => cleanPlan({ tasks: [{ key: "st2334-quiz-9", title: "Quiz 9", kind: "quiz", due: "2026-10-30T23:59:00+08:00", dueConfidence: "exact",
+      sources }] }, refs, NOW, "ST2334", refFacts(labInput))!;
+    expect(quiz9([{ ref: "A9", quote: "Quiz 9 is on Friday 30 October" }])).toEqual([]);
+    // With a slide beside it, the quiz stays only as a guess.
+    const [t] = quiz9([{ ref: "A9", quote: "Quiz 9 is on Friday 30 October" }, { ref: "F4p12" }]);
+    expect(t).toMatchObject({ anticipated: true, dueConfidence: "estimated" });
+    expect(t!.sources.find((s) => s.kind === "announcement")!.quote).toBeUndefined();
   });
 
   it("reads a date-only due as the end of that Singapore day", () => {
@@ -175,6 +194,12 @@ describe("adding steps to a touched task", () => {
   it("adds a step for new material even when the planner gives no more steps than before", () => {
     expect(newSteps(have, [step("Redo L4 examples", "2026-09-26"), step("Review L6-L7", "2026-09-28")]).map((s) => s.text)).toEqual(["Review L6-L7"]);
     expect(newSteps(have, [step("Redo L4 examples", "2026-09-26"), step("Go over the notes", "2026-09-28")])).toEqual([]);
+  });
+  it("doesn't take a reworded step with some other number for new material", () => {
+    expect(newSteps(have, [step("Redo L4 examples", "2026-09-26"), step("Try the 2019 paper, 30 min", "2026-09-28")])).toEqual([]);
+    expect(newSteps(have, [step("Redo L4 examples", "2026-09-26"), step("Do Q1-5 of the practice set", "2026-09-28")])).toEqual([]);
+    // A chapter range that reaches further does count.
+    expect(newSteps(have, [step("Redo L4 examples", "2026-09-26"), step("Read Ch 3 to 5", "2026-09-28")]).map((s) => s.text)).toEqual(["Read Ch 3 to 5"]);
   });
   it("adds nothing to a task that is done or dismissed", () => {
     const ops = mergeTasks([{ id: 1, key: "k", status: "done", touchedAt: 5, steps: have }],

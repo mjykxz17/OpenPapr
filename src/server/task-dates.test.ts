@@ -51,7 +51,11 @@ describe("steps follow a date from the bell", () => {
 describe("tasksView days", () => {
   it("says how full each day is, with less room on days with classes", () => {
     const { db } = setup([st("Big revision", "2026-10-01", false, 150), st("Late one", "2026-09-29", false, 20)], sgt("2026-10-01T23:59:00"));
-    db.insert(items).values({ userId: 1, moduleId: 1, type: "event", source: "canvas", sourceId: "e1", title: "Lecture", dueAt: sgt("2026-10-01T14:00:00"), firstSeenAt: now }).run();
+    // A weekly lecture is a class; a one-off midterm and a personal event are not.
+    db.insert(items).values(["2026-09-17", "2026-09-24", "2026-10-01"].map((d, i) => ({ userId: 1, moduleId: 1, type: "event" as const, source: "canvas" as const, sourceId: `e${i}`,
+      title: "Lecture", dueAt: sgt(`${d}T14:00:00`), firstSeenAt: now }))).run();
+    db.insert(items).values([{ userId: 1, moduleId: 1, type: "event" as const, source: "canvas" as const, sourceId: "mid", title: "Midterm", dueAt: sgt("2026-10-01T18:00:00"), firstSeenAt: now },
+      { userId: 1, moduleId: null, type: "event" as const, source: "canvas" as const, sourceId: "own", title: "Dentist", dueAt: sgt("2026-10-01T09:00:00"), firstSeenAt: now }]).run();
     expect(classesOn(db, 1, "2026-10-01")).toEqual(new Map([["2026-10-01", 1]]));
     const { days } = tasksView(db, 1, now);
     expect(days).toHaveLength(14);
