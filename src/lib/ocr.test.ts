@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -62,6 +62,41 @@ describe("pdfTextWithOcr", () => {
     const text = prose(4);
     expect(await pdfTextWithOcr(pdf, { runner, extract: async () => text })).toBe(text);
     expect(recognise).not.toHaveBeenCalled();
+  });
+
+  it("does not keep a read that lost pages, and tries it again later", async () => {
+    const scan = new Uint8Array([7, 7, 1]);
+    const { runner, recognise } = fakeRunner(4);
+    let failing = true;
+    recognise.mockImplementation(async (png: Uint8Array) => {
+      if (failing && png[0] === 2) throw new Error("tesseract exited with null");   // a page timed out
+      return `Page ${png[0]} says binary search halves the interval each step`;
+    });
+    const cachePath = join(mkdtempSync(join(tmpdir(), "ocr-")), "deck.pdf.ocr.txt");
+    const extract = async () => scanText(4);
+    const T = 1_000_000_000;
+    expect(await pdfTextWithOcr(scan, { runner, extract, cachePath, now: T })).toContain("Page 3 says");
+    expect(existsSync(cachePath)).toBe(false);                             // not cached
+    expect(recognise).toHaveBeenCalledTimes(4);
+    await pdfTextWithOcr(scan, { runner, extract, cachePath, now: T + 60_000 });
+    expect(recognise).toHaveBeenCalledTimes(4);                            // not straight away again
+    failing = false;
+    expect(await pdfTextWithOcr(scan, { runner, extract, cachePath, now: T + 7 * 3_600_000 })).toContain("Page 2 says");
+    expect(recognise).toHaveBeenCalledTimes(8);
+    expect(readFileSync(cachePath, "utf8")).toContain("Page 2 says");      // now it is
+  });
+
+  it("reads one deck once when two readers ask at the same time, and marks the cache used", async () => {
+    const scan = new Uint8Array([7, 7, 2]);
+    const { runner, recognise } = fakeRunner(3);
+    const cachePath = join(mkdtempSync(join(tmpdir(), "ocr-")), "deck.pdf.ocr.txt");
+    const extract = async () => scanText(3);
+    const [a, b] = await Promise.all([pdfTextWithOcr(scan, { runner, extract, cachePath }), pdfTextWithOcr(scan, { runner, extract, cachePath })]);
+    expect(a).toBe(b);
+    expect(recognise).toHaveBeenCalledTimes(3);
+    utimesSync(cachePath, new Date(1000), new Date(1000));
+    await pdfTextWithOcr(scan, { runner, extract, cachePath, now: 5_000_000 });
+    expect(statSync(cachePath).mtimeMs).toBe(5_000_000);
   });
 
   it("gives the text layer back when OCR is not installed", async () => {
