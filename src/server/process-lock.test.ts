@@ -9,11 +9,16 @@ const lockPath = () => join(mkdtempSync(join(tmpdir(), "lock-test-")), "convert.
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Another process that takes the lock, says "held", and keeps it until killed.
+// The lock is kept on globalThis: awaiting a promise nothing can settle leaves
+// the connection unreachable, and the garbage collector closing it would let
+// the lock go before the kill.
 function holdInChild(path: string) {
   const script = join(mkdtempSync(join(tmpdir(), "lock-child-")), "child.ts");
   writeFileSync(script, [
     `import { processLock } from ${JSON.stringify(resolve(__dirname, "process-lock.ts"))};`,
-    `void processLock(process.argv[2]!).run(async () => { console.log("held"); await new Promise(() => {}); });`,
+    `const lock = processLock(process.argv[2]!);`,
+    `(globalThis as { held?: unknown }).held = lock;`,
+    `void lock.run(async () => { console.log("held"); await new Promise(() => {}); });`,
     `setInterval(() => {}, 1000);`,
   ].join("\n"));
   // node itself with tsx's loader, not the tsx wrapper: the wrapper runs the
