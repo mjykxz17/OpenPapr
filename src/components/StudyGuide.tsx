@@ -7,6 +7,7 @@ import remarkUnwrapImages from "remark-unwrap-images";
 import type { Components } from "react-markdown";
 import { splitGuideIntoChapters, extractSubheadings, slugifyHeading } from "@/lib/study-chapters";
 import { parseSlideCitation, deckProxyUrl, parseSlideImage, slideImageUrl, citedPagesByDeck } from "@/lib/slide-citation";
+import { slideChipLabel } from "@/lib/slide-label";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
 import { SlidePanel, type OpenDeck, type PanelMode } from "@/components/SlidePanel";
 import { SlidePanelContext, useSlidePanel, type SlideRef } from "@/components/slide-panel-context";
@@ -45,7 +46,7 @@ function componentsFor(moduleId: number): Components {
   em: ({ children }) => <em className="italic text-ink-2">{children}</em>,
   a: ({ href, children }) => {
     const cite = href ? parseSlideCitation(href) : null;
-    if (cite) return <SlideChip moduleId={moduleId} cite={cite}>{children}</SlideChip>;
+    if (cite) return <SlideChip moduleId={moduleId} cite={cite} />;
     return (
       <a href={href} target="_blank" rel="noreferrer" className="underline decoration-line-2 underline-offset-2 hover:text-accent">
         {children}
@@ -108,8 +109,9 @@ function componentsFor(moduleId: number): Components {
 // A slide citation. With the side panel available it shows the slide there —
 // a plain click never leaves the page — and a modifier-click or middle-click
 // still opens the PDF in a new tab, because the href is real. The chip that
-// matches what the panel is showing goes solid.
-function SlideChip({ moduleId, cite, children }: { moduleId: number; cite: SlideRef; children: ReactNode }) {
+// matches what the panel is showing goes solid. Its words come from the slide
+// it opens, not from the guide's link text, so the two cannot disagree.
+function SlideChip({ moduleId, cite }: { moduleId: number; cite: SlideRef }) {
   const panel = useSlidePanel();
   const current = panel?.current && panel.current.deck === cite.deck && panel.current.page === cite.page;
   return (
@@ -131,7 +133,7 @@ function SlideChip({ moduleId, cite, children }: { moduleId: number; cite: Slide
       <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <rect x="3" y="5" width="18" height="14" rx="2" />
       </svg>
-      {children}
+      {slideChipLabel(cite.deck, cite.page)}
     </a>
   );
 }
@@ -179,13 +181,15 @@ function useMinWidth(px: number): boolean {
 
 // A small on/off button for the reading toolbar. It is always rendered in
 // the same place; when it cannot apply right now it is disabled and says
-// why, rather than disappearing.
+// why, rather than disappearing. On a phone it is just its icon, so the
+// chapter picker beside it has room to name the chapter.
 function ToggleButton({ on, onClick, label, title, disabled, className = "", children }: {
   on: boolean; onClick: () => void; label: string; title: string; disabled?: boolean; className?: string; children: ReactNode;
 }) {
   return (
     <button
       type="button"
+      aria-label={label}
       aria-pressed={on}
       onClick={onClick}
       disabled={disabled}
@@ -195,7 +199,7 @@ function ToggleButton({ on, onClick, label, title, disabled, className = "", chi
       } ${className || "flex"}`}
     >
       {children}
-      <span>{label}</span>
+      <span className="hidden sm:inline">{label}</span>
     </button>
   );
 }
@@ -212,6 +216,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
   const [active, setActive] = useState(0);
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
   const [quizAsk, setQuizAsk] = useState(0);   // bumps when the toolbar's Quiz button is pressed
+  const [read, setRead] = useState<boolean[]>([]); // chapters marked as read, one flag per chapter
   const pendingScroll = useRef<string | null>(null); // section to scroll to after a restored chapter renders
   const tabsRef = useRef<HTMLDivElement | null>(null);      // the sticky chapter bar
   const tabsAnchor = useRef<HTMLDivElement | null>(null);   // zero-height marker at the bar's resting position
@@ -273,6 +278,27 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
       window.removeEventListener("touchmove", stop);
     };
   }, [active]);
+
+  // Which chapters are read lives on the server, so it follows the student
+  // to another device. Offline, the ticks just don't show.
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/modules/${moduleId}/guide/progress`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { read?: boolean[] } | null) => { if (live && Array.isArray(d?.read)) setRead(d.read); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [moduleId, markdown]);
+  async function markRead(i: number, on: boolean) {
+    const before = read;
+    setRead((r) => Object.assign([...r], { [i]: on }));
+    const r = await fetch(`/api/modules/${moduleId}/guide/progress`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter: i, read: on }),
+    }).catch(() => null);
+    const d = (await r?.json().catch(() => null)) as { read?: boolean[] } | null;
+    setRead(r?.ok && Array.isArray(d?.read) ? d.read : before);
+  }
+  const readCount = chapters.filter((_, i) => read[i]).length;
 
   // Persist position as the reader moves (only after the initial restore).
   useEffect(() => {
@@ -431,15 +457,15 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
         className="sticky top-0 z-20 -mx-3 mb-6 flex h-14 items-center gap-2 border-b border-line bg-surface px-3"
       >
         {chapters.length > 0 && (
-          <label className="flex min-w-0 items-center gap-2 text-[13px] text-ink-2">
+          <label className="flex min-w-0 flex-1 items-center gap-2 text-[13px] text-ink-2 sm:flex-none">
             <span className="hidden sm:inline">Chapter</span>
             <select
               value={active}
               onChange={(e) => selectChapter(Number(e.target.value))}
-              className="h-8 min-w-0 max-w-[18rem] rounded-md border border-line-2 bg-panel px-2 text-[13px] text-ink"
+              className="h-8 w-full min-w-0 max-w-[18rem] rounded-md border border-line-2 bg-panel px-2 text-[13px] text-ink sm:w-auto"
             >
               {chapters.map((c, i) => (
-                <option key={c.label} value={i}>{i + 1}. {bare(c.label)}</option>
+                <option key={c.label} value={i}>{i + 1}. {bare(c.label)}{read[i] ? " ✓" : ""}</option>
               ))}
             </select>
           </label>
@@ -602,6 +628,9 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
     );
   }
 
+  const tick = (
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+  );
   const chapterNav = (
     <nav aria-label="Chapters" className="sticky top-[72px] hidden self-start lg:block">
       <p className="mb-2.5 px-2.5 text-xs font-semibold uppercase tracking-[0.06em] text-ink-2">Chapters</p>
@@ -618,6 +647,7 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
             >
               <span className={`shrink-0 tabular-nums ${i === active ? "text-accent" : "text-ink-3"}`}>{i + 1}</span>
               <span>{bare(c.label)}</span>
+              {read[i] && <span className="ml-auto shrink-0 self-center text-ok" title="Read">{tick}<span className="sr-only">(read)</span></span>}
             </button>
           </li>
         ))}
@@ -680,10 +710,29 @@ export function StudyGuide({ markdown, moduleId, decks = [] }: { markdown: strin
             <Body markdown={preamble} moduleId={moduleId} />
           </div>
         )}
-        <p className="guide mb-2">
-          <span className="text-[13px] font-semibold uppercase tracking-[0.06em] text-accent">Chapter {active + 1} of {chapters.length}</span>
-        </p>
+        <div className="guide mb-2">
+          <p className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <span className="text-[13px] font-semibold uppercase tracking-[0.06em] text-accent">Chapter {active + 1} of {chapters.length}</span>
+            <span className="text-[13px] tabular-nums text-ink-3">{readCount} of {chapters.length} chapters read</span>
+          </p>
+        </div>
         <Body markdown={chapters[active].markdown} moduleId={moduleId} />
+        <div className="guide mt-10">
+          <div className="flex flex-wrap items-center gap-3 border-t border-line pt-5">
+            {read[active] ? (
+              <>
+                <span className="flex items-center gap-1.5 text-[14px] font-medium text-ok">{tick}Read</span>
+                <button type="button" onClick={() => markRead(active, false)} className="text-[13px] text-ink-3 underline decoration-line-2 underline-offset-2 hover:text-ink">
+                  Mark as unread
+                </button>
+              </>
+            ) : (
+              <button type="button" onClick={() => markRead(active, true)} className="flex h-9 items-center gap-1.5 rounded-md border border-line-2 bg-panel px-3 text-[13px] font-medium text-ink hover:border-accent hover:text-accent">
+                {tick}Mark as read
+              </button>
+            )}
+          </div>
+        </div>
         <ChapterQuiz key={`${active}:${chapters[active].label}`} moduleId={moduleId} chapter={active} label={chapters[active].label} start={quizAsk} />
       </div>
 
