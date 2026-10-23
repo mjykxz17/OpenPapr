@@ -15,7 +15,9 @@ import { deckStem } from "./deck";
 // gives is kept too, with the slide its question came from, so a reload shows
 // where they were and the planner can see which slides they keep missing.
 
-export type QuizQuestion = { q: string; options: string[]; answer: number; why: string; slide: { deck: string; page: number } | null };
+// `missedBefore`: carried over from the previous set because the student got
+// it wrong there, so the quiz can say "Missed last time" before it is answered.
+export type QuizQuestion = { q: string; options: string[]; answer: number; why: string; slide: { deck: string; page: number } | null; missedBefore?: true };
 export type QuizAnswer = { question: number; chosen: number; correct: boolean; answeredAt: number };
 
 const RawQ = z.object({
@@ -113,6 +115,7 @@ export function quizSource(markdown: string, budget = QUIZ_BUDGET): string {
 
 const MIN_QUESTIONS = 3;
 const WANT_QUESTIONS = 4;   // fewer good ones than this and it asks once more
+const MAX_CARRIED = 4;      // missed questions kept when a new set is made
 
 type Found = { mod: typeof modules.$inferSelect; chapter: GuideChapter; hash: string } | { error: string; status: number };
 function findChapter(db: Db, userId: number, moduleId: number, chapterIndex: number): Found {
@@ -176,6 +179,15 @@ export async function chapterQuiz(
     questions = [...questions, ...cleanQuiz(raw, chapter.markdown, decks).filter((q) => !seen.has(norm(q.q)))].slice(0, 8);
   }
   if (questions.length < MIN_QUESTIONS) return { error: "The questions came back garbled. Try again.", status: 502 };
+  // "New questions" keeps the ones the student got wrong in the old set, at
+  // the top, so missing a question once is not forgotten by asking for more.
+  if (saved) {
+    const wrong = new Set(answersFor(db, userId, moduleId, saved.set).filter((a) => !a.correct).map((a) => a.question));
+    const carried = saved.questions.filter((_, i) => wrong.has(i)).slice(0, MAX_CARRIED)
+      .map(({ missedBefore: _, ...q }) => ({ ...q, missedBefore: true as const }));
+    const again = new Set(carried.map((q) => norm(q.q)));
+    questions = [...carried, ...questions.filter((q) => !again.has(norm(q.q)))].slice(0, 8);
+  }
   const json = JSON.stringify(questions);
   db.insert(guideQuizzes).values({ moduleId, chapterHash: h, questionsJson: json, createdAt: now })
     .onConflictDoUpdate({ target: [guideQuizzes.moduleId, guideQuizzes.chapterHash], set: { questionsJson: json, createdAt: now } }).run();

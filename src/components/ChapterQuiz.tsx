@@ -3,9 +3,23 @@
 import { useEffect, useRef, useState } from "react";
 import { useSlidePanel } from "@/components/slide-panel-context";
 
-type Q = { q: string; options: string[]; answer: number; why: string; slide: { deck: string; page: number } | null };
+type Q = { q: string; options: string[]; answer: number; why: string; slide: { deck: string; page: number } | null; missedBefore?: boolean };
 type Saved = { question: number; chosen: number; correct: boolean };
 type QuizSet = { questions: Q[]; set: string; answers: Saved[] };
+
+// Which questions to flag "Missed last time", and the order to show them in,
+// flagged first: answered wrong in this set, or carried over from the last set
+// by "New questions" and not answered yet.
+export function missedFirst(d: Pick<QuizSet, "questions" | "answers">): { missed: number[]; order: number[] } {
+  const answered = new Map(d.answers.filter((a) => a.question < d.questions.length).map((a) => [a.question, a.correct]));
+  const all = d.questions.map((_, i) => i);
+  const missed = all.filter((i) => answered.get(i) === false || (!!d.questions[i]!.missedBefore && !answered.has(i)));
+  return { missed, order: [...missed, ...all.filter((i) => !missed.includes(i))] };
+}
+
+// Takes back an answer that could not be saved, unless another was picked since.
+export const unpick = (p: Record<number, number>, i: number, j: number): Record<number, number> =>
+  p[i] === j ? Object.fromEntries(Object.entries(p).filter(([k]) => Number(k) !== i)) : p;
 
 // "Test yourself" at the end of a chapter: a handful of multiple-choice
 // questions written from this chapter, each with why and the slide it is on.
@@ -24,22 +38,21 @@ export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: num
   const panel = useSlidePanel();
 
   function show(d: QuizSet) {
-    const missed = d.answers.filter((a) => !a.correct && a.question < d.questions.length).map((a) => a.question);
-    const rest = d.questions.map((_, i) => i).filter((i) => !missed.includes(i));
+    const { missed, order: o } = missedFirst(d);
     setQs(d.questions);
     setSet(d.set);
     setPicked(Object.fromEntries(d.answers.filter((a) => a.question < d.questions.length).map((a) => [a.question, a.chosen])));
     setMissedBefore(missed);
-    setOrder([...missed, ...rest]);
+    setOrder(o);
   }
 
   // Coming back to a chapter: its saved questions, if the student answered
-  // any. Never makes new ones.
+  // any or some are back from last time. Never makes new ones.
   useEffect(() => {
     let live = true;
     fetch(`/api/modules/${moduleId}/guide/quiz?chapter=${chapter}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: Partial<QuizSet> | null) => { if (live && d?.questions && d.set && d.answers?.length) show(d as QuizSet); })
+      .then((d: Partial<QuizSet> | null) => { if (live && d?.questions && d.set && (d.answers?.length || d.questions.some((q) => q.missedBefore))) show({ questions: d.questions, set: d.set, answers: d.answers ?? [] }); })
       .catch(() => {});
     return () => { live = false; };
   }, [moduleId, chapter]);
@@ -56,15 +69,22 @@ export function ChapterQuiz({ moduleId, chapter, label, start }: { moduleId: num
     setBusy(false);
   }
 
+  // Shows the answer straight away; if it can't be saved, it is taken back
+  // so the student can answer again rather than think it was kept.
   function choose(i: number, j: number) {
+    setError(null);
     setPicked((p) => ({ ...p, [i]: j }));
+    const undo = (message: string) => {
+      setPicked((p) => unpick(p, i, j));
+      setError(message);
+    };
     void fetch(`/api/modules/${moduleId}/guide/quiz/answer`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chapter, set, question: i, chosen: j }),
     }).then(async (r) => {
       if (r.ok) return;
       const d = (await r.json().catch(() => null)) as { error?: string } | null;
-      setError(d?.error ?? "Couldn't save that answer.");
-    }).catch(() => setError("Couldn't save that answer — you seem to be offline."));
+      undo(d?.error ?? "Couldn't save that answer. Try again.");
+    }).catch(() => undo("Couldn't save that answer — you seem to be offline."));
   }
 
   // Only a press made while this chapter is showing starts it.

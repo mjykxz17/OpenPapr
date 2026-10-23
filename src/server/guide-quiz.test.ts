@@ -87,6 +87,28 @@ describe("answers", () => {
     expect(recordAnswer(db, 1, 1, { chapter: 0, set: made.set, question: 0, chosen: 0 }, 210)).toMatchObject({ status: 409 });
   });
 
+  it("keeps the questions missed in the old set at the top of a new one", async () => {
+    const made = await chapterQuiz(db, 1, 1, 0, cfg, 10, { fetchFn: reply(six) });
+    if ("error" in made) throw new Error(made.error);
+    recordAnswer(db, 1, 1, { chapter: 0, set: made.set, question: 1, chosen: 0 }, 100);   // wrong
+    recordAnswer(db, 1, 1, { chapter: 0, set: made.set, question: 0, chosen: 0 }, 110);   // right
+    const other = [
+      q({ q: "What does a canary detect?", options: ["Overflows", "Leaks", "Races", "Deadlocks"] }),
+      q({ q: "Which value sits before the canary?", options: ["Locals", "Code", "Heap", "Disk"], slide: null }),
+      q({ q: "Where is the canary placed?", answer: 1, options: ["Heap", "Before the return address", "TLB", "Registers"] }),
+    ];
+    const fresh = await chapterQuiz(db, 1, 1, 0, cfg, 200, { fresh: true, fetchFn: reply(other) });
+    if ("error" in fresh) throw new Error(fresh.error);
+    expect(fresh.questions.map((x) => [x.q, x.missedBefore ?? false])).toEqual([
+      ["Where is the canary placed?", true], ["What does a canary detect?", false], ["Which value sits before the canary?", false],
+    ]);
+    // Answering it right in the new set clears it as a weak spot, and the next set does not carry it.
+    recordAnswer(db, 1, 1, { chapter: 0, set: fresh.set, question: 0, chosen: 1 }, 210);
+    const next = await chapterQuiz(db, 1, 1, 0, cfg, 300, { fresh: true, fetchFn: reply(other) });
+    if ("error" in next) throw new Error(next.error);
+    expect(next.questions.some((x) => x.missedBefore)).toBe(false);
+  });
+
   it("checks who is answering and what", async () => {
     const made = await chapterQuiz(db, 1, 1, 0, cfg, 10, { fetchFn: reply(six) });
     if ("error" in made) throw new Error(made.error);
