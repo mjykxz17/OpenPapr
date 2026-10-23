@@ -228,6 +228,22 @@ function TodayList({ hold, nextDay, today }: { hold: Hold; nextDay: TasksView["n
 // The study steps planned for today, above the views: the AI plan's part of
 // the page that is about doing rather than dates. On a phone it folds away,
 // so the views start on screen.
+// Days in the next two weeks with more planned than fits, even after the
+// worker spread the steps out: nothing could move without missing a deadline.
+export function overloadText(days: TasksView["days"], today: string): string | null {
+  const heavy = days.filter((d) => d.overloaded);
+  if (!heavy.length) return null;
+  const named = heavy.slice(0, 3).map((d) => `${dayLabel(d.date, today)} (${fmtMin(d.minutes)} planned, about ${fmtMin(d.cap)} fits)`);
+  const more = heavy.length > 3 ? ` and ${heavy.length - 3} more` : "";
+  return `${heavy.length === 1 ? "A heavy day" : "Heavy days"} ahead: ${named.join(", ")}${more}. These steps can't move later without missing a deadline — start some early if you can.`;
+}
+
+export function OverloadNote({ view, today }: { view: TasksView; today: string }) {
+  const text = overloadText(view.days, today);
+  if (!text) return null;
+  return <p className="mb-6 max-w-3xl rounded-[10px] border border-line bg-panel px-4 py-3 text-[13px] text-ink-2" role="note">{text}</p>;
+}
+
 export function TodaySteps({ view, today }: { view: TasksView; today: string }) {
   const hold = useHold(view.today);
   // Nothing for today, and nothing ticked off here: no box at all.

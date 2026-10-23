@@ -11,7 +11,7 @@ import { calendarDues } from "@/server/calendar-dues";
 import { taskRows, weekBands } from "@/server/task-rows";
 import { AppShell } from "@/components/AppShell";
 import { TodoList } from "@/components/TodoList";
-import { TodaySteps } from "@/components/tasks/TodaySteps";
+import { OverloadNote, TodaySteps } from "@/components/tasks/TodaySteps";
 import { TasksApp } from "@/components/tasks/TasksApp";
 import { RebuildButton } from "@/components/profile/RebuildButton";
 
@@ -47,6 +47,7 @@ export default async function TasksPage() {
       {/* Always mounted, so ticking the last step keeps its Undo; it draws
           nothing when there is nothing for today. */}
       <TodaySteps view={view} today={today} />
+      <OverloadNote view={view} today={today} />
 
       <TasksApp rows={rows} modules={modules} today={today} weeks={weekBands(semesterWeeks(now).weeks)} />
 

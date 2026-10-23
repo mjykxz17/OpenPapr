@@ -22,12 +22,12 @@ describe("pet conversations", () => {
   it("keeps whether each answer was grounded in the material", () => {
     const db = createDb(":memory:");
     db.insert(users).values({ name: "A" }).run();
-    const a = appendToChat(db, 1, null, "What is a canary?", "I couldn't find that in your material.", 1000, [], false);
+    const a = appendToChat(db, 1, null, "What is a canary?", "A guard on the stack.", 1000, [], false);
     appendToChat(db, 1, a.id, "Quiz date?", "Wed.", 2000);
     const m = getChat(db, 1, a.id)!.messages;
     expect(m[1]!.grounded).toBe(false);
-    // Saved without the flag: read back as "cites a source", here none.
-    expect(m[3]!.grounded).toBe(false);
+    // Saved without the flag and citing nothing (a date answer): not flagged.
+    expect(m[3]!.grounded).toBeUndefined();
   });
 
   it("fills in grounded and source labels on answers saved before they existed", () => {

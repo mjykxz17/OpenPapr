@@ -25,7 +25,7 @@ export type TasksView = {
   // (late ones count on today), how much the student can do that day (less
   // for days with classes), and overloaded: more planned than that even
   // after the worker balanced the days — nothing could move without missing
-  // a deadline. For the UI to warn on; not shown yet.
+  // a deadline. The Tasks page warns about those days (OverloadNote).
   days: DayLoad[];
 };
 

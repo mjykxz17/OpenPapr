@@ -115,7 +115,12 @@ export const NO_SOURCES_RULE = "None of the student's material matched this ques
 
 export const NOT_FOUND = "I couldn't find that in your material. Try other words, or open the slides from the module page.";
 
-export type Answer = { reply: string; sources: SourceRef[]; grounded: boolean; askedModel: boolean };
+// `grounded` is set only for an answer about course content: true when it
+// cites the student's material, false when the model answered without a
+// citation (the chat flags that one). Answers about dates, tasks or chat come
+// from the student's facts, and "couldn't find it" says so itself, so those
+// leave it unset.
+export type Answer = { reply: string; sources: SourceRef[]; grounded?: boolean; askedModel: boolean };
 type Llm = (messages: { role: "system" | "user" | "assistant"; content: string }[], opts: { maxTokens: number; temperature: number }) => Promise<string>;
 
 // One answer from the student's material. A content question with no passage
@@ -130,7 +135,7 @@ export async function answerFromMaterial(input: {
   // "why?" is as much a content question as the one before it; "when is it
   // due?" after a content question is still about dates.
   const content = isContentQuestion(question) || (!!input.context && !queryTokens(question).length && isContentQuestion(input.context));
-  if (!hits.length && content) return { reply: NOT_FOUND, sources: [], grounded: false, askedModel: false };
+  if (!hits.length && content) return { reply: NOT_FOUND, sources: [], askedModel: false };
   const system = hits.length
     ? `${input.system}\n\n${SOURCES_RULES}\n\nFACTS\n${input.facts}\n\nSOURCES\n${sourcesBlock(hits)}`
     : `${input.system}\n\n${NO_SOURCES_RULE}\n\nFACTS\n${input.facts}`;
@@ -141,5 +146,6 @@ export async function answerFromMaterial(input: {
   ], { maxTokens: hits.length ? 700 : 400, temperature: hits.length ? 0.3 : 0.6 });
   const clean = out.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/\*\*(.+?)\*\*/g, "$1").replace(/^#+\s*/gm, "").trim();
   const cited = citedSources(clean, hits);
-  return { reply: cited.text, sources: cited.sources, grounded: cited.grounded, askedModel: true };
+  const grounded = cited.grounded ? true : content ? false : undefined;
+  return { reply: cited.text, sources: cited.sources, ...(grounded !== undefined ? { grounded } : {}), askedModel: true };
 }

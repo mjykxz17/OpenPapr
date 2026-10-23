@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TodayStep } from "@/server/tasks";
-import { HOLD_MS, mergeHeld, queueBy } from "./TodaySteps";
+import { HOLD_MS, mergeHeld, queueBy, overloadText } from "./TodaySteps";
 
 const step = (taskId: number, id: string, minutes = 30): TodayStep =>
   ({ id, text: `${taskId}-${id}`, minutes, doBy: "2026-10-01", done: false, taskId, taskTitle: "T", code: null, dueAt: null, late: false });
@@ -46,5 +46,20 @@ describe("a step's requests go in order", () => {
     expect(await next).toBe(true);
     await other;
     expect(log).toEqual(["2:s1", "1:s1"]);
+  });
+});
+
+describe("overloadText", () => {
+  const day = (date: string, minutes: number, cap: number) => ({ date, minutes, cap, overloaded: minutes > cap });
+  it("says nothing when every day fits", () => {
+    expect(overloadText([day("2026-10-23", 90, 180), day("2026-10-24", 240, 240)], "2026-10-23")).toBeNull();
+  });
+  it("names the heavy days with what is planned and what fits", () => {
+    expect(overloadText([day("2026-10-23", 90, 180), day("2026-10-24", 300, 240)], "2026-10-23"))
+      .toBe("A heavy day ahead: Tomorrow (5h planned, about 4h fits). These steps can't move later without missing a deadline — start some early if you can.");
+  });
+  it("lists three and counts the rest", () => {
+    const days = ["2026-10-26", "2026-10-27", "2026-10-28", "2026-10-29", "2026-10-30"].map((d) => day(d, 200, 180));
+    expect(overloadText(days, "2026-10-23")).toMatch(/^Heavy days ahead: Mon \(3h 20m planned, about 3h fits\), Tue .*, Wed .* and 2 more\./);
   });
 });

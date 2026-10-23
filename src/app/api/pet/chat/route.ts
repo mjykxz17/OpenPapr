@@ -28,20 +28,20 @@ export const dynamic = "force-dynamic";
 // Response: { reply, smart, sources, grounded, sessionId, title?, added? }.
 // `sources` are the passages the reply cites ([n] in the text), each with a
 // `label` ("slides", "study guide", "your note", "announcement").
-// `grounded` is true only when the reply cites at least one of them. It is
-// false for "I couldn't find that in your material" (nothing passed the
-// floor; the model was not asked), for an answer that cites nothing, and for
-// answers about dates and tasks, which come from the student's facts rather
-// than their material. The same flag is kept on the stored message;
-// messages saved before it existed read back with grounded = "cites a source"
-// and each source's label filled in from its kind.
+// `grounded` is there only for an answer about course content: true when the
+// reply cites at least one source, false when the model answered without one
+// (the chat flags it). It is left out for replies that don't claim anything
+// from the material: "I couldn't find that" (nothing passed the floor; the
+// model was not asked), answers about dates and tasks from the student's
+// facts, tasks added, and the rule-based replies. The same flag is kept on the
+// stored message.
 export async function POST(request: Request) {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
     return NextResponse.json({ error: "expected a JSON body" }, { status: 415 });
   }
-  if (!rateLimit(`pet:${userId}`, 40, 10 * 60_000)) return NextResponse.json({ reply: "I need a little breather — too many questions at once. Try again in a few minutes?", grounded: false });
+  if (!rateLimit(`pet:${userId}`, 40, 10 * 60_000)) return NextResponse.json({ reply: "I need a little breather — too many questions at once. Try again in a few minutes?" });
   let body: { message?: unknown; sessionId?: unknown; moduleId?: unknown };
   try { body = (await request.json()) as typeof body; } catch { return NextResponse.json({ error: "invalid body" }, { status: 400 }); }
   const question = typeof body.message === "string" ? body.message.trim().slice(0, 1000) : "";
@@ -69,9 +69,9 @@ export async function POST(request: Request) {
       ? "What should I remind you about? Try “remind me to print the tutorial sheet by Friday”."
       : `Added to your tasks: “${q.title}”${dueAt ? `, due ${dayLabel(dueAt)}` : " (no date — say “by Friday” next time and I'll set one)"}. It's on the Tasks page.`;
     // The demo account is shared by every visitor: nobody's chat is kept for the next one.
-    if (user?.isDemo) return NextResponse.json({ reply, smart: false, grounded: false, sessionId: null, added: id !== null });
-    const saved = appendToChat(db, userId, earlierTurns.length ? sessionId : null, question, reply, now, [], false);
-    return NextResponse.json({ reply, smart: false, grounded: false, sessionId: saved.id, title: saved.title, added: id !== null });
+    if (user?.isDemo) return NextResponse.json({ reply, smart: false, sessionId: null, added: id !== null });
+    const saved = appendToChat(db, userId, earlierTurns.length ? sessionId : null, question, reply, now, []);
+    return NextResponse.json({ reply, smart: false, sessionId: saved.id, title: saved.title, added: id !== null });
   }
   const fallback = () => ruleAnswer(question, dueList(db, userId, now), codes, now, recentlySaid(db, userId, now));
   const earlier = earlierTurns;
@@ -79,7 +79,7 @@ export async function POST(request: Request) {
   let reply: string;
   let smart = false;
   let sources: SourceRef[] = [];
-  let grounded = false;
+  let grounded: boolean | undefined;
   if (!cfg) reply = fallback();
   else {
     try {
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
       });
       reply = out.reply || fallback();
       sources = out.sources;
-      grounded = out.grounded && !!out.reply;
+      grounded = out.reply ? out.grounded : undefined;
       smart = out.askedModel;
     } catch {
       // The model is down or out of credit: the rules still know the dates.

@@ -10,12 +10,13 @@ export type PetChatSummary = { id: number; title: string; updatedAt: number; cou
 const MAX_CHATS = 50;
 const MAX_MESSAGES = 200;
 
-// Answers saved before `grounded` and `label` existed get them here, so every
-// message the chat reads back has both.
+// Answers saved before source labels existed get them here. One saved before
+// `grounded` existed counts as grounded when it cites something, and is left
+// unflagged otherwise: it may have been about dates, not the material.
 const filled = (m: PetMsg): PetMsg => m.role !== "assistant" ? m : {
   ...m,
   ...(m.sources ? { sources: m.sources.map((s) => (s.label ? s : { ...s, label: sourceLabel(s.kind) })) } : {}),
-  grounded: m.grounded ?? !!m.sources?.length,
+  ...(m.grounded !== undefined ? {} : m.sources?.length ? { grounded: true } : {}),
 };
 const parse = (json: string): PetMsg[] => { try { const v = JSON.parse(json); return Array.isArray(v) ? (v as PetMsg[]).map(filled) : []; } catch { return []; } };
 const titleFrom = (q: string) => { const t = q.replace(/\s+/g, " ").trim(); return t.length > 60 ? `${t.slice(0, 57).trimEnd()}…` : t || "New chat"; };

@@ -203,7 +203,8 @@ describe("answering from material", () => {
     let calls = 0;
     const llm = async () => { calls++; return "Paris [1]."; };
     const out = await answerFromMaterial({ question: "What is the capital of France?", earlier: [], hits: [], system: "S", facts: "F", llm });
-    expect(out).toEqual({ reply: NOT_FOUND, sources: [], grounded: false, askedModel: false });
+    // The reply says it wasn't found, so it isn't flagged as well.
+    expect(out).toEqual({ reply: NOT_FOUND, sources: [], askedModel: false });
     expect(calls).toBe(0);
   });
 
@@ -211,7 +212,8 @@ describe("answering from material", () => {
     let calls = 0;
     let system = "";
     const llm = async (m: { role: string; content: string }[]) => { calls++; system = m[0]!.content; return "Quiz 2 is on Wed."; };
-    expect((await answerFromMaterial({ question: "When is the next quiz?", earlier: [], hits: [], system: "S", facts: "F", llm })).grounded).toBe(false);
+    // From the facts, not the material: neither grounded nor flagged.
+    expect((await answerFromMaterial({ question: "When is the next quiz?", earlier: [], hits: [], system: "S", facts: "F", llm })).grounded).toBeUndefined();
     // With nothing from their material, the model is told not to teach from general knowledge.
     expect(system).toContain(NO_SOURCES_RULE);
     await answerFromMaterial({ question: "thanks!", earlier: [], hits: [], system: "S", facts: "F", llm });
@@ -244,6 +246,8 @@ describe("answering from material", () => {
     expect(out.reply).toBe("It guards the return address.");
     expect(out.grounded).toBe(false);
     expect((await answerFromMaterial({ question: "what does a canary guard", earlier: [], hits: [slide], system: "S", facts: "F", llm: async () => "The return address [1]." })).grounded).toBe(true);
+    // A date question that happened to match a slide, answered from the facts: not flagged.
+    expect((await answerFromMaterial({ question: "When is the next quiz?", earlier: [], hits: [slide], system: "S", facts: "F", llm: async () => "Quiz 2 is on Wed." })).grounded).toBeUndefined();
   });
 
   it("sends history without its old [n] markers and labels the study guide", async () => {
