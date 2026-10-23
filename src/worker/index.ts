@@ -4,12 +4,13 @@ import Anthropic from "@anthropic-ai/sdk";
 import { eq, and, isNull, or, inArray } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { components, items, modules, users } from "../db/schema";
-import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, selectRequestedUsers, takeSyncRequest, upsertModuleFiles, type DiscoveredFile,
+import { applyCanvasSync, applyExtractedActions, markSyncStarted, recordActionFailure, selectActionCandidates, selectDueUsers, selectRequestedUsers, takeSyncRequest,
   claimNextGuideRun, updateGuideRun, failStaleGuideRuns, failOrphanedGuideRuns, upsertStudyGuide, setModuleActivity, shouldAttemptWeightage, upsertMailItems, recordCanvasTokenCheck } from "../db/repo";
 import { loadEnv } from "../lib/env";
 import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient, isPdfFile, type CanvasClient } from "../connectors/canvas/client";
-import { extractCanvasFileLinks, type FileLinkSource } from "../lib/canvas-file-links";
+import { cachedPageBody } from "../connectors/canvas/page-cache";
+import { createHarvester } from "./harvest";
 import { categorizeModuleFiles, createCompatFileCategorizer } from "../enrich/file-category";
 import { generateModuleGuide } from "../enrich/generate-guide";
 import { keepAwake, selfPing } from "./keep-awake";
@@ -127,73 +128,10 @@ function kitFor(userId: number): LlmKit {
 
 const SYLLABUS_NAME_RE = /(syllabus|assessment|grading|outline)/i;
 
-// Records every file a module has, from two sources that barely overlap: the
-// Files listing, and links pasted into announcements or the syllabus. Some
-// courses keep their entire deck set in the second category — IFS4103's Files
-// tab holds two recruitment posters while its lecture slides are reachable
-// only by id, hidden from the listing, and the study guide for that module
-// consequently had no slides to cite.
-//
-// Only files LINKED FROM CONTENT the student can already read are harvested.
-// hidden:true can mean deliberately withheld as well as merely unlisted, and
-// following a link the course itself published is what keeps the distinction
-// honest.
-async function harvestFiles(
-  canvas: CanvasClient,
-  courseId: number,
-  moduleId: number,
-  sources: FileLinkSource[],
-  fileCategorizer: LlmKit["fileCategorizer"],
-): Promise<void> {
-  const discovered = new Map<number, DiscoveredFile>();
-
-  const listed = await (async () => {
-    try { return await canvas.listCourseFiles(courseId); } catch { return []; }
-  })();
-  for (const f of listed) {
-    discovered.set(f.id, {
-      canvasFileId: f.id, displayName: f.display_name,
-      contentType: f["content-type"] ?? null, sizeBytes: f.size ?? null, hidden: false,
-    });
-  }
-
-  // Pages carry the links the Files tab omits: IFS4103 publishes its lecture
-  // decks on two content pages and nowhere else. Page counts are small (2-7
-  // across the active modules) so this is a handful of extra calls, but the
-  // cap stops a course with a large wiki from dominating a sync cycle.
-  const fromPages: FileLinkSource[] = [];
-  try {
-    for (const page of (await canvas.listPages(courseId)).slice(0, 25)) {
-      try { fromPages.push({ label: page.title, html: await canvas.getPageBody(courseId, page.url) }); } catch { /* single page unreadable */ }
-    }
-  } catch {
-    // Pages are disabled for some courses (CS4239 returns 404); not an error.
-  }
-
-  for (const link of extractCanvasFileLinks([...sources, ...fromPages])) {
-    const listed = discovered.get(link.id);
-    if (listed) {
-      // Listed AND linked: keep the link's context, it helps categorisation.
-      listed.linkedFrom = link.linkedFrom;
-      listed.linkContext = link.context;
-      continue;
-    }
-    try {
-      const f = await canvas.getFile(link.id);
-      discovered.set(link.id, {
-        canvasFileId: f.id, displayName: f.display_name,
-        contentType: f["content-type"] ?? null, sizeBytes: f.size ?? null, hidden: true,
-        linkedFrom: link.linkedFrom, linkContext: link.context,
-      });
-    } catch {
-      // A link can point at a file the student cannot read, or one since
-      // deleted. Skip it rather than failing the whole course sync.
-    }
-  }
-
-  if (discovered.size > 0) upsertModuleFiles(db, moduleId, [...discovered.values()], Date.now());
-  await categorizeModuleFiles(db, moduleId, fileCategorizer);
-}
+// File discovery for each course (see harvest.ts). Kept across cycles: it
+// remembers which linked files Canvas refused, so they are not asked for
+// again every sync.
+const harvestFiles = createHarvester({ db, now: Date.now });
 
 async function canvasSync(userId: number): Promise<void> {
   const user = db.select().from(users).where(eq(users.id, userId)).get()!;
@@ -222,7 +160,8 @@ async function canvasSync(userId: number): Promise<void> {
     await harvestFiles(canvas, course.id, moduleId, [
       ...announcements.map((a) => ({ label: a.title, html: a.message })),
       { label: "Syllabus", html: course.syllabus_body ?? null },
-    ], fileCategorizer);
+    ]);
+    await categorizeModuleFiles(db, moduleId, fileCategorizer);
 
     await syncDiscussions(canvas, user.canvasUserId ?? null, course.id, moduleId);
 
@@ -240,7 +179,7 @@ async function canvasSync(userId: number): Promise<void> {
     const texts: WeightageSourceText[] = [];
     if (sync.module.syllabusBody) texts.push({ label: "Canvas syllabus page", text: sync.module.syllabusBody });
     for (const p of (await optional(canvas.listPages(course.id), [])).filter((p) => SYLLABUS_NAME_RE.test(p.title)).slice(0, 3))
-      texts.push({ label: `Page: ${p.title}`, text: await optional(canvas.getPageBody(course.id, p.url), "") });
+      texts.push({ label: `Page: ${p.title}`, text: await optional(cachedPageBody(db, canvas, course.id, p, Date.now()), "") });
     // Candidate PDFs: syllabus-named files, else week-0/admin-looking decks
     // (profs often put the assessment breakdown in the prelim slides).
     let candidateFiles = (await optional(canvas.listSyllabusFiles(course.id), [])).filter(isPdfFile);
