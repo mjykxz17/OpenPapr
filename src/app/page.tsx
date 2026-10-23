@@ -25,7 +25,7 @@ import { SemesterBar } from "@/components/home/SemesterBar";
 import { shortDate, syncedLabel } from "@/lib/format-date";
 import { todayLine } from "@/components/home/today-line";
 import { AccountLink } from "@/components/home/AccountLink";
-import { mailEnabled } from "@/components/mail-access";
+import { mailConnected, mailEnabled } from "@/components/mail-access";
 
 export const dynamic = "force-dynamic";
 
@@ -108,7 +108,8 @@ export default async function Home() {
   // The server sleeps when nobody is using it, so data a few hours old on
   // opening is normal (the Sync button catches up straight away). Only a
   // source that hasn't synced for a day is worth a warning.
-  const syncStale = overview.syncStatus.some((x) => (x.source === "canvas" || (x.source === "graph" && user?.msRefreshTokenEnc)) && x.stale
+  const hasMail = mailConnected(env, user);
+  const syncStale = overview.syncStatus.some((x) => (x.source === "canvas" || (x.source === "graph" && hasMail)) && x.stale
     && (x.lastOkAt === null || now - x.lastOkAt > 24 * 3_600_000));
 
   return (
@@ -156,7 +157,7 @@ export default async function Home() {
               <h1 className="text-2xl font-semibold tracking-[-0.01em] tabular-nums text-ink">{dateLabel}</h1>
             )}
             {/* Sync is the icon on the right; this line only speaks up when something is stale. */}
-            {user?.canvasTokenEnc && syncStale && <div className="mt-2"><SyncStatus syncStatus={overview.syncStatus} now={now} mailConnected={Boolean(user?.msRefreshTokenEnc)} /></div>}
+            {user?.canvasTokenEnc && syncStale && <div className="mt-2"><SyncStatus syncStatus={overview.syncStatus} now={now} mailConnected={hasMail} /></div>}
           </div>
         }
         actions={<>
