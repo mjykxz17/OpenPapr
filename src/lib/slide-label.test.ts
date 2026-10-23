@@ -11,6 +11,8 @@ describe("slide chip labels", () => {
     expect(shortDeck("CS2040S-L3-sorting")).toBe("L3");
     expect(shortDeck("Lecture 5 - Paging")).toBe("L5");
     expect(shortDeck("Tutorial_2")).toBe("T2");
+    expect(shortDeck("CS2040S_Lecture_10")).toBe("L10");
+    expect(shortDeck("CS2040S_Tutorial_3_sorting")).toBe("T3");
     expect(shortDeck("Week10 notes")).toBe("W10");
     expect(shortDeck("Introductions-and-setup")).toBe("Introductio…");
     expect(shortDeck("Intro")).toBe("Intro");

@@ -13,7 +13,8 @@ export function shortDeck(deck: string): string {
   const words = deck.trim().split(/[\s_.\-–]+/).filter(Boolean);
   const code = words.find((w) => /^[A-Za-z]{1,2}\d{1,2}[a-z]?$/.test(w));
   if (code) return code;
-  const named = /\b(lecture|lec|week|wk|tutorial|tut|unit|chapter|ch|lab|topic)\s*[-_]?\s*(\d+)/i.exec(deck);
+  // "_" counts as a letter to \b, so "CS2040S_Lecture_10" is read with spaces.
+  const named = /\b(lecture|lec|week|wk|tutorial|tut|unit|chapter|ch|lab|topic)\s*[-_]?\s*(\d+)/i.exec(deck.replace(/_/g, " "));
   if (named) return `${PREFIX[named[1]!.toLowerCase()]}${named[2]}`;
   const first = words[0] ?? deck;
   return first.length > 12 ? `${first.slice(0, 11)}…` : first;
