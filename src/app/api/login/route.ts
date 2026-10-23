@@ -1,12 +1,14 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { SESSION_TTL_MS, signSession } from "@/server/auth";
-import { hashPassword, normalizeUsername, verifyPassword } from "@/server/password";
-import { pruneRateLimits, rateLimit } from "@/server/rate-limit";
+import { eq } from "drizzle-orm";
+import { hashPassword, hashPasswordAsync, needsRehash, normalizeUsername, verifyPasswordAsync } from "@/server/password";
+import { loginLocked, pruneRateLimits, rateLimit, recordLoginFailure, recordLoginSuccess } from "@/server/rate-limit";
+import { setSessionCookie } from "@/server/session";
 import { getDb } from "@/server/db";
+import { users } from "@/db/schema";
 import { createLocalUser, findByUsername, resolveCanvasUser, setCredentials } from "@/db/repo";
 import { createCanvasClient } from "@/connectors/canvas/client";
-import { loadEnv, sessionSigningKey } from "@/lib/env";
+import { loadEnv } from "@/lib/env";
 
 const sameSecret = (a: string, b: string) =>
   timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest());
@@ -16,19 +18,11 @@ const clientKey = (request: Request) =>
   ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
   ?? "unknown";
 
-// max-age is what makes the session survive closing the browser; without it
-// the cookie is discarded on exit no matter how long the token stays valid.
-function withSession(body: object, userId: number, secret: string) {
-  const res = NextResponse.json(body);
-  res.cookies.set("session", signSession(userId, secret), {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: true,
-    path: "/",
-    maxAge: Math.floor(SESSION_TTL_MS / 1000),
-  });
-  return res;
-}
+const withSession = (body: object, userId: number) => setSessionCookie(NextResponse.json(body), getDb(), userId);
+
+// One answer for an unknown username, a wrong password and a locked account,
+// so none of them reveals which usernames exist.
+const SIGN_IN_REFUSED = "Wrong username or password. After several wrong tries in a row, sign-in pauses for 15 minutes.";
 
 const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
@@ -53,13 +47,24 @@ export async function POST(request: Request) {
   // --- returning visit: username and password, no Canvas token needed ---
   if (username && password && !str(raw.canvasToken) && !str(raw.inviteCode)) {
     const user = findByUsername(db, username);
-    // Verify against a dummy hash when the user is unknown, so a wrong
-    // username and a wrong password take the same time to answer.
-    const ok = verifyPassword(password, user?.passwordHash ?? DUMMY_HASH);
-    if (!user || !ok) {
-      return NextResponse.json({ error: "wrong username or password" }, { status: 401 });
+    const now = Date.now();
+    // Verify against a dummy hash when the user is unknown — and even when the
+    // account is locked — so every refusal takes the same time to answer.
+    const ok = await verifyPasswordAsync(password, user?.passwordHash ?? DUMMY_HASH);
+    if (!user || loginLocked(user, now) || !ok) {
+      if (user && !loginLocked(user, now)) recordLoginFailure(db, user.id, now);
+      // A hash from before the cost went up checks faster than the dummy;
+      // pay the difference so a quick refusal does not mark a real username.
+      if (user?.passwordHash && needsRehash(user.passwordHash)) await verifyPasswordAsync(password, DUMMY_HASH);
+      return NextResponse.json({ error: SIGN_IN_REFUSED }, { status: 401 });
     }
-    return withSession({ ok: true, name: user.name }, user.id, sessionSigningKey(env));
+    recordLoginSuccess(db, user);
+    // Hashes made with older, cheaper settings are upgraded while the
+    // password is at hand; this is the only moment it is.
+    if (needsRehash(user.passwordHash)) {
+      db.update(users).set({ passwordHash: await hashPasswordAsync(password) }).where(eq(users.id, user.id)).run();
+    }
+    return withSession({ ok: true, name: user.name }, user.id);
   }
 
   // --- first visit: the invite code, then a Canvas token and/or a username ---
@@ -77,8 +82,8 @@ export async function POST(request: Request) {
   if (!canvasToken) {
     if (password.length < 8) return NextResponse.json({ error: "choose a password of at least 8 characters" }, { status: 400 });
     if (findByUsername(db, username)) return NextResponse.json({ error: "that username is already taken" }, { status: 409 });
-    const userId = createLocalUser(db, username, hashPassword(password), Date.now());
-    return withSession({ ok: true, name: username, credentialsSaved: true, created: true }, userId, sessionSigningKey(env));
+    const userId = createLocalUser(db, username, await hashPasswordAsync(password), Date.now());
+    return withSession({ ok: true, name: username, credentialsSaved: true, created: true }, userId);
   }
 
   let self: { id: number; name: string };
@@ -103,13 +108,13 @@ export async function POST(request: Request) {
     if (password.length < 8) {
       return NextResponse.json({ error: "choose a password of at least 8 characters" }, { status: 400 });
     }
-    credentialsSaved = setCredentials(db, userId, username, hashPassword(password));
+    credentialsSaved = setCredentials(db, userId, username, await hashPasswordAsync(password));
     if (!credentialsSaved) {
       return NextResponse.json({ error: "that username is already taken" }, { status: 409 });
     }
   }
 
-  return withSession({ ok: true, name: self.name, credentialsSaved }, userId, sessionSigningKey(env));
+  return withSession({ ok: true, name: self.name, credentialsSaved }, userId);
 }
 
 // Cost-matched placeholder so an unknown username cannot be distinguished by

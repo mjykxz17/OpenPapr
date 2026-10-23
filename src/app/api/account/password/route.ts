@@ -2,13 +2,17 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/server/db";
 import { accountRequest, str } from "@/server/account-request";
 import { getUser, setCredentials } from "@/db/repo";
-import { hashPassword, normalizeUsername, verifyPassword } from "@/server/password";
+import { hashPasswordAsync, normalizeUsername, verifyPasswordAsync } from "@/server/password";
+import { endAllSessions, setSessionCookie } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 
 // Sets or changes the username and password. An account that already has a
 // password must present it: a session left open on a shared machine should
-// not be enough to lock the owner out.
+// not be enough to lock the owner out. Saving signs out every other device
+// (a new password is what someone sets when they fear the old one leaked)
+// and re-issues this device's cookie so it stays signed in. The demo account
+// is refused by accountRequest.
 export async function PUT(request: Request) {
   const req = await accountRequest(request);
   if ("res" in req) return req.res;
@@ -22,11 +26,12 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "usernames are 3–40 letters, numbers, dots, dashes or underscores" }, { status: 400 });
   }
   if (next.length < 8) return NextResponse.json({ error: "choose a password of at least 8 characters" }, { status: 400 });
-  if (user.passwordHash && !verifyPassword(str(req.body.currentPassword), user.passwordHash)) {
+  if (user.passwordHash && !(await verifyPasswordAsync(str(req.body.currentPassword), user.passwordHash))) {
     return NextResponse.json({ error: "your current password is not right" }, { status: 401 });
   }
-  if (!setCredentials(db, user.id, username, hashPassword(next))) {
+  if (!setCredentials(db, user.id, username, await hashPasswordAsync(next))) {
     return NextResponse.json({ error: "that username is already taken" }, { status: 409 });
   }
-  return NextResponse.json({ ok: true, username });
+  endAllSessions(db, user.id);
+  return setSessionCookie(NextResponse.json({ ok: true, username }), db, user.id);
 }
