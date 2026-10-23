@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/server/db";
 import { currentUserId } from "@/server/session";
+import { requireJson } from "@/server/http";
 import { rateLimit } from "@/server/rate-limit";
 import { resolveChange, type ChangeAction } from "@/server/changes";
 
@@ -13,7 +14,8 @@ const ACTIONS: ChangeAction[] = ["accept", "keep", "undo", "seen", "not_task"];
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (!(request.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) return NextResponse.json({ error: "expected a JSON body" }, { status: 415 });
+  const notJson = requireJson(request);
+  if (notJson) return notJson;
   if (!rateLimit(`changes:${userId}`, 200, 10 * 60_000)) return NextResponse.json({ error: "too many changes" }, { status: 429 });
   const body = (await request.json().catch(() => ({}))) as { action?: string };
   const action = ACTIONS.find((a) => a === body.action);

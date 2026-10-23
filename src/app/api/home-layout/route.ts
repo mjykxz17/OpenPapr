@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { currentUserId } from "@/server/session";
+import { requireJson } from "@/server/http";
 import { getDb } from "@/server/db";
 import { users } from "@/db/schema";
 import { normalizeLayout } from "@/lib/home-layout";
@@ -9,6 +10,8 @@ import { normalizeLayout } from "@/lib/home-layout";
 export async function POST(request: Request) {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const notJson = requireJson(request);
+  if (notJson) return notJson;
   const body = await request.json().catch(() => null);
   if (!Array.isArray(body?.layout)) return NextResponse.json({ error: "layout must be an array" }, { status: 400 });
   const layout = normalizeLayout(body.layout);

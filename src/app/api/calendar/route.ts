@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { DEMO_LOCKED, currentUserId, isDemoUser } from "@/server/session";
+import { currentUserId } from "@/server/session";
+import { demoLocked } from "@/server/demo-guard";
+import { requireJson } from "@/server/http";
 import { getDb } from "@/server/db";
 import { users } from "@/db/schema";
 import { calendarToken } from "@/server/calendar";
@@ -10,7 +12,8 @@ import { calendarToken } from "@/server/calendar";
 export async function POST(request: Request) {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (isDemoUser(userId)) return NextResponse.json({ error: DEMO_LOCKED }, { status: 403 });
+  const refused = demoLocked(userId) ?? requireJson(request);
+  if (refused) return refused;
   const body = (await request.json().catch(() => null)) as { reset?: unknown } | null;
   const token = calendarToken(getDb(), userId, body?.reset === true);
   return NextResponse.json({ ok: true, path: `/api/calendar/feed/${token}.ics` });
@@ -19,7 +22,8 @@ export async function POST(request: Request) {
 export async function DELETE() {
   const userId = await currentUserId();
   if (userId === null) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  if (isDemoUser(userId)) return NextResponse.json({ error: DEMO_LOCKED }, { status: 403 });
+  const locked = demoLocked(userId);
+  if (locked) return locked;
   getDb().update(users).set({ calendarToken: null }).where(eq(users.id, userId)).run();
   return NextResponse.json({ ok: true });
 }
