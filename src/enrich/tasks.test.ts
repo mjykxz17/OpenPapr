@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { balanceDays, cleanPlan, dailyCap, mergeTasks, obligationLines, quizNumber, quizSeries, rollForward, sgtDate, stepId, type TaskSource, type TaskStep } from "./tasks";
+import { balanceDays, cleanPlan, dailyCap, mergeTasks, obligationLines, planModuleTasks, quizNumber, quizSeries, rollForward, sgtDate, stepId, type TaskSource, type TaskStep } from "./tasks";
 
 const NOW = Date.UTC(2026, 8, 25, 2, 0); // Fri 25 Sep 2026, 10:00 SGT
 const refs = new Map<string, TaskSource>([
@@ -127,5 +127,21 @@ describe("quizSeries", () => {
     expect(quizSeries([q(1, "Quiz 1", 20), q(2, "Quiz 2", -3, false)], NOW)).toBeNull();        // Quiz 2 is still to do
     expect(quizSeries([q(1, "Quiz 1", 90), q(2, "Quiz 2", 80)], NOW)).toBeNull();               // series went quiet
     expect(quizSeries([q(1, "Quiz 1", 10)], NOW)).toBeNull();                                  // one quiz is not a series
+  });
+});
+
+describe("planModuleTasks", () => {
+  it("asks a reply that ran out of budget again with twice as much", async () => {
+    const budgets: number[] = [];
+    const fetchFn = (async (_u: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      budgets.push(body.max_tokens ?? body.max_completion_tokens);
+      return budgets.length === 1
+        ? Response.json({ choices: [{ message: { content: "" }, finish_reason: "length" }] })
+        : Response.json({ choices: [{ message: { content: '{"tasks":[]}' } }] });
+    }) as unknown as typeof fetch;
+    const input = { today: "2026-09-25 (Fri)", module: { code: "CS1", name: "x" }, canvas: [], past: [], announcements: [], discussions: [], notes: [], fileHints: [], weightage: [], examDate: null, studyAdvice: [], existing: [] };
+    await planModuleTasks({ baseUrl: "https://llm.test/v1", apiKey: "tasks-budget", model: "m" }, input, new Map(), 0, fetchFn).catch(() => null);
+    expect(budgets).toEqual([6000, 12_000]);
   });
 });

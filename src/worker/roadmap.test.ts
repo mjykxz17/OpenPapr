@@ -125,6 +125,23 @@ describe("schedules pasted as pictures", () => {
   });
 });
 
+describe("a roadmap reply that ran out of budget", () => {
+  it("is asked again with twice the budget", async () => {
+    const { extractRoadmap } = await import("../enrich/roadmap");
+    const budgets: number[] = [];
+    const fetchFn = (async (_u: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      budgets.push(body.max_tokens ?? body.max_completion_tokens);
+      return budgets.length === 1
+        ? Response.json({ choices: [{ message: { content: "" }, finish_reason: "length" }] })
+        : Response.json({ choices: [{ message: { content: '{"items":[]}' } }] });
+    }) as unknown as typeof fetch;
+    const r = await extractRoadmap({ ...cfg, apiKey: "budget-key" }, { code: "CS4238", name: "x" }, [{ ref: "F1", label: "L1.pdf", text: "Week 3 quiz\n-- 1 of 7 --" }], fetchFn);
+    expect(r.items).toEqual([]);
+    expect(budgets).toEqual([5000, 10_000]);
+  });
+});
+
 describe("citations by name", () => {
   it("maps a source cited by its file name back to its ref", async () => {
     const { cleanRoadmap, refResolver } = await import("../enrich/roadmap");

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { chatJson, isNoAnswer, type CompatConfig } from "./openai-compat";
+import { chatJson, isNoAnswer, isOutOfBudget, isTimeout, type CompatConfig } from "./openai-compat";
 
 // The automatic guide is organised by topic, not by file. One cheap model
 // call per module sorts the lecture decks (newest copy of each) into topics in
@@ -103,9 +103,15 @@ export function cleanPlan(raw: unknown, input: PlanInput, fallbackTitle: (lectur
 
 export async function planGuide(cfg: CompatConfig, input: PlanInput, fallbackTitle: (lectureRef: string) => string, fetchFn: typeof fetch = fetch): Promise<GuidePlan> {
   // A thinking model spends part of the budget reasoning, so it is generous.
-  // A reply that came back unusable, empty or cut off gets one more try.
-  const ask = () => chatJson(cfg, fetchFn, PLAN_SYSTEM, planPrompt(input), 12_000);
-  let raw = await ask().catch((err) => { if (isNoAnswer(err)) return null; throw err; });
+  // A reply that came back unusable, empty, cut off or out of time gets one
+  // more try — with twice the budget when it ran out of it.
+  let budget = 12_000;
+  const ask = () => chatJson(cfg, fetchFn, PLAN_SYSTEM, planPrompt(input), budget);
+  let raw = await ask().catch((err) => {
+    if (!isNoAnswer(err) && !isTimeout(err)) throw err;
+    if (isOutOfBudget(err)) budget *= 2;
+    return null;
+  });
   if (!Plan.safeParse(raw).success || !(raw as { topics?: unknown[] })?.topics?.length) {
     raw = await ask();
   }

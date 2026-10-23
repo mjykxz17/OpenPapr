@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { chatJson, isNoAnswer, type CompatConfig } from "./openai-compat";
+import { chatJson, isNoAnswer, isOutOfBudget, type CompatConfig } from "./openai-compat";
 import { TASK_KINDS } from "../db/schema";
 import { assessmentNumber, assessmentNumbers, assessmentText, ownWork, quizNumber, sameTask } from "../lib/own-work";
 import type { WeakSpot } from "../server/weak-topics";
@@ -322,10 +322,15 @@ export async function planModuleTasks(
 ): Promise<CleanTask[]> {
   // Some models now and then answer with nothing, or cut the JSON short;
   // one more try usually lands.
+  // A reply that ran out of budget is asked again with twice as much.
   let tasks: CleanTask[] | null = null;
+  let budget = 6000;
   for (let attempt = 0; attempt < 2 && tasks === null; attempt++) {
-    const raw = await chatJson(cfg, fetchFn, PLANNER_SYSTEM, plannerPrompt(input), 6000)
-      .catch((err) => { if (attempt === 0 && isNoAnswer(err)) return null; throw err; });
+    const raw = await chatJson(cfg, fetchFn, PLANNER_SYSTEM, plannerPrompt(input), budget)
+      .catch((err) => {
+        if (attempt === 0 && isNoAnswer(err)) { if (isOutOfBudget(err)) budget *= 2; return null; }
+        throw err;
+      });
     tasks = cleanPlan(raw, refs, now, input.module.code, facts);
   }
   if (!tasks) throw new Error("the model's task plan was not in the expected shape");

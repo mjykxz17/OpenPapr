@@ -119,6 +119,20 @@ const CUT_JSON = "llm: the model's reply was cut off at its token budget";
 export const isNoAnswer = (err: unknown) =>
   /llm: the model(?: ran out of its token budget| returned an empty reply|'s reply was cut off)/.test(String(err instanceof Error ? err.message : err));
 
+// The model stopped at its token budget with nothing (or, for JSON, nothing
+// usable) to show: the try after it needs more room, not the same again.
+export const isOutOfBudget = (err: unknown) =>
+  /llm: the model(?: ran out of its token budget|'s reply was cut off)/.test(String(err instanceof Error ? err.message : err));
+
+// A request that ran out of time (AbortSignal.timeout), on every provider
+// tried. Worth one more try where a caller retries.
+export const isTimeout = (err: unknown) =>
+  /aborted due to timeout|TimeoutError|timed out/i.test(String(err instanceof Error ? `${err.name} ${err.message}` : err));
+
+// An empty reply means the provider answered: the budget was short, not the
+// provider broken, so it must not count toward the breaker below.
+const answeredEmpty = (msg: string) => msg === NO_BUDGET || msg === EMPTY;
+
 async function callOnce(cfg: CompatConfig, messages: Message[], params: Record<string, number>, timeoutMs: number, fetchFn: typeof fetch): Promise<Reply> {
   for (let attempt = 0; ; attempt++) {
     await assertPublicBaseUrl(cfg, "llm");
@@ -190,6 +204,7 @@ async function completion(
   const fetchFn = opts.fetchFn ?? fetch;
   const chain: CompatConfig[] = [cfg, ...(cfg.fallback ? [cfg.fallback] : [])];
   const errors: string[] = [];
+  const withImages = messages.some((m) => Array.isArray(m.content) && m.content.some((part) => part.type === "image_url"));
   for (const [i, p] of chain.entries()) {
     const key = gateKey(p);
     const last = i === chain.length - 1;
@@ -201,8 +216,11 @@ async function completion(
       if (cfg.owner) { try { usageListener?.(cfg.owner); } catch { /* counting must never fail a call */ } }
       return out;
     } catch (err) {
-      recordResult(key, false, Date.now());
       const msg = String(err instanceof Error ? err.message : err);
+      if (!answeredEmpty(msg)) recordResult(key, false, Date.now());
+      // A refusal of images is remembered for the provider that refused —
+      // never the primary for its fallback's refusal.
+      if (withImages && isImageRefusal(msg)) rememberImageRefusal(p);
       errors.push(chain.length > 1 ? `${i === 0 ? "primary" : "fallback"}: ${msg}` : msg);
     }
   }
@@ -212,7 +230,13 @@ async function completion(
 // JSON cut off at the budget is broken JSON, so it fails like an empty reply
 // instead of coming back as null, which callers read as "the model answered
 // with something unusable".
-export async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system: string, user: string | ContentPart[], maxTokens: number, timeoutMs = 180_000): Promise<unknown | null> {
+//
+// Without a timeout, a request gets time in step with its budget (50 ms a
+// token, never under three minutes): a 12,000-token outline on a slow
+// thinking model needs more than three minutes to arrive.
+export const jsonTimeoutMs = (maxTokens: number) => Math.max(180_000, maxTokens * 50);
+
+export async function chatJson(cfg: CompatConfig, fetchFn: typeof fetch, system: string, user: string | ContentPart[], maxTokens: number, timeoutMs = jsonTimeoutMs(maxTokens)): Promise<unknown | null> {
   const { text, cut } = await completion(cfg, [{ role: "system", content: system }, { role: "user", content: user }], { maxTokens, timeoutMs, fetchFn });
   if (cut) throw new Error(CUT_JSON);
   return extractJson(text);
@@ -239,9 +263,11 @@ export function resetImageRefusals(): void { noImages.clear(); }
 // mangle markdown. Carries a timeout because the shared client has none and a
 // stalled generation would otherwise hang a script indefinitely.
 //
-// A reply cut off at the budget is asked for once more with twice the room.
-// Still cut, it comes back trimmed to its last whole paragraph and onCut is
-// told, so the caller can say so instead of storing half a sentence.
+// A reply cut off at the budget — or one that never started because the
+// reasoning spent the whole budget — is asked for once more with twice the
+// room, and twice the time to write it in. Still cut, it comes back trimmed
+// to its last whole paragraph and onCut is told, so the caller can say so
+// instead of storing half a sentence; still empty, it fails.
 const MAX_PROSE_TOKENS = 64_000;
 
 export async function chatText(
@@ -252,13 +278,25 @@ export async function chatText(
 ): Promise<string> {
   const { maxTokens = 20_000, temperature = 0.3, timeoutMs = 600_000, fetchFn = fetch } = opts;
   const messages: Message[] = [{ role: "system", content: system }, { role: "user", content: user }];
-  const first = await completion(cfg, messages, { maxTokens, temperature, timeoutMs, fetchFn });
+  const more = Math.min(maxTokens * 2, MAX_PROSE_TOKENS);
+  const bigger = () => completion(cfg, messages, { maxTokens: more, temperature, timeoutMs: Math.round(timeoutMs * (more / maxTokens)), fetchFn });
+  let first: Reply;
+  try {
+    first = await completion(cfg, messages, { maxTokens, temperature, timeoutMs, fetchFn });
+  } catch (err) {
+    // All of the budget went on reasoning: the same budget again would go
+    // the same way.
+    if (!isOutOfBudget(err) || more <= maxTokens) throw err;
+    first = await bigger();
+    if (!first.cut) return first.text;
+    opts.onCut?.();
+    return lastWholeParagraph(first.text);
+  }
   if (!first.cut) return first.text;
   let last = first;
-  const more = Math.min(maxTokens * 2, MAX_PROSE_TOKENS);
   if (more > maxTokens) {
     // A second try that fails outright still leaves the first one's text.
-    last = await completion(cfg, messages, { maxTokens: more, temperature, timeoutMs, fetchFn }).catch(() => first);
+    last = await bigger().catch(() => first);
     if (!last.cut) return last.text;
   }
   opts.onCut?.();
