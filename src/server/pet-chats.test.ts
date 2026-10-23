@@ -18,4 +18,14 @@ describe("pet conversations", () => {
     expect(deleteChat(db, 1, a.id)).toBe(true);
     expect(listChats(db, 1)).toHaveLength(1);
   });
+
+  it("keeps whether each answer was grounded in the material", () => {
+    const db = createDb(":memory:");
+    db.insert(users).values({ name: "A" }).run();
+    const a = appendToChat(db, 1, null, "What is a canary?", "I couldn't find that in your material.", 1000, [], false);
+    appendToChat(db, 1, a.id, "Quiz date?", "Wed.", 2000);
+    const m = getChat(db, 1, a.id)!.messages;
+    expect(m[1]!.grounded).toBe(false);
+    expect(m[3]!.grounded).toBeUndefined();
+  });
 });
