@@ -1,7 +1,7 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import {
-  components, courseHistory, fileHints, files, guidePlans, guideProgress, guideQuizzes, guideRuns, guideTopics, items, llmUsage,
+  canvasPageCache, components, courseHistory, fileHints, files, guidePlans, guideProgress, guideQuizzes, guideRuns, guideTopics, items, llmUsage,
   moduleProfiles, moduleRoadmaps, modules, passages, petChats, quizAttempts, slideNotes, studyGuides, syncRuns, taskChanges, taskFeedback, taskPlans, tasks, users, weeklyPlans,
 } from "@/db/schema";
 
@@ -56,7 +56,13 @@ export function wipeUserData(db: Db, userId: number, andUser = false): void {
     for (const t of [passages, quizAttempts, guideProgress, taskChanges, taskFeedback, tasks, items, guideRuns, slideNotes, weeklyPlans, courseHistory, petChats, llmUsage, syncRuns] as const) {
       tx.delete(t).where(eq(t.userId, userId)).run();
     }
-    if (ids.length) tx.delete(modules).where(inArray(modules.id, ids)).run();
+    if (ids.length) {
+      tx.delete(modules).where(inArray(modules.id, ids)).run();
+      // Canvas pages are cached per course, not per student (they read the
+      // same for everyone in it), but they were fetched with this student's
+      // token: once no one here takes the course any more, they go too.
+      tx.delete(canvasPageCache).where(notInArray(canvasPageCache.courseId, tx.select({ c: modules.canvasCourseId }).from(modules))).run();
+    }
     if (andUser) tx.delete(users).where(eq(users.id, userId)).run();
   });
 }
