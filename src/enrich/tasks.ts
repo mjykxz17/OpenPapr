@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { chatJson, type CompatConfig } from "./openai-compat";
+import { chatJson, isNoAnswer, type CompatConfig } from "./openai-compat";
 import { TASK_KINDS } from "../db/schema";
 import { assessmentNumber, assessmentNumbers, assessmentText, ownWork, quizNumber, sameTask } from "../lib/own-work";
 import type { WeakSpot } from "../server/weak-topics";
@@ -324,7 +324,9 @@ export async function planModuleTasks(
   // one more try usually lands.
   let tasks: CleanTask[] | null = null;
   for (let attempt = 0; attempt < 2 && tasks === null; attempt++) {
-    tasks = cleanPlan(await chatJson(cfg, fetchFn, PLANNER_SYSTEM, plannerPrompt(input), 6000), refs, now, input.module.code, facts);
+    const raw = await chatJson(cfg, fetchFn, PLANNER_SYSTEM, plannerPrompt(input), 6000)
+      .catch((err) => { if (attempt === 0 && isNoAnswer(err)) return null; throw err; });
+    tasks = cleanPlan(raw, refs, now, input.module.code, facts);
   }
   if (!tasks) throw new Error("the model's task plan was not in the expected shape");
   return tasks;

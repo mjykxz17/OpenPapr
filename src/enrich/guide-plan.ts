@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { chatJson, type CompatConfig } from "./openai-compat";
+import { chatJson, isNoAnswer, type CompatConfig } from "./openai-compat";
 
 // The automatic guide is organised by topic, not by file. One cheap model
 // call per module sorts the lecture decks (newest copy of each) into topics in
@@ -102,9 +102,12 @@ export function cleanPlan(raw: unknown, input: PlanInput, fallbackTitle: (lectur
 }
 
 export async function planGuide(cfg: CompatConfig, input: PlanInput, fallbackTitle: (lectureRef: string) => string, fetchFn: typeof fetch = fetch): Promise<GuidePlan> {
-  let raw = await chatJson(cfg, fetchFn, PLAN_SYSTEM, planPrompt(input), 4000);
+  // A thinking model spends part of the budget reasoning, so it is generous.
+  // A reply that came back unusable, empty or cut off gets one more try.
+  const ask = () => chatJson(cfg, fetchFn, PLAN_SYSTEM, planPrompt(input), 12_000);
+  let raw = await ask().catch((err) => { if (isNoAnswer(err)) return null; throw err; });
   if (!Plan.safeParse(raw).success || !(raw as { topics?: unknown[] })?.topics?.length) {
-    raw = await chatJson(cfg, fetchFn, PLAN_SYSTEM, planPrompt(input), 4000);
+    raw = await ask();
   }
   if (!Plan.safeParse(raw).success) throw new Error("the model did not return a usable plan");
   return cleanPlan(raw, input, fallbackTitle);

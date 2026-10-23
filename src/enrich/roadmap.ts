@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { chatJson, isImageRefusal, type CompatConfig, type ContentPart } from "./openai-compat";
+import { chatJson, isImageRefusal, isNoAnswer, type CompatConfig, type ContentPart } from "./openai-compat";
 
 // The course roadmap. Lecturers set out the semester once — a "Schedule"
 // table in the first lecture, an "Assessment" slide in the admin deck, the
@@ -136,6 +136,8 @@ export async function extractRoadmap(
     } catch (err) {
       // A model that can't read images still gets the text.
       if (typeof send !== "string" && isImageRefusal(err)) { refused = true; send = text; attempt--; continue; }
+      // An empty or cut-off reply gets the second try an unusable one does.
+      if (attempt === 0 && isNoAnswer(err)) continue;
       throw err;
     }
   }
