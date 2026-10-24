@@ -139,15 +139,17 @@ const SPELLING: [RegExp, string | ((...m: string[]) => string)][] = [
 // Words that end in -our in American English too, so "flour" and "scour"
 // never turn into "flor" and "scor" (and from there "floral" and "score").
 const NOT_OUR = new Set(["fl", "sc", "det", "cont", "dev", "am", "vel", "param", "troubad"]);
-// -ce / -se only for the nouns where it is the same word.
-const CE: Record<string, string> = { defence: "defense", licence: "license", offence: "offense", pretence: "pretense", practise: "practice", practised: "practiced", practising: "practicing" };
+// -ce / -se only for the nouns where it is the same word. A Map, not an
+// object: "constructor" is a word on plenty of slides, and an object would
+// hand back its own constructor function for it.
+const CE = new Map(Object.entries({ defence: "defense", licence: "license", offence: "offense", pretence: "pretense", practise: "practice", practised: "practiced", practising: "practicing" }));
 
 const MAX_WORD = 30;
 const canonCache = new Map<string, string>();
 export function canonical(word: string): string {
   const hit = canonCache.get(word);
   if (hit !== undefined) return hit;
-  let w = CE[word] ?? word;
+  let w = CE.get(word) ?? word;
   // Nothing longer than a real word goes through the rules: their cost grows
   // with the square of the length, and a pasted hash or URL has no spelling.
   if (w.length >= 5 && w.length <= MAX_WORD && !/\d/.test(w)) for (const [re, to] of SPELLING) w = typeof to === "string" ? w.replace(re, to) : w.replace(re, to);

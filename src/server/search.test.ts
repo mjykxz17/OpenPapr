@@ -34,6 +34,10 @@ describe("spelling", () => {
       ["centre", "center"], ["centred", "centered"], ["metres", "meters"], ["modelling", "modeling"], ["defence", "defense"], ["optimising", "optimizing"]];
     for (const [uk, us] of pairs) expect(canonical(uk!)).toBe(canonical(us!));
   });
+  it("treats words that name object properties as words", () => {
+    for (const w of ["constructor", "tostring", "valueof", "hasownproperty", "proto"]) expect(canonical(w)).toBe(w);
+    expect(termForms("constructors", ["constructor", "class"]).forms).toEqual(["constructor"]);
+  });
   it("leaves short and unrelated words alone", () => {
     for (const w of ["four", "hour", "your", "rise", "more", "there", "price", "rice", "calling", "spelling"]) expect(canonical(w)).toBe(w);
   });
