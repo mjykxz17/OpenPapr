@@ -5,7 +5,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { LLM_PRESETS, presetFor } from "@/lib/llm-presets";
 import { relativeDay, shortTime } from "@/lib/format-date";
 import { clearOfflineCaches } from "@/lib/offline";
-import { CalendarSection, DataSection } from "./AccountExtras";
+import { CalendarSection, ClaudeCodeSection, DataSection } from "./AccountExtras";
 import { AboutYou } from "./profile/AboutYou";
 import type { ComponentProps } from "react";
 
@@ -20,6 +20,8 @@ type Props = {
   sharedModel: string | null;
   usage: { calls: number; sharedCalls: number; limit: number };
   calendarUrl: string | null;
+  // When the Claude Code key was made; null = none.
+  mcpKeyAt: number | null;
   signIn: { username: string | null; hasPassword: boolean };
   about: Omit<ComponentProps<typeof AboutYou>, "locked">;
   // Set for the shared demo account, whose settings can't be changed: the
@@ -526,6 +528,7 @@ export function AccountSettings(props: Props) {
         ? <DemoLlmSection demo={demo} calls={props.usage.calls} />
         : <LlmSection llm={props.llm} fallback={props.fallback} sharedModel={props.sharedModel} usage={props.usage} />}
       <CalendarSection url={props.calendarUrl} locked={Boolean(demo)} />
+      <ClaudeCodeSection madeAt={props.mcpKeyAt} locked={Boolean(demo)} />
       {demo ? <DemoSignInSection /> : <SignInSection signIn={props.signIn} />}
       <DataSection locked={Boolean(demo)} />
     </div>

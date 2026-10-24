@@ -9,7 +9,7 @@ import {
 // secret (tokens, keys, the password hash, the calendar link); delete removes
 // every row that belongs to them, children before parents.
 
-const SECRET = new Set(["canvasTokenEnc", "msRefreshTokenEnc", "msDeltaLink", "llmKeyEnc", "llmFallbackKeyEnc", "passwordHash", "calendarToken"]);
+const SECRET = new Set(["canvasTokenEnc", "msRefreshTokenEnc", "msDeltaLink", "llmKeyEnc", "llmFallbackKeyEnc", "passwordHash", "calendarToken", "mcpTokenHash"]);
 
 export function exportAccount(db: Db, userId: number) {
   const user = db.select().from(users).where(eq(users.id, userId)).get();

@@ -15,7 +15,7 @@ const base: Props = {
   fallback: null,
   sharedModel: null,
   usage: { calls: 12, sharedCalls: 12, limit: 300 },
-  calendarUrl: null,
+  calendarUrl: null, mcpKeyAt: null,
   signIn: { username: null, hasPassword: false },
   about: {
     major: null, studyYear: null, styleLearning: true, profile: null, style: null, historyCount: 0,

@@ -82,7 +82,7 @@ export function resetDemo(db: Db, now: number, dbPath?: string): Promise<number>
         wipeUserData(db, user.id);
       }
       db.update(users).set({
-        homeLayoutJson: null, calendarToken: null, lastSeenAt: now - D, onboardedAt: now, demoResetAt: now,
+        homeLayoutJson: null, calendarToken: null, mcpTokenHash: null, mcpTokenAt: null, lastSeenAt: now - D, onboardedAt: now, demoResetAt: now,
         major: "Computer Science", studyYear: 2, tasksRequestedAt: null, profileRequestedAt: null, syncRequestedAt: null,
       }).where(eq(users.id, user.id)).run();
       // The semester also stamps the account's last Canvas sync and profile.

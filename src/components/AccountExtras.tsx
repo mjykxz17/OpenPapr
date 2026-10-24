@@ -101,6 +101,81 @@ function CalendarFeed({ url: initial }: { url: string | null }) {
   );
 }
 
+// --- Claude Code ----------------------------------------------------------------
+// A key Claude Code (or any MCP client) reads the student's material with:
+// modules, files, guides, announcements, emails, tasks, notes. Shown once,
+// inside the command that connects it, since only its hash is kept.
+export function ClaudeCodeSection({ madeAt, locked = false }: { madeAt: number | null; locked?: boolean }) {
+  const [at, setAt] = useState(madeAt);
+  const [key, setKey] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const command = key ? `claude mcp add --scope user --transport http openpapr ${origin}/api/mcp --header "Authorization: Bearer ${key}"` : null;
+
+  if (locked) {
+    return (
+      <Card id="acct-claude" title="Claude Code" status="Off">
+        <p className="max-w-2xl text-[14px] leading-relaxed text-ink-2">
+          With your own account you can let Claude Code read your modules, files and study guides. The shared demo can&apos;t.
+        </p>
+      </Card>
+    );
+  }
+
+  async function make() {
+    setBusy(true);
+    setError(null);
+    const r = await fetch("/api/account/mcp", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).catch(() => null);
+    const d = r?.ok ? ((await r.json()) as { key: string }) : null;
+    if (d) { setKey(d.key); setAt(Date.now()); } else setError("Could not make a key. Try again.");
+    setBusy(false);
+  }
+  async function off() {
+    setBusy(true);
+    await fetch("/api/account/mcp", { method: "DELETE" }).catch(() => null);
+    setKey(null);
+    setAt(null);
+    setBusy(false);
+  }
+  async function copy() {
+    if (!command) return;
+    try { await navigator.clipboard.writeText(command); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* select by hand */ }
+  }
+
+  return (
+    <Card id="acct-claude" title="Claude Code" status={at ? "Key on" : "Off"}>
+      <p className="max-w-2xl text-[14px] leading-relaxed text-ink-2">
+        Let Claude Code read everything OpenPapr has of yours — modules, every file&apos;s text and pages, study guides, announcements, emails, tasks and your notes — so you can ask it about your courses from the terminal. It can only read; it can&apos;t change anything.
+      </p>
+      {command ? (
+        <div className="mt-4 flex flex-col gap-3">
+          <p className="text-[14px] text-ink">Run this once in a terminal. The key is in it, and it won&apos;t be shown again.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input readOnly value={command} onFocus={(e) => e.currentTarget.select()} aria-label="Claude Code command"
+              className="h-10 min-w-0 flex-1 rounded-md border border-line-2 bg-surface px-3 font-mono text-[12px] text-ink-2" />
+            <button type="button" onClick={copy} className={secondary}>{copied ? "Copied" : "Copy"}</button>
+          </div>
+        </div>
+      ) : at ? (
+        <p className="mt-4 text-[14px] text-ink-2">A key was made on {new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}.</p>
+      ) : (
+        <button type="button" onClick={make} disabled={busy} className={`${primary} mt-4`}>Make a key</button>
+      )}
+      {at && (
+        <p className="mt-3 text-[12px] leading-relaxed text-ink-3">
+          Anyone with the key can read your material, so keep it to yourself. If it gets out,{" "}
+          <button type="button" onClick={make} disabled={busy} className="text-accent underline underline-offset-2">make a new key</button>{" "}
+          (the old one stops working) or{" "}
+          <button type="button" onClick={off} disabled={busy} className="text-accent underline underline-offset-2">turn it off</button>.
+        </p>
+      )}
+      {error && <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p>}
+    </Card>
+  );
+}
+
 // --- your data -----------------------------------------------------------------
 // The demo gets neither: it is shared, so a download would hand out what
 // other visitors typed and deleting it would take it from everyone, and the

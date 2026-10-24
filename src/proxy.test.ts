@@ -40,12 +40,13 @@ describe("proxy", () => {
     expect(passed(get("/", signSession(1, key)))).toBe(false);
   });
 
-  it("leaves sign-in, the demo, health and calendar feeds open", () => {
-    for (const p of ["/login", "/api/login", "/api/demo", "/api/health", "/api/calendar/feed/abc.ics"]) expect(passed(get(p))).toBe(true);
+  it("leaves sign-in, the demo, health, calendar feeds and the MCP server open", () => {
+    for (const p of ["/login", "/api/login", "/api/demo", "/api/health", "/api/calendar/feed/abc.ics", "/api/mcp"]) expect(passed(get(p))).toBe(true);
   });
 
   it("does not open look-alike paths", () => {
     expect(get("/login-help").status).toBe(307);
     expect(get("/api/healthz").status).toBe(401);
+    expect(get("/api/mcp/x").status).toBe(401);
   });
 });

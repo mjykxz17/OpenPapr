@@ -43,6 +43,7 @@ const AUDIT: Record<string, "open" | "locked"> = {
   "account/delete": "locked",
   "account/export": "locked", // a GET, but it hands out what other visitors typed
   "account/llm": "locked", // accountRequest
+  "account/mcp": "locked", // a Claude Code key would outlive the reset
   "account/onboarded": "locked", // accountRequest
   "account/password": "locked", // accountRequest
   "account/sessions/revoke": "locked", // accountRequest; would sign every visitor out
@@ -57,6 +58,7 @@ const AUDIT: Record<string, "open" | "locked"> = {
   "items/[id]/dismiss": "open",
   "login": "open",
   "logout": "open",
+  "mcp": "open", // reads only, with a key; the demo can't have one (userForMcpKey)
   "modules/[id]/guide": "open", // the worker never spends a model call on the demo
   "modules/[id]/guide/progress": "open", // chapters read; the reset clears them
   "modules/[id]/guide/quiz": "open",

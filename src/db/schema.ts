@@ -53,6 +53,11 @@ export const users = sqliteTable("users", {
   // Secret in the student's private calendar feed URL. Null until they ask
   // for a feed; replaced when they reset it.
   calendarToken: text("calendar_token"),
+  // The key an MCP client (Claude Code) reads the student's material with,
+  // as a SHA-256 of the key: the key itself is shown once, when it is made.
+  // Null until they make one; replaced when they make another.
+  mcpTokenHash: text("mcp_token_hash"),
+  mcpTokenAt: integer("mcp_token_at"),
   // --- the student profile ---------------------------------------------
   // What the student tells us (major, year) and what OpenPapr derives from
   // their courses and notes. Derived JSON is shown to them on Account and can
@@ -85,7 +90,7 @@ export const users = sqliteTable("users", {
   // Failed sign-ins in a row, and the time the account is locked until.
   failedLogins: integer("failed_logins").notNull().default(0),
   lockedUntil: integer("locked_until"),
-}, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId), uniqueIndex("users_username").on(t.username)]);
+}, (t) => [uniqueIndex("users_canvas_user").on(t.canvasUserId), uniqueIndex("users_username").on(t.username), uniqueIndex("users_mcp_token").on(t.mcpTokenHash)]);
 
 export const modules = sqliteTable("modules", {
   id: integer("id").primaryKey({ autoIncrement: true }),

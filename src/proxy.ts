@@ -19,6 +19,8 @@ export function proxy(req: NextRequest) {
   const allowed = OPEN.has(path) || path.startsWith("/api/login")
     // Calendar apps fetch the feed without a session; its URL token is checked by the route.
     || path.startsWith("/api/calendar/feed/")
+    // Claude Code sends a key instead of a session; the route checks it.
+    || path === "/api/mcp"
     || verifySession(req.cookies.get("session")?.value, signingKey()) !== null;
   if (!allowed) {
     return api

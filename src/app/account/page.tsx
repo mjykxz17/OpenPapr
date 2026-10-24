@@ -67,6 +67,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         about={about}
         usage={{ ...usageThisMonth(getDb(), userId, now), limit: env.SHARED_MONTHLY_CALLS }}
         calendarUrl={user.calendarToken ? `/api/calendar/feed/${user.calendarToken}.ics` : null}
+        mcpKeyAt={user.mcpTokenAt ?? null}
         demo={demo}
       />
     </AppShell>
