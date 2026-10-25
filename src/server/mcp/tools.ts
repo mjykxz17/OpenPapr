@@ -5,6 +5,7 @@ import type { Db } from "@/db/client";
 import { components, files, items, modules, slideNotes, tasks, users } from "@/db/schema";
 import { getStudyGuide } from "@/db/repo";
 import { slidePages } from "@/enrich/study-guide";
+import { extractCanvasFileIds } from "@/lib/canvas-file-links";
 import { fileKind, servedType } from "@/lib/file-kind";
 import { htmlToText } from "@/lib/html-text";
 import { categoryLabel } from "@/lib/materials";
@@ -304,7 +305,7 @@ const refOf = (href: string) => {
 const searchTool: Tool<Ctx> = {
   name: "search",
   title: "Search",
-  description: "Searches the student's material: the words on every page of their lecture slides, tutorials and readings, the study guides, their notes and announcements (with the passage that matched), plus Canvas work, tasks, files and modules by name. Other files (assignments, past papers) are found by name only — read_file reads them. Use read_file / read_guide / read_item on a hit for more.",
+  description: "Searches the student's material: the words on every page of their lecture slides, tutorials and readings, the study guides, their notes, announcements and assignment pages on Canvas (with the passage that matched), plus Canvas work, tasks, files and modules by name. Other files (assignment handouts, past papers) are found by name only — read_file reads them. Use read_file / read_guide / read_item on a hit for more.",
   input: z.object({
     query: z.string().min(1).max(200),
     module: moduleArg.optional(),
@@ -317,7 +318,7 @@ const searchTool: Tool<Ctx> = {
     for (const h of hits) {
       const ref = h.kind === "slide" ? `read_file file_id=${h.fileId} from_page=${h.page}`
         : h.kind === "guide" ? `read_guide module=${h.code}${h.anchor ? ` (section ${h.anchor})` : ""}`
-        : h.kind === "announcement" ? `read_item item_id=${h.itemId}`
+        : h.kind === "announcement" || h.kind === "assignment" ? `read_item item_id=${h.itemId}`
         : `read_notes module=${h.code}`;
       out.push(`### ${h.code} · ${h.title}\n→ ${ref}\n${clip(h.body, 900)}`);
     }
@@ -391,7 +392,7 @@ const listItems: Tool<Ctx> = {
 const readItem: Tool<Ctx> = {
   name: "read_item",
   title: "Read an announcement, email or assignment",
-  description: "One item from list_items or search, in full.",
+  description: "One item from list_items or search, in full. For an assignment this is its Canvas page — often the problem statement itself — with the files it links to.",
   input: z.object({ item_id: z.number().int(), offset: z.number().int().min(0).optional() }),
   run(args: { item_id: number; offset?: number }, ctx) {
     const i = ctx.db.select().from(items).where(and(eq(items.id, args.item_id), eq(items.userId, ctx.userId))).get();
@@ -400,7 +401,12 @@ const readItem: Tool<Ctx> = {
     const head = [`# ${i.title}`, `${i.type} · ${code ?? "no module"} · ${when(i.sourceCreatedAt ?? i.firstSeenAt)}${i.sender ? ` · from ${i.sender}` : ""}`,
       i.dueAt ? `Due ${when(i.dueAt)}${i.submitted ? " · submitted" : ""}${i.missing ? " · Canvas marks it missing" : ""}` : null,
       i.url ? `Link: ${i.url}` : null].filter(Boolean).join("\n");
-    return text(`${head}\n\n${part(htmlToText(i.body) || "(no text)", args.offset ?? 0)}`);
+    // Handouts the item links to, as the files read_file opens.
+    const linked = i.moduleId ? extractCanvasFileIds(i.body) : [];
+    const attached = linked.length
+      ? ctx.db.select().from(files).where(and(eq(files.moduleId, i.moduleId!), inArray(files.canvasFileId, linked))).all() : [];
+    const tail = attached.length ? `\n\n## Files it links to\n${attached.map((f) => `- file_id ${f.id} · ${f.displayName}`).join("\n")}` : "";
+    return text(`${head}\n\n${part(htmlToText(i.body) || "(no text)", args.offset ?? 0)}${tail}`);
   },
 };
 
@@ -455,5 +461,5 @@ const readNotes: Tool<Ctx> = {
 
 export const TOOLS: Tool<Ctx>[] = [overview, listModules, getModule, listFiles, readFile, viewPage, searchTool, readGuide, listItems, readItem, listTasks, readNotes];
 
-export const INSTRUCTIONS = `OpenPapr is the student's study app: their university modules synced from Canvas (slides, files, announcements, assignments), study guides written from the slides, their tasks and their own notes. Everything here is read-only.
+export const INSTRUCTIONS = `OpenPapr is the student's study app: their university modules synced from Canvas (slides, files, announcements, assignments — an assignment's problem statement is often only on its Canvas page: read_item), study guides written from the slides, their tasks and their own notes. Everything here is read-only.
 Start with overview or list_modules. To answer about course content, search first, then read_file (slides, page by page) or read_guide; view_page shows a slide as an image when the figure matters. Cite what you use as module · file name · page. Times are Singapore time.`;

@@ -58,7 +58,7 @@ export function normalizeCanvasCourse(
     const meta: AssignmentMeta | null = quiz || opensAt !== null || (dueAt === null && closesAt !== null)
       ? { quiz, opensAt, closesAt, closesOnly: dueAt === null && closesAt !== null } : null;
     items.push({
-      type: "assignment", sourceId: `assignment:${a.id}`, title: a.name, body: null, url: a.html_url,
+      type: "assignment", sourceId: `assignment:${a.id}`, title: a.name, body: a.description || null, url: a.html_url,
       dueAt: dueAt ?? closesAt, sourceCreatedAt: null,
       submitted: ["submitted", "graded", "pending_review"].includes(a.submission?.workflow_state ?? ""),
       metaJson: meta ? JSON.stringify(meta) : null,

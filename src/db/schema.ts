@@ -491,8 +491,8 @@ export const passages = sqliteTable("passages", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull().references(() => users.id),
   moduleId: integer("module_id").notNull().references(() => modules.id),
-  kind: text("kind", { enum: ["slide", "guide", "note", "announcement"] }).notNull(),
-  sourceKey: text("source_key").notNull(),     // "slide:<fileId>:<page>", "guide:<slug>", "note:<deck>:<page>", "ann:<itemId>"
+  kind: text("kind", { enum: ["slide", "guide", "note", "announcement", "assignment"] }).notNull(),
+  sourceKey: text("source_key").notNull(),     // "slide:<fileId>:<page>", "guide:<slug>", "note:<deck>:<page>", "ann:<itemId>", "asg:<itemId>"
   version: text("version"),
   fileId: integer("file_id"),
   deck: text("deck"),

@@ -36,6 +36,11 @@ describe("normalizeCanvasCourse", () => {
     const an = n.items.find((i) => i.sourceId === "announcement:9")!;
     expect(an.type).toBe("announcement");
   });
+  it("keeps an assignment's description, which may be its only problem statement", () => {
+    const g = [{ ...groups[1], assignments: [{ ...groups[1].assignments![0], description: "<p>Implement <b>undo</b>.</p>" }] }];
+    expect(normalizeCanvasCourse(course, g, [], []).items[0].body).toBe("<p>Implement <b>undo</b>.</p>");
+    expect(normalizeCanvasCourse(course, groups, [], []).items[0].body).toBeNull();
+  });
   it("marks graded/submitted submissions", () => {
     const g = [{ ...groups[1], assignments: [{ ...groups[1].assignments![0], submission: { workflow_state: "submitted", score: null } }] }];
     expect(normalizeCanvasCourse(course, g, [], []).items[0].submitted).toBe(true);

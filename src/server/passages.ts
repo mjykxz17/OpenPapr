@@ -11,7 +11,7 @@ import { guideSections } from "./search";
 // the worker and the tests share them.
 
 export type Passage = {
-  sourceKey: string; kind: "slide" | "guide" | "note" | "announcement"; version?: string | null;
+  sourceKey: string; kind: "slide" | "guide" | "note" | "announcement" | "assignment"; version?: string | null;
   fileId?: number | null; deck?: string | null; page?: number | null; itemId?: number | null; anchor?: string | null;
   title: string; body: string;
 };
@@ -59,6 +59,14 @@ export function announcementPassages(rows: { id: number; type: string; title: st
   }));
 }
 
+// An assignment's problem statement as Canvas shows it on the assignment's
+// page, which for some courses is the only copy (no file is uploaded).
+export function assignmentPassages(rows: { id: number; title: string; body: string | null }[]): Passage[] {
+  return rows.map((r) => ({ r, text: tidy(htmlToText(r.body)) })).filter(({ text }) => text.length >= 20).map(({ r, text }) => ({
+    sourceKey: `asg:${r.id}`, kind: "assignment" as const, itemId: r.id, title: `Assignment: ${r.title}`, body: clip(text),
+  }));
+}
+
 // Makes the rows under one prefix ("slide:12:", "guide:", …) match `want`:
 // new ones added, changed ones rewritten (their embedding dropped), gone ones
 // removed. Returns how many rows changed.
@@ -86,13 +94,14 @@ export function syncPassages(db: Db, userId: number, moduleId: number, prefix: s
 }
 
 // The cheap sources, rebuilt from the database each time: the guide, the
-// student's slide notes, announcements and lecturers' replies.
+// student's slide notes, announcements, lecturers' replies and assignments.
 export function syncCheapSources(db: Db, userId: number, moduleId: number, now: number): number {
   const guide = db.select({ markdown: studyGuides.markdown }).from(studyGuides).where(eq(studyGuides.moduleId, moduleId)).get();
   const notes = db.select().from(slideNotes).where(and(eq(slideNotes.userId, userId), eq(slideNotes.moduleId, moduleId))).all();
-  const anns = db.select().from(items).where(and(eq(items.userId, userId), eq(items.moduleId, moduleId))).all()
-    .filter((i) => i.type === "announcement" || i.type === "staff_reply");
+  const own = db.select().from(items).where(and(eq(items.userId, userId), eq(items.moduleId, moduleId))).all();
+  const anns = own.filter((i) => i.type === "announcement" || i.type === "staff_reply");
   return syncPassages(db, userId, moduleId, "guide:", guide ? guidePassages(guide.markdown) : [], now)
     + syncPassages(db, userId, moduleId, "note:", notePassages(notes), now)
-    + syncPassages(db, userId, moduleId, "ann:", announcementPassages(anns), now);
+    + syncPassages(db, userId, moduleId, "ann:", announcementPassages(anns), now)
+    + syncPassages(db, userId, moduleId, "asg:", assignmentPassages(own.filter((i) => i.type === "assignment")), now);
 }

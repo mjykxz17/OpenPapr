@@ -258,6 +258,17 @@ describe("tools", () => {
     expect(r.text).not.toContain("Bea");
   });
 
+  it("reads an assignment's Canvas page, with the files it links to", async () => {
+    const id = db.insert(items).values({ userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: "assignment:50", title: "PS3",
+      body: '<p>Prove the recurrence. Template: <a href="/courses/7/files/101/download">L4-master.pdf</a>, and <a href="/courses/7/files/201">not yours</a>.</p>', firstSeenAt: now }).returning().get().id;
+    db.insert(passages).values({ userId: 1, moduleId: 1, kind: "assignment", sourceKey: `asg:${id}`, itemId: id, title: "Assignment: PS3", body: "Prove the recurrence.", hash: "h", updatedAt: now }).run();
+    const r = await run(ctx, "read_item", { item_id: id });
+    expect(r.text).toContain("Prove the recurrence.");
+    expect(r.text).toContain("## Files it links to\n- file_id 1 · L4-master.pdf");
+    expect(r.text).not.toContain("bea-secret");
+    expect((await run(ctx, "search", { query: "prove recurrence" })).text).toContain(`→ read_item item_id=${id}`);
+  });
+
   it("searches names even before any passages are indexed", async () => {
     const r = await run(ctx, "search", { query: "tut1" });
     expect(r.text).toContain("tut1.txt (file_id 3)");

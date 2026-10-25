@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { files, items, modules, passages, studyGuides, users } from "../db/schema";
-import { announcementPassages, guidePassages, slidePassages, syncCheapSources, syncPassages } from "./passages";
+import { announcementPassages, assignmentPassages, guidePassages, slidePassages, syncCheapSources, syncPassages } from "./passages";
 import { bm25, demoteGuide, fuse, queryTokens, retrieve, semanticFloor, tokens } from "./retrieve";
 import { NOT_FOUND, NO_SOURCES_RULE, answerFromMaterial, citedSources, isContentQuestion, isFollowUp, previousQuestion, sentTurns, sourceHref, stripCitations } from "./ask";
 import { embedTexts, embeddingsUsable, normalize, resetEmbeddingHealth, toBlob } from "../enrich/embeddings";
@@ -24,6 +24,15 @@ describe("passage builders", () => {
   it("reads announcements and staff replies as text", () => {
     const p = announcementPassages([{ id: 3, type: "staff_reply", title: "Quiz scope", body: "<p>The quiz covers <b>L1–L5</b> only.</p>", sender: "Dr Lim" }]);
     expect(p[0]).toMatchObject({ title: "Dr Lim replied: Quiz scope", body: "The quiz covers L1–L5 only." });
+  });
+  it("reads an assignment's Canvas page as its problem statement", () => {
+    const p = assignmentPassages([
+      { id: 4, title: "Lab 2", body: "<h2>Task</h2><p>Write a <code>malloc</code> that never returns freed memory twice.</p>" },
+      { id: 5, title: "Quiz 3", body: null },
+    ]);
+    expect(p).toHaveLength(1);
+    expect(p[0]).toMatchObject({ sourceKey: "asg:4", kind: "assignment", itemId: 4, title: "Assignment: Lab 2" });
+    expect(p[0]!.body).toContain("never returns freed memory twice");
   });
 });
 
@@ -86,14 +95,15 @@ describe("indexing and asking", () => {
     db.insert(files).values({ moduleId: modId, canvasFileId: 1, displayName: "L3-stack.pdf", discoveredAt: 1, category: "slides", textSigJson: JSON.stringify(sig) }).run();
     db.insert(studyGuides).values({ moduleId: modId, markdown: "## 1. Heap\n\nHeap spraying places shellcode copies all over memory.", generatedAt: 1 }).run();
     db.insert(items).values({ userId: 1, moduleId: modId, type: "announcement", source: "canvas", sourceId: "a:1", title: "Quiz 2", body: "Quiz 2 covers stack overflows and canaries.", firstSeenAt: 1 }).run();
+    db.insert(items).values({ userId: 1, moduleId: modId, type: "assignment", source: "canvas", sourceId: "assignment:9", title: "Lab 1", body: "<p>Exploit the format string bug in the given binary.</p>", firstSeenAt: 1 }).run();
     let reads = 0;
     const deps = { db, now: () => 10, cfgFor: () => cfg, fileText: async () => { reads++; return deckText; }, fetchFn: fakeEmbed };
     const mod = db.select().from(modules).where(eq(modules.id, modId)).get()!;
     await indexModule(deps, 1, mod, { decks: 2 });
     await indexModule(deps, 1, mod, { decks: 2 });
     expect(reads).toBe(1);   // unchanged deck is not read again
-    expect(db.select().from(passages).all().map((p) => p.kind).sort()).toEqual(["announcement", "guide", "slide", "slide"]);
-    expect(await embedPending(deps, 1)).toBe(4);
+    expect(db.select().from(passages).all().map((p) => p.kind).sort()).toEqual(["announcement", "assignment", "guide", "slide", "slide"]);
+    expect(await embedPending(deps, 1)).toBe(5);
     expect(await embedPending(deps, 1)).toBe(0);
 
     const r = await retrieve(db, 1, "what does a canary protect", { cfg, fetchFn: fakeEmbed });

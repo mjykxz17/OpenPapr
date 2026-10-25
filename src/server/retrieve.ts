@@ -9,7 +9,7 @@ import { dot, embedTexts, embeddingsUsable, fromBlob } from "@/enrich/embeddings
 // merged by rank. Small enough to run in memory per question.
 
 export type Hit = {
-  id: number; kind: "slide" | "guide" | "note" | "announcement"; moduleId: number; code: string;
+  id: number; kind: "slide" | "guide" | "note" | "announcement" | "assignment"; moduleId: number; code: string;
   title: string; body: string; fileId: number | null; deck: string | null; page: number | null; itemId: number | null; anchor: string | null;
 };
 

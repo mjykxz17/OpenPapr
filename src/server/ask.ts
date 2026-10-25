@@ -5,8 +5,8 @@ import { queryTokens, tokens, type Hit } from "./retrieve";
 
 // What a source is, in the words shown next to it. The study guide is
 // OpenPapr's own summary of the slides, so it is never passed off as one.
-export type SourceLabel = "slides" | "study guide" | "your note" | "announcement";
-const LABEL: Record<Hit["kind"], SourceLabel> = { slide: "slides", guide: "study guide", note: "your note", announcement: "announcement" };
+export type SourceLabel = "slides" | "study guide" | "your note" | "announcement" | "assignment";
+const LABEL: Record<Hit["kind"], SourceLabel> = { slide: "slides", guide: "study guide", note: "your note", announcement: "announcement", assignment: "assignment" };
 export const sourceLabel = (kind: Hit["kind"]): SourceLabel => LABEL[kind];
 
 export type SourceRef = {
@@ -14,7 +14,7 @@ export type SourceRef = {
   slide: { deck: string; page: number } | null;
 };
 
-export const SOURCES_RULES = `SOURCES are passages from the student's own slides, notes and course announcements, and from the study guide OpenPapr wrote from the slides, numbered [1], [2], …
+export const SOURCES_RULES = `SOURCES are passages from the student's own slides, notes, course announcements and assignment pages, and from the study guide OpenPapr wrote from the slides, numbered [1], [2], …
 - For questions about course content, answer from SOURCES. Put the source number in square brackets right after the sentence it supports, like "A canary sits before the return address [2]." Cite only numbers that are listed.
 - A source marked (study guide) is a summary, not the lecturer's words: when a slide says the same thing, cite the slide.
 - If SOURCES and FACTS don't cover the question, say that their material doesn't seem to cover it, and suggest where to look. Never fill gaps from general knowledge without saying so.

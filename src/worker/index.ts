@@ -173,6 +173,7 @@ async function canvasSync(userId: number): Promise<void> {
 
       await harvestFiles(canvas, course.id, moduleId, [
         ...announcements.map((a) => ({ label: a.title, html: a.message })),
+        ...groups.flatMap((g) => g.assignments ?? []).map((a) => ({ label: `Assignment: ${a.name}`, html: a.description ?? null })),
         { label: "Syllabus", html: course.syllabus_body ?? null },
       ]);
       // The rules sort most files at once; the model does the rest later.

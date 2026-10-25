@@ -5,6 +5,9 @@ export interface CanvasAssignment {
   // When it opens and closes. A quiz often has only these, no due date.
   unlock_at?: string | null; lock_at?: string | null;
   submission_types?: string[]; is_quiz_assignment?: boolean; is_quiz_lti_assignment?: boolean; quiz_id?: number | null;
+  // The problem statement as HTML, often the only copy of it: some courses
+  // never upload it as a file. Absent while the assignment is locked.
+  description?: string | null;
 }
 export interface CanvasAssignmentGroup { id: number; name: string; group_weight: number | null; assignments?: CanvasAssignment[]; }
 export interface CanvasAnnouncement { id: number; title: string; message: string; html_url: string; posted_at: string | null; }
