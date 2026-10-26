@@ -11,10 +11,13 @@ import { decrypt, encrypt } from "../lib/crypto";
 import { createCanvasClient, isPdfFile, type CanvasClient } from "../connectors/canvas/client";
 import { cachedPageBody } from "../connectors/canvas/page-cache";
 import { createHarvester } from "./harvest";
+import { syncInbox } from "./inbox";
+import { fetchMailAttachments } from "./mail-attachments";
+import { outlineFrom } from "../lib/course-outline";
 import { categorizeModuleFiles, createCompatFileCategorizer } from "../enrich/file-category";
 import { generateModuleGuide } from "../enrich/generate-guide";
 import { keepAwake, selfPing } from "./keep-awake";
-import { normalizeCanvasCourse } from "../connectors/canvas/normalize";
+import { gradesFrom, normalizeCanvasCourse } from "../connectors/canvas/normalize";
 import { DeltaExpiredError, fetchInboxDelta } from "../connectors/graph/client";
 import { refreshAccessToken } from "../connectors/graph/auth";
 import { linkMailToModule, normalizeMail } from "../connectors/graph/normalize";
@@ -167,15 +170,26 @@ async function canvasSync(userId: number): Promise<void> {
         canvas.listAnnouncements(course.id),
         canvas.listCalendarEvents(course.id),
       ]);
-      const sync = normalizeCanvasCourse(course, groups, announcements, events);
+      // Marks and feedback, and the Modules tab: both optional (a tab can be
+      // off), neither may fail the course.
+      const [submissions, mods] = await Promise.all([
+        canvas.listOwnSubmissions(course.id).catch(() => null),
+        canvas.listModules(course.id).catch(() => null),
+      ]);
+      const selfId = user.canvasUserId ?? null;
+      const needStaff = (submissions ?? []).some((s) => (s.submission_comments ?? []).some((c) => c.author_id !== selfId));
+      const staff = needStaff ? await staffOf(canvas, course.id) : new Set<number>();
+      const sync = normalizeCanvasCourse(course, groups, announcements, events, submissions ? gradesFrom(groups, submissions, staff, selfId) : undefined);
       const { moduleId } = applyCanvasSync(db, userId, sync, Date.now());
       seen.push(moduleId);
+      const outline = mods ? outlineFrom(mods) : null;
+      if (mods) db.update(modules).set({ outlineJson: outline!.length ? JSON.stringify(outline) : null }).where(eq(modules.id, moduleId)).run();
 
       await harvestFiles(canvas, course.id, moduleId, [
         ...announcements.map((a) => ({ label: a.title, html: a.message })),
         ...groups.flatMap((g) => g.assignments ?? []).map((a) => ({ label: `Assignment: ${a.name}`, html: a.description ?? null })),
         { label: "Syllabus", html: course.syllabus_body ?? null },
-      ]);
+      ], outline);
       // The rules sort most files at once; the model does the rest later.
       await categorizeModuleFiles(db, moduleId, null);
 
@@ -189,6 +203,19 @@ async function canvasSync(userId: number): Promise<void> {
   }
   setModuleActivity(db, userId);
   await syncPlanner(canvas, userId);
+  try { await syncInbox(db, canvas, userId, user.canvasUserId ?? null); } catch (err) { console.error(`inbox sync failed for user ${userId}`, err); }
+}
+
+// A course's lecturers and TAs, whose comments on a submission are kept.
+// The roster rarely changes, so it is asked for at most twice a day.
+const staffCache = new Map<number, { at: number; ids: Set<number> }>();
+async function staffOf(canvas: CanvasClient, courseId: number): Promise<Set<number>> {
+  const hit = staffCache.get(courseId);
+  if (hit && Date.now() - hit.at < 12 * 3_600_000) return hit.ids;
+  let ids = new Set<number>();
+  try { ids = new Set((await canvas.listCourseStaff(courseId)).map((u) => u.id)); } catch { /* treat nobody as staff */ }
+  staffCache.set(courseId, { at: Date.now(), ids });
+  return ids;
 }
 
 // Weightage extraction for one module (the caller checks it is due). Reads
@@ -291,6 +318,7 @@ async function mailSync(userId: number): Promise<void> {
   const { messages, deltaLink } = delta;
   const byCode = new Map(db.select().from(modules).where(eq(modules.userId, userId)).all().map((m) => [m.code, m.id]));
   upsertMailItems(db, userId, messages.filter((m) => m.id).map((m) => linkMailToModule(normalizeMail(m), byCode)), Date.now());
+  try { await fetchMailAttachments(db, accessToken, userId, messages, Date.now()); } catch (err) { console.error(`mail attachments failed for user ${userId}`, err); }
   db.update(users).set({ msDeltaLink: deltaLink, msRefreshTokenEnc: encrypt(refreshToken, env.SECRET_KEY) })
     .where(eq(users.id, userId)).run();
 }

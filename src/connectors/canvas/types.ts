@@ -1,5 +1,7 @@
 export interface CanvasCourse { id: number; name: string; course_code: string; syllabus_body?: string | null; term?: { name: string } | null; }
-export interface CanvasSubmission { workflow_state: string; score: number | null; }
+export interface CanvasSubmission { workflow_state: string; score: number | null; grade?: string | null; graded_at?: string | null; }
+// One criterion of an assignment's rubric, with the marks each level earns.
+export interface CanvasRubricCriterion { description?: string | null; long_description?: string | null; points?: number | null; ratings?: { description?: string | null; points?: number | null }[] }
 export interface CanvasAssignment {
   id: number; name: string; due_at: string | null; html_url: string; points_possible: number | null; submission?: CanvasSubmission;
   // When it opens and closes. A quiz often has only these, no due date.
@@ -8,6 +10,7 @@ export interface CanvasAssignment {
   // The problem statement as HTML, often the only copy of it: some courses
   // never upload it as a file. Absent while the assignment is locked.
   description?: string | null;
+  rubric?: CanvasRubricCriterion[] | null;
 }
 export interface CanvasAssignmentGroup { id: number; name: string; group_weight: number | null; assignments?: CanvasAssignment[]; }
 export interface CanvasAnnouncement { id: number; title: string; message: string; html_url: string; posted_at: string | null; }
@@ -53,3 +56,29 @@ export interface CanvasPlannerItem {
 }
 // GET /users/self/missing_submissions — assignments Canvas flags as missing.
 export interface CanvasMissing { id: number; course_id: number; name: string; due_at: string | null; html_url: string }
+
+// GET /courses/:id/modules?include[]=items&include[]=content_details — the
+// Modules tab. items is left out when a module is too long to inline; then
+// items_url lists them.
+export interface CanvasModuleItem {
+  id: number; title: string; type: string; indent?: number; position?: number;
+  html_url?: string; page_url?: string; content_id?: number; external_url?: string; url?: string;
+  content_details?: { locked_for_user?: boolean; due_at?: string | null };
+}
+export interface CanvasModule { id: number; name: string; position?: number; unlock_at?: string | null; items?: CanvasModuleItem[]; items_url?: string }
+
+// GET /courses/:id/students/submissions?student_ids[]=self&include[]=submission_comments
+export interface CanvasSubmissionComment { author_id: number; author_name?: string; comment: string; created_at: string }
+export interface CanvasStudentSubmission {
+  assignment_id: number; score: number | null; grade: string | null; graded_at: string | null;
+  workflow_state?: string; submission_comments?: CanvasSubmissionComment[];
+}
+
+// The Canvas Inbox. common_courses says, per course id, what role each
+// participant has in a course the student shares with them — how a
+// lecturer's message is told from a classmate's.
+export interface CanvasConversation { id: number; subject: string | null; last_message_at: string | null; context_code?: string | null; context_name?: string | null }
+export interface CanvasConversationDetail extends CanvasConversation {
+  participants?: { id: number; name: string; common_courses?: Record<string, string[]> }[];
+  messages?: { id: number; author_id: number; body: string; created_at: string; generated?: boolean }[];
+}

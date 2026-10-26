@@ -108,6 +108,9 @@ export const modules = sqliteTable("modules", {
   // replies that arrived after it are "new" on the home card. Set on the
   // first sync, so a new account doesn't start with its whole backlog new.
   seenAt: integer("seen_at"),
+  // The course's Modules tab as the student sees it, week by week (JSON
+  // CourseOutline): files, pages, assignments and outside links, in order.
+  outlineJson: text("outline_json"),
 }, (t) => [uniqueIndex("modules_user_course").on(t.userId, t.canvasCourseId)]);
 
 // Every Canvas file we know about for a module, from the Files listing AND
@@ -185,6 +188,9 @@ export const items = sqliteTable("items", {
   // Canvas planner. Both are refreshed every sync.
   missing: integer("missing", { mode: "boolean" }).notNull().default(false),
   canvasDone: integer("canvas_done", { mode: "boolean" }).notNull().default(false),
+  // An assignment's mark and the lecturers' comments on the submission (JSON
+  // Grade). null = not graded, or not an assignment.
+  gradeJson: text("grade_json"),
 }, (t) => [uniqueIndex("items_user_source").on(t.userId, t.source, t.sourceId)]);
 
 // The automatic guide's plan for one module: how its slides fall into
@@ -491,8 +497,8 @@ export const passages = sqliteTable("passages", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull().references(() => users.id),
   moduleId: integer("module_id").notNull().references(() => modules.id),
-  kind: text("kind", { enum: ["slide", "guide", "note", "announcement", "assignment"] }).notNull(),
-  sourceKey: text("source_key").notNull(),     // "slide:<fileId>:<page>", "guide:<slug>", "note:<deck>:<page>", "ann:<itemId>", "asg:<itemId>"
+  kind: text("kind", { enum: ["slide", "guide", "note", "announcement", "assignment", "page", "message"] }).notNull(),
+  sourceKey: text("source_key").notNull(),     // "slide:<fileId>:<page>", "guide:<slug>", "note:<deck>:<page>", "ann:<itemId>", "asg:<itemId>", "page:<pageId>", "msg:<messageId>"
   version: text("version"),
   fileId: integer("file_id"),
   deck: text("deck"),
@@ -542,3 +548,55 @@ export const canvasPageCache = sqliteTable("canvas_page_cache", {
   body: text("body").notNull(),
   fetchedAt: integer("fetched_at").notNull(),
 }, (t) => [uniqueIndex("canvas_page_cache_page").on(t.courseId, t.pageUrl)]);
+
+// A course's content pages as this student can see them: from the Pages tab,
+// and those reachable only through the Modules tab (some courses switch the
+// Pages tab off). Kept whole so they can be read and searched.
+export const canvasPages = sqliteTable("canvas_pages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  moduleId: integer("module_id").notNull().references(() => modules.id),
+  pageUrl: text("page_url").notNull(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),            // HTML
+  updatedAt: text("updated_at"),           // Canvas's stamp
+  seenAt: integer("seen_at").notNull(),
+}, (t) => [uniqueIndex("canvas_pages_module_page").on(t.moduleId, t.pageUrl)]);
+
+// Canvas Inbox messages the course's lecturers and TAs wrote, and the
+// student's own. Other students' messages are never stored.
+export const canvasMessages = sqliteTable("canvas_messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  moduleId: integer("module_id").references(() => modules.id),
+  conversationId: integer("conversation_id").notNull(),
+  messageId: integer("message_id").notNull(),
+  courseName: text("course_name"),
+  subject: text("subject"),
+  author: text("author").notNull(),        // a staff member's name, or "You"
+  body: text("body").notNull(),            // plain text, as Canvas sends it
+  sentAt: integer("sent_at").notNull(),
+}, (t) => [uniqueIndex("canvas_messages_user_message").on(t.userId, t.messageId)]);
+
+// Which Inbox conversations were last read at which last_message_at, so a
+// sync only opens the ones that moved.
+export const canvasConversations = sqliteTable("canvas_conversations", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  conversationId: integer("conversation_id").notNull(),
+  lastMessageAt: text("last_message_at"),
+}, (t) => [uniqueIndex("canvas_conversations_user_conv").on(t.userId, t.conversationId)]);
+
+// Files attached to an Outlook email, downloaded once (Microsoft is asked
+// only when the email arrives). path is null when it could not be fetched.
+export const mailAttachments = sqliteTable("mail_attachments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  itemId: integer("item_id").notNull().references(() => items.id),
+  graphId: text("graph_id").notNull(),
+  name: text("name").notNull(),
+  contentType: text("content_type"),
+  sizeBytes: integer("size_bytes"),
+  path: text("path"),
+  fetchedAt: integer("fetched_at").notNull(),
+}, (t) => [uniqueIndex("mail_attachments_item_graph").on(t.itemId, t.graphId)]);

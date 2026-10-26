@@ -16,6 +16,11 @@ describe("normalizeMail", () => {
       sourceCreatedAt: Date.parse("2026-08-12T03:02:00Z"), moduleId: null,
     });
   });
+  it("keeps the whole body when Microsoft sends it, not just the preview", () => {
+    expect(normalizeMail({ ...msg, body: { contentType: "text", content: "  The midterm moved to MPSH2. Bring your matric card.  " } }).body)
+      .toBe("The midterm moved to MPSH2. Bring your matric card.");
+    expect(normalizeMail({ ...msg, body: { content: "" } }).body).toBe("moved to MPSH2");
+  });
   it("tolerates null subject", () => {
     expect(normalizeMail({ ...msg, subject: null }).title).toBe("(no subject)");
   });

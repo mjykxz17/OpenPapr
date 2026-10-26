@@ -202,6 +202,30 @@ export function ensurePdf(db: Db, userId: number, row: Row, opts: { convertWaitM
   });
 }
 
+// A PDF copy of an office file that isn't a Canvas file (an email
+// attachment), kept next to it. Same converter, same one-at-a-time lock.
+export async function officeFileToPdf(src: string, opts: { convertWaitMs?: number } = {}): Promise<Served> {
+  const target = `${src}.pdf`;
+  if (existsSync(target)) return stat(target);
+  const bin = sofficeBin();
+  if (!bin) return { error: "previews for this file type are not available on this server", status: 501 };
+  return once(`pdf:${target}`, async () => {
+    try {
+      const ok = await oneConversionAtATime(async () => {
+        if (existsSync(target)) return true;
+        const pdf = await runSoffice(bin, src, src.split(".").pop()!.toLowerCase());
+        if (!pdf || pdf.length === 0) return false;
+        writeAtomic(target, pdf);
+        return true;
+      }, opts.convertWaitMs ?? VIEWER_WAIT_MS);
+      return ok ? stat(target) : { error: "this file could not be converted", status: 422 };
+    } catch (err) {
+      if (err instanceof LockTimeoutError) return { error: "lots of files are being converted right now — try again in a minute", status: 503 };
+      throw err;
+    }
+  });
+}
+
 // Streams part or all of a cached file. PDF.js asks for byte ranges, which is
 // what lets the first page of a 20MB deck appear before the rest arrives.
 export function streamFile(

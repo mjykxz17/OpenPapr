@@ -1,7 +1,8 @@
 import { streamToFile } from "../../server/io";
 import type {
   CanvasAnnouncement, CanvasAssignmentGroup, CanvasCalendarEvent,
-  CanvasCourse, CanvasDiscussion, CanvasDiscussionView, CanvasFile, CanvasMissing, CanvasPage, CanvasPlannerItem, CanvasSelf,
+  CanvasConversation, CanvasConversationDetail, CanvasCourse, CanvasDiscussion, CanvasDiscussionView, CanvasFile, CanvasMissing, CanvasModule,
+  CanvasModuleItem, CanvasPage, CanvasPlannerItem, CanvasSelf, CanvasStudentSubmission,
 } from "./types";
 
 function nextLink(header: string | null): string | null {
@@ -92,6 +93,23 @@ export function createCanvasClient(baseUrl: string, token: string, fetchFn: type
       getAllPages<CanvasPlannerItem>(`/planner/items?per_page=100&start_date=${encodeURIComponent(startIso)}&end_date=${encodeURIComponent(endIso)}`),
     listMissingSubmissions: () =>
       getAllPages<CanvasMissing>("/users/self/missing_submissions?per_page=100&filter[]=submittable"),
+    // The Modules tab. A long module comes without its items inline; those
+    // are listed separately. Courses can switch the tab off (404).
+    listModules: async (courseId: number) => {
+      const mods = await getAllPages<CanvasModule>(`/courses/${courseId}/modules?include[]=items&include[]=content_details&per_page=100`);
+      for (const m of mods) {
+        if (!m.items) m.items = await getAllPages<CanvasModuleItem>(`/courses/${courseId}/modules/${m.id}/items?include[]=content_details&per_page=100`);
+      }
+      return mods;
+    },
+    // The student's own submissions with the comments on them: marks and
+    // the lecturers' feedback.
+    listOwnSubmissions: (courseId: number) =>
+      getAllPages<CanvasStudentSubmission>(`/courses/${courseId}/students/submissions?student_ids[]=self&include[]=submission_comments&per_page=100`),
+    listConversations: () => getAllPages<CanvasConversation>("/conversations?per_page=100"),
+    // Canvas marks a conversation read when it is opened, unless told not
+    // to: reading it here must leave the student's Inbox as it was.
+    getConversation: (id: number) => getOne<CanvasConversationDetail>(`/conversations/${id}?auto_mark_as_read=false`),
     listCourseFiles: (courseId: number) =>
       getAllPages<CanvasFile>(`/courses/${courseId}/files?per_page=100&sort=created_at`),
     // Streams straight to disk; for anything that might be large.

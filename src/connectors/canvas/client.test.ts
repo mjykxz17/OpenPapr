@@ -15,6 +15,19 @@ describe("createCanvasClient", () => {
     expect(url).toContain("enrollment_state=active");
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok");
   });
+  it("opens an Inbox conversation without marking it read", async () => {
+    const fetchFn = vi.fn(async () => json({ id: 5, messages: [] }));
+    await createCanvasClient("https://canvas.example", "tok", fetchFn as never).getConversation(5);
+    expect(((fetchFn.mock.calls[0] as unknown) as [string])[0]).toBe("https://canvas.example/api/v1/conversations/5?auto_mark_as_read=false");
+  });
+  it("lists a long module's items separately", async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce(json([{ id: 1, name: "Week 1" }]))
+      .mockResolvedValueOnce(json([{ id: 9, title: "Intro", type: "Page", page_url: "intro" }]));
+    const mods = await createCanvasClient("https://canvas.example", "tok", fetchFn as never).listModules(7);
+    expect(mods[0]!.items!.map((i) => i.title)).toEqual(["Intro"]);
+    expect(((fetchFn.mock.calls[1] as unknown) as [string])[0]).toContain("/courses/7/modules/1/items?");
+  });
   it("follows Link rel=next pagination and concatenates pages", async () => {
     const fetchFn = vi.fn()
       .mockResolvedValueOnce(json([{ id: 1 }], { link: '<https://canvas.example/api/v1/courses?page=2>; rel="next", <x>; rel="last"' }))

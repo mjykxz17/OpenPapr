@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
 //
 // Response: { reply, smart, sources, grounded, sessionId, title?, added? }.
 // `sources` are the passages the reply cites ([n] in the text), each with a
-// `label` ("slides", "study guide", "your note", "announcement", "assignment").
+// `label` ("slides", "study guide", "your note", "announcement", "assignment", "course page", "message").
 // `grounded` is there only for an answer about course content: true when the
 // reply cites at least one source, false when the model answered without one
 // (the chat flags it). It is left out for replies that don't claim anything

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createDb } from "../db/client";
 import { files, items, modules, passages, studyGuides, users } from "../db/schema";
-import { announcementPassages, assignmentPassages, guidePassages, slidePassages, syncCheapSources, syncPassages } from "./passages";
+import { announcementPassages, assignmentPassages, guidePassages, messagePassages, pagePassages, slidePassages, syncCheapSources, syncPassages } from "./passages";
 import { bm25, demoteGuide, fuse, queryTokens, retrieve, semanticFloor, tokens } from "./retrieve";
 import { NOT_FOUND, NO_SOURCES_RULE, answerFromMaterial, citedSources, isContentQuestion, isFollowUp, previousQuestion, sentTurns, sourceHref, stripCitations } from "./ask";
 import { embedTexts, embeddingsUsable, normalize, resetEmbeddingHealth, toBlob } from "../enrich/embeddings";
@@ -24,6 +24,18 @@ describe("passage builders", () => {
   it("reads announcements and staff replies as text", () => {
     const p = announcementPassages([{ id: 3, type: "staff_reply", title: "Quiz scope", body: "<p>The quiz covers <b>L1–L5</b> only.</p>", sender: "Dr Lim" }]);
     expect(p[0]).toMatchObject({ title: "Dr Lim replied: Quiz scope", body: "The quiz covers L1–L5 only." });
+  });
+  it("cuts a long course page at its headings, and keeps only lecturers' messages", () => {
+    const long = "word ".repeat(300);
+    const p = pagePassages([{ id: 3, title: "Week 1", body: `<h2>Readings</h2><p>${long}</p><h2>Lab</h2><p>${long}</p><h2>Note</h2><p>Bring a laptop to the lab.</p>` }]);
+    expect(p.map((x) => x.sourceKey)).toEqual(["page:3:0", "page:3:1"]);
+    expect(p[0]).toMatchObject({ kind: "page", itemId: 3, title: "Page: Week 1" });
+    expect(p[1]!.body).toContain("Bring a laptop");
+    const m = messagePassages([
+      { id: 1, subject: "Quiz 2", author: "Dr Tan", body: "Quiz 2 moves to LT19 next week." },
+      { id: 2, subject: "Quiz 2", author: "You", body: "Thank you for letting us know!" },
+    ]);
+    expect(m.map((x) => [x.sourceKey, x.title])).toEqual([["msg:1", "Message from Dr Tan: Quiz 2"]]);
   });
   it("reads an assignment's Canvas page as its problem statement", () => {
     const p = assignmentPassages([

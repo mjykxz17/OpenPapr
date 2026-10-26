@@ -260,6 +260,13 @@
       "when": 1792860478509,
       "tag": "0036_mcp_token",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1793037089593,
+      "tag": "0037_canvas_extras",
+      "breakpoints": true
     }
   ]
 }

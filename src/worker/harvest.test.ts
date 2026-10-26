@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createDb } from "../db/client";
-import { files, modules, users } from "../db/schema";
+import { canvasPages, files, modules, users } from "../db/schema";
+import type { CourseOutline } from "../lib/course-outline";
 import { createHarvester } from "./harvest";
 
 const H = 3_600_000;
@@ -14,7 +15,7 @@ function setup() {
   const canvas = {
     listCourseFiles: vi.fn(async () => [{ id: 1, display_name: "poster.png", url: "u", "content-type": "image/png" }]),
     listPages: vi.fn(async () => [{ url: "lectures", title: "Lectures", updated_at: "t1" }]),
-    getPageBody: vi.fn(async () => `<p>Slides: <a href="/courses/7/files/55">L1</a> and <a href="/courses/7/files/66">L2</a></p>`),
+    getPageBody: vi.fn<(courseId: number, slug: string) => Promise<string>>(async () => `<p>Slides: <a href="/courses/7/files/55">L1</a> and <a href="/courses/7/files/66">L2</a></p>`),
     getFile: vi.fn(async (id: number) => {
       if (id === 66) throw new Error("Canvas 403");
       return { id, display_name: `L${id}.pdf`, url: "signed", "content-type": "application/pdf", size: 100 };
@@ -70,5 +71,33 @@ describe("harvestFiles", () => {
     canvas.listPages.mockRejectedValue(new Error("Canvas 404"));
     await harvest(canvas, 7, 1, []);
     expect(db.select().from(files).all()).toHaveLength(1);
+  });
+
+  it("keeps the pages it reads, including those only the Modules tab leads to, and drops removed ones", async () => {
+    const { db, harvest, canvas } = setup();
+    canvas.listPages.mockRejectedValue(new Error("Canvas 404"));   // Pages tab off
+    canvas.getPageBody.mockImplementation(async (_c, slug) => (slug === "week-1" ? "<p>Read chapter 1.</p>" : "<p>See <a href=\"/files/55\">L1</a></p>"));
+    const outline: CourseOutline = [{ name: "Week 1", unlockAt: null, items: [
+      { kind: "page", title: "Week 1", indent: 0, pageUrl: "week-1" },
+      { kind: "page", title: "Locked", indent: 0, pageUrl: "later", locked: true },
+      { kind: "file", title: "Handout", indent: 1, canvasFileId: 77 },
+    ] }];
+    await harvest(canvas, 7, 1, [], outline);
+    expect(db.select().from(canvasPages).all().map((p) => [p.pageUrl, p.title, p.userId])).toEqual([["week-1", "Week 1", 1]]);
+    // A file listed in the Modules tab counts as linked, with its week.
+    expect(db.select().from(files).all().find((f) => f.canvasFileId === 77)?.linkedFrom).toBe("Modules: Week 1");
+    expect(canvas.getPageBody.mock.calls.map((c) => c[1])).toEqual(["week-1"]);
+
+    await harvest(canvas, 7, 1, [], [{ name: "Week 1", unlockAt: null, items: [] }]);
+    expect(db.select().from(canvasPages).all()).toEqual([]);
+  });
+
+  it("keeps the pages it has when Canvas can't list them", async () => {
+    const { db, harvest, canvas } = setup();
+    await harvest(canvas, 7, 1, []);
+    expect(db.select().from(canvasPages).all()).toHaveLength(1);
+    canvas.listPages.mockRejectedValue(new Error("Canvas 500"));
+    await harvest(canvas, 7, 1, [], null);
+    expect(db.select().from(canvasPages).all()).toHaveLength(1);
   });
 });

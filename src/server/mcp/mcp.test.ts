@@ -5,7 +5,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createDb } from "@/db/client";
-import { files, items, modules, passages, slideNotes, studyGuides, tasks, users } from "@/db/schema";
+import { canvasMessages, canvasPages, files, items, mailAttachments, modules, passages, slideNotes, studyGuides, tasks, users } from "@/db/schema";
 import { deckCachePath } from "../deck";
 import { originalCachePath } from "../files";
 import { handleRpc, ToolError, text, type Tool } from "./protocol";
@@ -267,6 +267,73 @@ describe("tools", () => {
     expect(r.text).toContain("## Files it links to\n- file_id 1 · L4-master.pdf");
     expect(r.text).not.toContain("bea-secret");
     expect((await run(ctx, "search", { query: "prove recurrence" })).text).toContain(`→ read_item item_id=${id}`);
+  });
+
+  it("reads the Modules tab, course pages and lecturers' messages, never another student's", async () => {
+    const outline = [{ name: "Week 1", unlockAt: null, items: [
+      { kind: "page", title: "Week 1 plan", indent: 0, pageUrl: "week-1" },
+      { kind: "file", title: "Lecture 4", indent: 1, canvasFileId: 101 },
+      { kind: "assignment", title: "PS3", indent: 1, contentId: 50 },
+      { kind: "tool", title: "Recordings", indent: 0, url: "https://panopto.example/x" },
+    ] }];
+    db.update(modules).set({ outlineJson: JSON.stringify(outline) }).where(eq(modules.id, 1)).run();
+    const [page, extra] = db.insert(canvasPages).values([
+      { userId: 1, moduleId: 1, pageUrl: "week-1", title: "Week 1 plan", body: '<p>Read CLRS ch. 4. Slides: <a href="/files/101">L4</a></p>', seenAt: now },
+      { userId: 1, moduleId: 1, pageUrl: "faq", title: "FAQ", body: "<p>Ask on the forum.</p>", seenAt: now },
+    ]).returning().all();
+    const bea = db.insert(canvasPages).values({ userId: 2, moduleId: 2, pageUrl: "week-1", title: "Bea's page", body: "x", seenAt: now }).returning().get();
+
+    const o = (await run(ctx, "course_outline", { module: "CS3230" })).text;
+    expect(o).toContain(`- Page: Week 1 plan (page_id ${page!.id})`);
+    expect(o).toContain("  - Lecture 4 (file_id 1)");
+    expect(o).toContain("  - Assignment: PS3 (item_id");
+    expect(o).toContain("- Tool: Recordings — https://panopto.example/x");
+    expect(o).toContain(`## Other course pages\n- FAQ (page_id ${extra!.id})`);
+    const r = (await run(ctx, "read_page", { page_id: page!.id })).text;
+    expect(r).toContain('in "Week 1"');
+    expect(r).toContain("Read CLRS ch. 4.");
+    expect(r).toContain("- file_id 1 · L4-master.pdf");
+    expect((await run(ctx, "read_page", { page_id: bea.id })).isError).toBe(true);
+
+    const [m1] = db.insert(canvasMessages).values([
+      { userId: 1, moduleId: 1, conversationId: 9, messageId: 1, courseName: "CS3230", subject: "Quiz 2", author: "Dr Tan", body: "Quiz 2 moves to LT19.", sentAt: now - 3_600_000 },
+      { userId: 1, moduleId: 1, conversationId: 9, messageId: 2, courseName: "CS3230", subject: "Quiz 2", author: "You", body: "Thanks!", sentAt: now },
+      { userId: 2, moduleId: 2, conversationId: 9, messageId: 3, courseName: "CS3230", subject: "Quiz 2", author: "Dr Tan", body: "Bea's own copy", sentAt: now },
+    ]).returning().all();
+    expect((await run(ctx, "list_messages", {})).text).toContain("Dr Tan · Quiz 2\n  Quiz 2 moves to LT19.");
+    expect((await run(ctx, "overview")).text).toContain("## Messages from lecturers, last 7 days");
+    const t = (await run(ctx, "read_message", { message_id: m1!.id })).text;
+    expect(t.indexOf("--- Dr Tan")).toBeLessThan(t.indexOf("--- You"));
+    expect(t).not.toContain("Bea");
+    expect((await run(other, "read_message", { message_id: m1!.id })).isError).toBe(true);
+    expect((await run(ctx, "get_module", { module: "CS3230" })).text).toContain("Modules tab: 1 sections (course_outline) · 2 course pages (read_page) · 2 Inbox messages");
+  });
+
+  it("shows an assignment's mark and comments, and an email's attachments", async () => {
+    const asg = db.insert(items).values({ userId: 1, moduleId: 1, type: "assignment", source: "canvas", sourceId: "assignment:77", title: "PS4", body: "<p>Prove it.</p>", firstSeenAt: now,
+      gradeJson: JSON.stringify({ score: 17, outOf: 20, grade: "A-", gradedAt: now, comments: [{ author: "Dr Tan", at: now, text: "Tighten the base case." }] }) }).returning().get();
+    const r = (await run(ctx, "read_item", { item_id: asg.id })).text;
+    expect(r).toContain("## Mark\n17/20 (A-)");
+    expect(r).toContain("- Dr Tan, 2026-10-20 10:00: Tighten the base case.");
+    expect((await run(ctx, "list_items", { type: "assignment" })).text).toContain("PS4 · mark 17/20 (A-)");
+
+    const mail = db.insert(items).values({ userId: 1, type: "email", source: "graph", sourceId: "mail:x", title: "Lab handout", body: "See attached.", firstSeenAt: now }).returning().get();
+    const txt = join(dir, "notes.txt");
+    writeFileSync(txt, "Lab 3: implement a heap.");
+    const pdf = join(dir, "lab.pdf");
+    copyFileSync(join(process.cwd(), "src/demo/decks/L4-master.pdf"), pdf);
+    const [a1, a2, a3] = db.insert(mailAttachments).values([
+      { userId: 1, itemId: mail.id, graphId: "g1", name: "notes.txt", sizeBytes: 24, path: txt, fetchedAt: now },
+      { userId: 1, itemId: mail.id, graphId: "g2", name: "lab.pdf", sizeBytes: 90_000, path: pdf, fetchedAt: now },
+      { userId: 1, itemId: mail.id, graphId: "g3", name: "video.mp4", sizeBytes: 90_000_000, path: null, fetchedAt: now },
+    ]).returning().all();
+    const e = (await run(ctx, "read_item", { item_id: mail.id })).text;
+    expect(e).toContain(`- attachment_id ${a1!.id} · notes.txt`);
+    expect(e).toContain("video.mp4 · 90.0 MB · not kept (too large)");
+    expect((await run(ctx, "read_attachment", { attachment_id: a1!.id })).text).toContain("implement a heap");
+    expect((await run(ctx, "read_attachment", { attachment_id: a2!.id, to_page: 1 })).text).toMatch(/lab\.pdf \(attachment \d+\) — \d+ pages, showing 1–1\n\n--- page 1 ---/);
+    expect((await run(ctx, "read_attachment", { attachment_id: a3!.id })).isError).toBe(true);
+    expect((await run(other, "read_attachment", { attachment_id: a1!.id })).isError).toBe(true);
   });
 
   it("searches names even before any passages are indexed", async () => {

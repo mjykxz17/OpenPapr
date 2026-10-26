@@ -1,4 +1,4 @@
-import type { CanvasAnnouncement, CanvasAssignment, CanvasAssignmentGroup, CanvasCalendarEvent, CanvasCourse } from "./types";
+import type { CanvasAnnouncement, CanvasAssignment, CanvasAssignmentGroup, CanvasCalendarEvent, CanvasCourse, CanvasRubricCriterion, CanvasStudentSubmission } from "./types";
 
 export interface NormalizedItem {
   type: "announcement" | "assignment" | "event";
@@ -6,6 +6,7 @@ export interface NormalizedItem {
   title: string; body: string | null; url: string | null;
   dueAt: number | null; sourceCreatedAt: number | null; submitted: boolean;
   metaJson?: string | null;
+  gradeJson?: string | null;
 }
 // What an assignment row knows beyond its due date: whether it is a quiz, and
 // its window. closesOnly: Canvas gave no due date, so dueAt is when it closes.
@@ -16,6 +17,37 @@ export function isQuizAssignment(a: CanvasAssignment): boolean {
   return Boolean(a.is_quiz_assignment || a.is_quiz_lti_assignment || a.quiz_id
     || (a.submission_types ?? []).includes("online_quiz") || QUIZ_NAME_RE.test(a.name));
 }
+// An assignment's mark, and what lecturers (and the student) wrote on the
+// submission. A classmate's comment (a peer review) is never kept.
+export type Grade = { score: number | null; outOf: number | null; grade: string | null; gradedAt: number | null; comments: { author: string; at: number; text: string }[] };
+
+export function gradesFrom(
+  groups: CanvasAssignmentGroup[], submissions: CanvasStudentSubmission[], staff: Set<number>, selfId: number | null,
+): Map<number, Grade> {
+  const outOf = new Map(groups.flatMap((g) => g.assignments ?? []).map((a) => [a.id, a.points_possible ?? null]));
+  const out = new Map<number, Grade>();
+  for (const s of submissions) {
+    const comments = (s.submission_comments ?? [])
+      .filter((c) => c.comment?.trim() && (c.author_id === selfId || staff.has(c.author_id)))
+      .map((c) => ({ author: c.author_id === selfId ? "You" : (c.author_name ?? "Staff"), at: Date.parse(c.created_at), text: c.comment.trim() }));
+    if (s.score == null && !s.grade && !comments.length) continue;
+    out.set(s.assignment_id, { score: s.score, outOf: outOf.get(s.assignment_id) ?? null, grade: s.grade, gradedAt: ts(s.graded_at), comments });
+  }
+  return out;
+}
+
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// The rubric, as HTML after the description: what each criterion is worth
+// and what each level of it looks like.
+function rubricHtml(rubric: CanvasRubricCriterion[] | null | undefined): string {
+  if (!rubric?.length) return "";
+  const rows = rubric.map((c) => {
+    const levels = (c.ratings ?? []).map((r) => `${esc(r.description ?? "")}${r.points != null ? ` (${r.points})` : ""}`).filter(Boolean).join("; ");
+    return `<li><b>${esc(c.description ?? "Criterion")}</b>${c.points != null ? ` — ${c.points} pts` : ""}${c.long_description ? `: ${esc(c.long_description)}` : ""}${levels ? `<br>Levels: ${levels}` : ""}</li>`;
+  });
+  return `<h3>Rubric</h3><ul>${rows.join("")}</ul>`;
+}
+
 export interface NormalizedDiscussionItem {
   type: "discussion" | "staff_reply";
   sourceId: string;
@@ -37,7 +69,7 @@ const ts = (iso: string | null | undefined) => (iso ? Date.parse(iso) : null);
 
 export function normalizeCanvasCourse(
   course: CanvasCourse, groups: CanvasAssignmentGroup[],
-  announcements: CanvasAnnouncement[], events: CanvasCalendarEvent[],
+  announcements: CanvasAnnouncement[], events: CanvasCalendarEvent[], grades?: Map<number, Grade>,
 ): NormalizedCanvasSync {
   const weighted = groups.some((g) => (g.group_weight ?? 0) > 0);
   const components = weighted
@@ -58,10 +90,12 @@ export function normalizeCanvasCourse(
     const meta: AssignmentMeta | null = quiz || opensAt !== null || (dueAt === null && closesAt !== null)
       ? { quiz, opensAt, closesAt, closesOnly: dueAt === null && closesAt !== null } : null;
     items.push({
-      type: "assignment", sourceId: `assignment:${a.id}`, title: a.name, body: a.description || null, url: a.html_url,
+      type: "assignment", sourceId: `assignment:${a.id}`, title: a.name, body: `${a.description ?? ""}${rubricHtml(a.rubric)}` || null, url: a.html_url,
       dueAt: dueAt ?? closesAt, sourceCreatedAt: null,
       submitted: ["submitted", "graded", "pending_review"].includes(a.submission?.workflow_state ?? ""),
       metaJson: meta ? JSON.stringify(meta) : null,
+      // Without the submissions call this sync knows nothing new; the stored grade stays.
+      ...(grades ? { gradeJson: grades.has(a.id) ? JSON.stringify(grades.get(a.id)) : null } : {}),
     });
   }
   for (const an of announcements) items.push({

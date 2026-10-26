@@ -1,7 +1,9 @@
+import { rmSync } from "node:fs";
 import { eq, inArray, notInArray } from "drizzle-orm";
 import type { Db } from "@/db/client";
+import { mailCacheDir } from "./mail-cache";
 import {
-  canvasPageCache, components, courseHistory, fileHints, files, guidePlans, guideProgress, guideQuizzes, guideRuns, guideTopics, items, llmUsage,
+  canvasConversations, canvasMessages, canvasPageCache, canvasPages, components, courseHistory, fileHints, files, guidePlans, guideProgress, guideQuizzes, guideRuns, guideTopics, items, llmUsage, mailAttachments,
   moduleProfiles, moduleRoadmaps, modules, passages, petChats, quizAttempts, slideNotes, studyGuides, syncRuns, taskChanges, taskFeedback, taskPlans, tasks, users, weeklyPlans,
 } from "@/db/schema";
 
@@ -24,6 +26,9 @@ export function exportAccount(db: Db, userId: number) {
     components: db.select().from(components).where(inArray(components.moduleId, inMods)).all(),
     files: db.select().from(files).where(inArray(files.moduleId, inMods)).all(),
     items: db.select().from(items).where(eq(items.userId, userId)).all(),
+    canvasPages: db.select().from(canvasPages).where(eq(canvasPages.userId, userId)).all(),
+    canvasMessages: db.select().from(canvasMessages).where(eq(canvasMessages.userId, userId)).all(),
+    mailAttachments: db.select().from(mailAttachments).where(eq(mailAttachments.userId, userId)).all(),
     tasks: db.select().from(tasks).where(eq(tasks.userId, userId)).all(),
     taskFeedback: db.select().from(taskFeedback).where(eq(taskFeedback.userId, userId)).all(),
     taskChanges: db.select().from(taskChanges).where(eq(taskChanges.userId, userId)).all(),
@@ -53,7 +58,7 @@ export function wipeUserData(db: Db, userId: number, andUser = false): void {
       }
       tx.delete(files).where(inArray(files.moduleId, ids)).run();
     }
-    for (const t of [passages, quizAttempts, guideProgress, taskChanges, taskFeedback, tasks, items, guideRuns, slideNotes, weeklyPlans, courseHistory, petChats, llmUsage, syncRuns] as const) {
+    for (const t of [canvasPages, canvasMessages, canvasConversations, mailAttachments, passages, quizAttempts, guideProgress, taskChanges, taskFeedback, tasks, items, guideRuns, slideNotes, weeklyPlans, courseHistory, petChats, llmUsage, syncRuns] as const) {
       tx.delete(t).where(eq(t.userId, userId)).run();
     }
     if (ids.length) {
@@ -65,6 +70,8 @@ export function wipeUserData(db: Db, userId: number, andUser = false): void {
     }
     if (andUser) tx.delete(users).where(eq(users.id, userId)).run();
   });
+  // The attachments' copies go with their rows.
+  rmSync(mailCacheDir(userId), { recursive: true, force: true });
 }
 
 export function deleteAccount(db: Db, userId: number): void {

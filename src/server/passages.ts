@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { and, eq, inArray, like } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { items, passages, slideNotes, studyGuides } from "@/db/schema";
+import { canvasMessages, canvasPages, items, passages, slideNotes, studyGuides } from "@/db/schema";
 import { slidePages } from "@/enrich/study-guide";
 import { htmlToText } from "@/lib/html-text";
 import { guideSections } from "./search";
@@ -11,7 +11,7 @@ import { guideSections } from "./search";
 // the worker and the tests share them.
 
 export type Passage = {
-  sourceKey: string; kind: "slide" | "guide" | "note" | "announcement" | "assignment"; version?: string | null;
+  sourceKey: string; kind: "slide" | "guide" | "note" | "announcement" | "assignment" | "page" | "message"; version?: string | null;
   fileId?: number | null; deck?: string | null; page?: number | null; itemId?: number | null; anchor?: string | null;
   title: string; body: string;
 };
@@ -67,6 +67,28 @@ export function assignmentPassages(rows: { id: number; title: string; body: stri
   }));
 }
 
+// A course page (Pages tab or Modules tab), cut by its headings when long so
+// a passage stays about one thing. itemId is the canvas_pages row.
+export function pagePassages(rows: { id: number; title: string; body: string }[]): Passage[] {
+  return rows.flatMap((r) => {
+    const parts = r.body.split(/(?=<h[1-4][\s>])/i).map((h) => tidy(htmlToText(h))).filter((t) => t.length >= 20);
+    const chunks: string[] = [];
+    for (const t of parts) {
+      const last = chunks.length - 1;
+      if (last >= 0 && chunks[last]!.length + t.length < MAX) chunks[last] += `\n\n${t}`;
+      else chunks.push(t);
+    }
+    return chunks.map((body, i) => ({ sourceKey: `page:${r.id}:${i}`, kind: "page" as const, itemId: r.id, title: `Page: ${r.title}`, body: clip(body) }));
+  });
+}
+
+// A lecturer's Inbox message to the student. itemId is the canvas_messages row.
+export function messagePassages(rows: { id: number; subject: string | null; author: string; body: string }[]): Passage[] {
+  return rows.filter((r) => r.author !== "You" && r.body.trim().length >= 20).map((r) => ({
+    sourceKey: `msg:${r.id}`, kind: "message" as const, itemId: r.id, title: `Message from ${r.author}${r.subject ? `: ${r.subject}` : ""}`, body: clip(tidy(r.body)),
+  }));
+}
+
 // Makes the rows under one prefix ("slide:12:", "guide:", …) match `want`:
 // new ones added, changed ones rewritten (their embedding dropped), gone ones
 // removed. Returns how many rows changed.
@@ -94,7 +116,8 @@ export function syncPassages(db: Db, userId: number, moduleId: number, prefix: s
 }
 
 // The cheap sources, rebuilt from the database each time: the guide, the
-// student's slide notes, announcements, lecturers' replies and assignments.
+// student's slide notes, announcements, lecturers' replies, assignments,
+// course pages and lecturers' Inbox messages.
 export function syncCheapSources(db: Db, userId: number, moduleId: number, now: number): number {
   const guide = db.select({ markdown: studyGuides.markdown }).from(studyGuides).where(eq(studyGuides.moduleId, moduleId)).get();
   const notes = db.select().from(slideNotes).where(and(eq(slideNotes.userId, userId), eq(slideNotes.moduleId, moduleId))).all();
@@ -103,5 +126,7 @@ export function syncCheapSources(db: Db, userId: number, moduleId: number, now: 
   return syncPassages(db, userId, moduleId, "guide:", guide ? guidePassages(guide.markdown) : [], now)
     + syncPassages(db, userId, moduleId, "note:", notePassages(notes), now)
     + syncPassages(db, userId, moduleId, "ann:", announcementPassages(anns), now)
-    + syncPassages(db, userId, moduleId, "asg:", assignmentPassages(own.filter((i) => i.type === "assignment")), now);
+    + syncPassages(db, userId, moduleId, "asg:", assignmentPassages(own.filter((i) => i.type === "assignment")), now)
+    + syncPassages(db, userId, moduleId, "page:", pagePassages(db.select().from(canvasPages).where(and(eq(canvasPages.userId, userId), eq(canvasPages.moduleId, moduleId))).all()), now)
+    + syncPassages(db, userId, moduleId, "msg:", messagePassages(db.select().from(canvasMessages).where(and(eq(canvasMessages.userId, userId), eq(canvasMessages.moduleId, moduleId))).all()), now);
 }

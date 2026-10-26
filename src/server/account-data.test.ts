@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDb } from "@/db/client";
-import { canvasPageCache, guideProgress, modules, quizAttempts, users } from "@/db/schema";
+import { canvasConversations, canvasMessages, canvasPageCache, canvasPages, guideProgress, items, mailAttachments, modules, quizAttempts, users } from "@/db/schema";
 import { deleteAccount, exportAccount, wipeUserData } from "./account-data";
 
 const now = Date.parse("2026-10-01T10:00:00+08:00");
@@ -32,6 +32,23 @@ describe("account data and the quiz and reading tables", () => {
     expect(db.select().from(quizAttempts).all().map((r) => r.userId)).toEqual([2]);
     expect(db.select().from(guideProgress).all().map((r) => r.userId)).toEqual([2]);
     expect(db.select().from(users).all().map((u) => u.id)).toEqual([2]);
+  });
+
+  it("deletes the Canvas pages, Inbox messages and email attachments too, and exports them", () => {
+    const db = setup();
+    for (const userId of [1, 2]) {
+      db.insert(canvasPages).values({ userId, moduleId: userId, pageUrl: "p", title: "P", body: "b", seenAt: now }).run();
+      db.insert(canvasMessages).values({ userId, moduleId: userId, conversationId: 1, messageId: userId, author: "Dr Tan", body: "hi", sentAt: now }).run();
+      db.insert(canvasConversations).values({ userId, conversationId: 1, lastMessageAt: "t" }).run();
+      const mail = db.insert(items).values({ userId, type: "email", source: "graph", sourceId: `mail:${userId}`, title: "m", firstSeenAt: now }).returning().get();
+      db.insert(mailAttachments).values({ userId, itemId: mail.id, graphId: "g", name: "a.pdf", fetchedAt: now }).run();
+    }
+    const ex = exportAccount(db, 1)!;
+    expect([ex.canvasPages.length, ex.canvasMessages.length, ex.mailAttachments.length]).toEqual([1, 1, 1]);
+    deleteAccount(db, 1);
+    for (const t of [canvasPages, canvasMessages, canvasConversations, mailAttachments] as const) {
+      expect(db.select().from(t).all().map((r) => r.userId)).toEqual([2]);
+    }
   });
 
   // The cache has no owner column: a course's pages go when its last student does.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { moduleCodeFromCourse, normalizeCanvasCourse } from "./normalize";
+import { gradesFrom, moduleCodeFromCourse, normalizeCanvasCourse } from "./normalize";
 import type { CanvasAnnouncement, CanvasAssignmentGroup, CanvasCourse } from "./types";
 
 const course: CanvasCourse = { id: 7, name: "Software Engineering", course_code: "CS2103T Software Engineering", term: { name: "AY26/27 S1" }, syllabus_body: "<p>tP 45%</p>" };
@@ -40,6 +40,33 @@ describe("normalizeCanvasCourse", () => {
     const g = [{ ...groups[1], assignments: [{ ...groups[1].assignments![0], description: "<p>Implement <b>undo</b>.</p>" }] }];
     expect(normalizeCanvasCourse(course, g, [], []).items[0].body).toBe("<p>Implement <b>undo</b>.</p>");
     expect(normalizeCanvasCourse(course, groups, [], []).items[0].body).toBeNull();
+  });
+  it("adds the rubric to the assignment's text", () => {
+    const g = [{ ...groups[1], assignments: [{ ...groups[1].assignments![0], description: "<p>Do it.</p>", rubric: [
+      { description: "Correctness", points: 6, long_description: "All tests pass", ratings: [{ description: "Full", points: 6 }, { description: "None", points: 0 }] },
+    ] }] }];
+    const body = normalizeCanvasCourse(course, g, [], []).items[0].body!;
+    expect(body).toContain("<p>Do it.</p><h3>Rubric</h3>");
+    expect(body).toContain("<b>Correctness</b> — 6 pts: All tests pass<br>Levels: Full (6); None (0)");
+  });
+  it("keeps marks and lecturers' comments, never a classmate's", () => {
+    const grades = gradesFrom(groups, [
+      { assignment_id: 11, score: 17, grade: "17", graded_at: "2026-09-01T00:00:00Z", submission_comments: [
+        { author_id: 900, author_name: "Dr Tan", comment: "Good use of invariants.", created_at: "2026-09-01T01:00:00Z" },
+        { author_id: 1, author_name: "Me", comment: "Thanks!", created_at: "2026-09-01T02:00:00Z" },
+        { author_id: 555, author_name: "A classmate", comment: "peer review", created_at: "2026-09-01T03:00:00Z" },
+      ] },
+      { assignment_id: 12, score: null, grade: null, graded_at: null, submission_comments: [] },
+    ], new Set([900]), 1);
+    expect([...grades.keys()]).toEqual([11]);
+    expect(grades.get(11)).toEqual({ score: 17, outOf: 100, grade: "17", gradedAt: Date.parse("2026-09-01T00:00:00Z"), comments: [
+      { author: "Dr Tan", at: Date.parse("2026-09-01T01:00:00Z"), text: "Good use of invariants." },
+      { author: "You", at: Date.parse("2026-09-01T02:00:00Z"), text: "Thanks!" },
+    ] });
+    const item = normalizeCanvasCourse(course, groups, [], [], grades).items[0];
+    expect(JSON.parse(item.gradeJson!).score).toBe(17);
+    // A sync that could not read submissions leaves the stored mark alone.
+    expect("gradeJson" in normalizeCanvasCourse(course, groups, [], []).items[0]).toBe(false);
   });
   it("marks graded/submitted submissions", () => {
     const g = [{ ...groups[1], assignments: [{ ...groups[1].assignments![0], submission: { workflow_state: "submitted", score: null } }] }];
